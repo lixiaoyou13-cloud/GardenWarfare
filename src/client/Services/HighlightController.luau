@@ -19,7 +19,6 @@ function HighlightController.Init()
             if not existingHighlight then
                 local hl = Instance.new("Highlight")
                 hl.Name = "InteractFocusHighlight"
-                ---6666666
                 
                 -- ==========================================
                 -- [🎨 视觉调优：更柔和、更暗的护眼高亮]

@@ -64,6 +64,7 @@ function InventoryController.Init()
                     local itemDetail = ItemConfig.Seeds[seedData.ID]
                     if itemDetail then
                         local newSlot = itemTemplate:Clone()
+                        newSlot.Index.Visible = false
                         newSlot.Name = seedData.ID 
                         newSlot.ItemName.Text = itemDetail.Name 
                         newSlot.Quantity.Text = "x" .. tostring(seedData.Quantity)
@@ -92,6 +93,7 @@ function InventoryController.Init()
                     local itemDetail = ItemConfig.Plants[plantData.ID]
                     if itemDetail then
                         local newSlot = itemTemplate:Clone()
+                        newSlot.Index.Visible = false
                         newSlot.Name = plantData.ID 
                         newSlot.ItemName.Text = itemDetail.Name 
                         newSlot.Quantity.Text = "x" .. tostring(plantData.Quantity)
