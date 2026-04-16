@@ -75,7 +75,6 @@ function HotbarController.Init()
              for _, p in ipairs(newData.Inventory.Plants) do plantQuantityMap[p.ID] = p.Quantity end
         end
 
-        -- 渲染常规物品（铲子、种子、植物）
         for index, compositeId in ipairs(hotbarList) do
             if index > 8 then break end 
             
@@ -84,10 +83,10 @@ function HotbarController.Init()
             
             if index == 1 then
                 targetLayoutOrder = 1
-                keyHint = "[1]"
+                keyHint = "1"
             else
                 targetLayoutOrder = index + 1
-                keyHint = "[" .. (index + 1) .. "]"
+                keyHint = tostring(index + 1)
             end
             
             local parts = string.split(compositeId, "_")
@@ -131,30 +130,27 @@ function HotbarController.Init()
                     targetSlot.ItemName.Text = itemDetail.Name or "" 
                 end
                 
-                -- [🌟 修复点 1：图片展示]
-                if targetSlot:FindFirstChild("ItemImage") then
-                    targetSlot.ItemImage.Image = itemDetail.Image or itemDetail.Icon or ""
+                -- [🌟 修复点 1：使用 Icom 读取 IconId]
+                if targetSlot:FindFirstChild("Icom") then
+                    targetSlot.Icom.Image = itemDetail.IconId or ""
                 end
                 
-                -- [🌟 修复点 2：将 ID 改为 Index，确保全部显示快捷键！]
                 if targetSlot:FindFirstChild("Index") then 
                     targetSlot.Index.Text = keyHint
                     targetSlot.Index.Visible = true 
                 end
 
-                -- [🌟 修复点 3：精准控制 Quantity（数量）的显隐]
                 if targetSlot:FindFirstChild("Quantity") then
                     if itemType == "Tool" then
-                        targetSlot.Quantity.Visible = false -- 铲子强制隐藏数量
+                        targetSlot.Quantity.Visible = false
                     else
                         targetSlot.Quantity.Text = (type(qty) == "number" and "x" or "") .. tostring(qty)
-                        targetSlot.Quantity.Visible = true  -- 种子和植物显示数量
+                        targetSlot.Quantity.Visible = true
                     end
                 end
             end
         end
         
-        -- 渲染固定背包位
         local backpackId = "System_Backpack"
         local backpackDetail = BaseItemConfig.System and BaseItemConfig.System.Backpack
         currentItems[backpackId] = true 
@@ -182,21 +178,20 @@ function HotbarController.Init()
         
         backpackSlot.LayoutOrder = 2
         
-        -- [🌟 修复背包的 Index 和 Quantity]
         if backpackSlot:FindFirstChild("Index") then 
-            backpackSlot.Index.Text = "[2]"
-            backpackSlot.Index.Visible = true -- 背包必定显示快捷键 [2]
+            backpackSlot.Index.Text = "2"
+            backpackSlot.Index.Visible = true
         end
         if backpackSlot:FindFirstChild("Quantity") then 
-            backpackSlot.Quantity.Visible = false -- 背包强制隐藏数量
+            backpackSlot.Quantity.Visible = false
         end
-        
         if backpackSlot:FindFirstChild("ItemName") then 
             backpackSlot.ItemName.Text = (backpackDetail and backpackDetail.Name) or "背包" 
             backpackSlot.ItemName.TextColor3 = Color3.fromRGB(255, 215, 0)
         end
-        if backpackSlot:FindFirstChild("ItemImage") then
-            backpackSlot.ItemImage.Image = (backpackDetail and (backpackDetail.Image or backpackDetail.Icon)) or ""
+        -- [🌟 使用 Icom]
+        if backpackSlot:FindFirstChild("Icom") then
+            backpackSlot.Icom.Image = (backpackDetail and backpackDetail.IconId) or ""
         end
         
         for _, slot in pairs(hotbarFrame:GetChildren()) do

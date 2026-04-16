@@ -5,7 +5,7 @@ local BaseItemConfig = {
     Tools = {
         ["Shovel"] = {
             Name = "铲子",
-            Icon = "rbxassetid://你的铲子图片ID", -- 请替换真实ID
+            IconId = "rbxassetid://126862599177625", -- 请替换真实的铲子图片ID
         }
     },
     
@@ -13,7 +13,7 @@ local BaseItemConfig = {
     System = {
         ["Backpack"] = {
             Name = "背包",
-            Icon = "rbxassetid://你的背包图片ID", -- 请替换真实ID
+            IconId = "rbxassetid://126862599177625", -- 请替换真实的背包图片ID
         }
     }
 }

@@ -31,6 +31,29 @@ local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
     grownPlant:SetAttribute("MaxYield", maxYield)
     grownPlant:SetAttribute("YieldCount", maxYield)
     
+    -- ==========================================
+    -- [🌟 核心：植物成熟时，根据配置表生成变异等级！]
+    -- ==========================================
+    local mutationLevel = 1
+    if ItemConfig.MutationProb then
+        local totalWeight = 0
+        for _, weight in pairs(ItemConfig.MutationProb) do totalWeight += weight end
+        
+        local roll = math.random() * totalWeight
+        local currentWeight = 0
+        
+        for level, weight in pairs(ItemConfig.MutationProb) do
+            currentWeight += weight
+            if roll <= currentWeight then
+                mutationLevel = level
+                break
+            end
+        end
+    end
+    -- 将变异等级打入植物的身体里
+    grownPlant:SetAttribute("MutationLevel", mutationLevel) 
+    -- ==========================================
+
     local ownerId = 0
     for _, p in ipairs(Players:GetPlayers()) do
         if PlotService.GetPlayerPlot(p) == plot then ownerId = p.UserId; break end
@@ -87,7 +110,10 @@ local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
     statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     statusLabel.TextScaled = true
     statusLabel.Font = Enum.Font.FredokaOne
-    statusLabel.Text = "加载中..."
+    
+    -- [🌟 动态显示变异前缀]
+    local mutName = ItemConfig.MutationName and ItemConfig.MutationName[mutationLevel] or ""
+    statusLabel.Text = (mutationLevel > 1) and ("⭐" .. mutName) or "加载中..."
     statusLabel.Parent = bgFrame
 
     local barBg = Instance.new("Frame")
@@ -137,7 +163,6 @@ local function CreateSeedling(seedId, soil, itemDetail, plantedTime, plot, plant
     local seedModelName = itemDetail.SeedId or "PlantSeed"
     local realModel = itemModelsFolder:FindFirstChild(seedModelName)
 
-    
     if not realModel then return nil end
 
     local plotNum = tonumber(string.match(plot.Name, "%d+")) or 1
@@ -239,16 +264,12 @@ local function StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt
                 end
                 if prompt and prompt.Parent then prompt.ActionText = "催熟(💰" .. tostring(remaining * 2) .. ")" end
             else
-                -- ==========================================
-                -- [🌟 核心：生长完成！揭晓盲盒！]
-                -- ==========================================
                 local seedId = newPlant.Name 
                 local finalItemDetail = itemDetail
                 local finalPlantId = seedId
 
                 if seedId == "RandomSeed" then
                     local data = PlayerDataManager.GetPlayerData(player)
-                    -- 根据通关进度决定能抽到什么植物（最高级进度+1）
                     local maxLevel = data and data.UnlockedLevel or 1
                     local maxPossibleId = math.clamp(maxLevel + 1, 1, #ItemConfig.IdToSeedKey)
                     
@@ -256,7 +277,6 @@ local function StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt
                     finalPlantId = ItemConfig.IdToSeedKey[randomNum]
                     finalItemDetail = ItemConfig.Seeds[finalPlantId]
 
-                    -- 如果随机到了新种子，解锁图鉴！
                     if data and not data.UnlockedSeeds[finalPlantId] then
                         PlayerDataManager.UnlockSeed(player, finalPlantId)
                         local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
@@ -265,7 +285,6 @@ local function StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt
                         end
                     end
                     
-                    -- 更新数据库，把 RandomSeed 替换为真实植物，防读档错误
                     PlayerDataManager.UpdatePlantedPlant(player, soil.Name, finalPlantId, os.time() - growthTime)
                 end
 
@@ -303,7 +322,6 @@ local function StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt
 
                 task.wait(0.2) 
 
-                -- [🌟 用变身后的真实属性生成成熟植物！]
                 SpawnMaturePlant(soil, finalItemDetail, plot, plantsFolder)
                 newPlant:Destroy() 
                 
@@ -348,11 +366,9 @@ function PlantService.Init()
                 local elapsed = os.time() - plantData.PlantedTime
                 
                 if elapsed >= itemDetail.GrowthTime then
-                    -- [🌟 新增防漏洞]：拦截器！如果存档里没有 HasDropped 烙印，才给发阳光。
                     if not plantData.HasDropped then
                         local dropPos = soil.Position + Vector3.new(0, 3, 0)
                         CoinDropService.DropCoins(player, dropPos, 5, itemDetail.Output or 20)
-                        -- 发完阳光立刻盖章烙印！
                         PlayerDataManager.MarkPlantAsDropped(player, soilName)
                     end
                     
@@ -396,21 +412,31 @@ function PlantService.Init()
                             local plantConfig = ItemConfig.Plants[plantId]
                             local plantName = plantConfig and plantConfig.Name or plantId
                             local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                            
+                            -- [🌟 提取之前存在植物身上的变异等级]
+                            local mutLevel = targetPlant:GetAttribute("MutationLevel") or 1
+                            local mutPrefix = (mutLevel > 1) and ("[".. (ItemConfig.MutationName[mutLevel] or "变异") .."] ") or ""
 
                             if isOwner then
-                                PlayerDataManager.GivePlant(player, plantId, currentYield)
+                                -- [🌟 核心改动：收获时，传参变异等级，并解锁专属图鉴！]
+                                PlayerDataManager.GivePlant(player, plantId, currentYield, mutLevel)
+                                PlayerDataManager.UnlockMutation(player, plantId, mutLevel)
+                                
                                 PlayerDataManager.RemovePlantedPlant(player, soil.Name)
                                 targetPlant:Destroy()
                                 prompt.ActionText = "种植"
 
-                               
-                                if showNotifRE then showNotifRE:FireClient(player, "收获成功！", "你获得了: " .. currentYield .. "x " .. plantName) end
+                                if showNotifRE then 
+                                    showNotifRE:FireClient(player, "收获成功！", "你获得了: " .. currentYield .. "x " .. mutPrefix .. plantName) 
+                                end
                             else
                                 if currentYield > 0 then
-                                    PlayerDataManager.GivePlant(player, plantId, 1)
+                                    PlayerDataManager.GivePlant(player, plantId, 1, mutLevel)
                                     targetPlant:SetAttribute("YieldCount", currentYield - 1)
                                     
-                                    if showNotifRE then showNotifRE:FireClient(player, "偷取成功！", "你悄悄顺走了 1x " .. plantName) end
+                                    if showNotifRE then 
+                                        showNotifRE:FireClient(player, "偷取成功！", "你悄悄顺走了 1x " .. mutPrefix .. plantName) 
+                                    end
                                     
                                     if (currentYield - 1) <= 0 then
                                         local ownerId = targetPlant:GetAttribute("OwnerId")
@@ -437,7 +463,6 @@ function PlantService.Init()
                                     local newTime = os.time() - growthTime - 1
                                     targetPlant:SetAttribute("PlantedTime", newTime)
                                     PlayerDataManager.UpdatePlantedPlant(player, soil.Name, targetPlant.Name, newTime)
-                                   
                                 end
                             end
                         end
@@ -450,25 +475,21 @@ function PlantService.Init()
                         return
                     end
 
-                   local character = player.Character; 
-                    if not character then return end
+                   local character = player.Character; if not character then return end
                     
                     local equippedCompositeId = character:GetAttribute("EquippedSeed")
                     if not equippedCompositeId then return end
 
-                    -- [🌟 核心原理：拆解身上的标签]
                     local parts = string.split(equippedCompositeId, "_")
                     local itemType = parts[1]
                     local realId = parts[2]
 
-                    -- [🌟 防呆机制] 如果手里拿的是成熟的植物，不准种在泥土里！(为以后你做塔防摆放预留接口)
                     if itemType ~= "Seed" then
                         local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                         if showNotifRE then showNotifRE:FireClient(player, "提示", "成熟的植物不能直接种在地里！") end
                         return
                     end
 
-                    -- [🌟 剥离伪装] 这里一定要传入 realId (如 "Peashooter")，因为数据库库存里只认纯净的名字
                     if PlayerDataManager.ConsumeSeed(player, realId, 1) then
                         local data = PlayerDataManager.GetPlayerData(player)
                         local hasStock = false
@@ -502,7 +523,5 @@ function PlantService.Init()
         end
     end
 end
-
-
 
 return PlantService

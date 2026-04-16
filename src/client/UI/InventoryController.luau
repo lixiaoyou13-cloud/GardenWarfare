@@ -1,7 +1,7 @@
 -- src/client/UI/InventoryController.luau
 local InventoryController = {}
 
-local TweenService = game:GetService("TweenService") -- [🌟 新增动画服务]
+local TweenService = game:GetService("TweenService")
 
 function InventoryController.Init()
     local Players = game:GetService("Players")
@@ -68,6 +68,12 @@ function InventoryController.Init()
                         newSlot.Name = seedData.ID 
                         newSlot.ItemName.Text = itemDetail.Name 
                         newSlot.Quantity.Text = "x" .. tostring(seedData.Quantity)
+                        
+                        -- [🌟 读取 IconId 赋给 Icom]
+                        if newSlot:FindFirstChild("Icom") then
+                            newSlot.Icom.Image = itemDetail.IconId or ""
+                        end
+                        
                         newSlot.InputBegan:Connect(function(input)
                             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                                 ReplicatedStorage:WaitForChild("EquipItemRE"):FireServer("Seed_" .. seedData.ID)
@@ -97,6 +103,12 @@ function InventoryController.Init()
                         newSlot.Name = plantData.ID 
                         newSlot.ItemName.Text = itemDetail.Name 
                         newSlot.Quantity.Text = "x" .. tostring(plantData.Quantity)
+                        
+                        -- [🌟 读取 IconId 赋给 Icom]
+                        if newSlot:FindFirstChild("Icom") then
+                            newSlot.Icom.Image = itemDetail.IconId or ""
+                        end
+
                         newSlot.InputBegan:Connect(function(input)
                             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                                 ReplicatedStorage:WaitForChild("EquipItemRE"):FireServer("Plant_" .. plantData.ID)
@@ -106,7 +118,6 @@ function InventoryController.Init()
                         targetSlot = newSlot
                     end
                 end
-
             end
         end
         
