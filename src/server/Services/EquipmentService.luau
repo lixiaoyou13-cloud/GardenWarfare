@@ -4,6 +4,32 @@ local EquipmentService = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 
+-- [🌟 终极特效控制系统：支持 Attachment 容器穿透]
+local function ApplyMutationEffects(model, mutationLevel)
+    mutationLevel = mutationLevel or 1
+    local effectMap = { [2] = "Glow", [3] = "Lightning", [4] = "HolyLight" }
+    
+    for lvl, fxName in pairs(effectMap) do
+        local shouldEnable = (mutationLevel == lvl)
+        
+        -- 遍历模型中所有元件
+        for _, node in ipairs(model:GetDescendants()) do
+            -- 如果找到了对应名字的元件（比如 Glow 附件）
+            if node.Name == fxName then
+                
+         
+
+                -- 2. [🌟 核心修复] 如果这个节点是附件(Attachment)或文件夹，遍历并开关它【里面】的所有特效！
+                for _, child in ipairs(node:GetDescendants()) do
+                    if child:IsA("ParticleEmitter") or child:IsA("Light") or child:IsA("Beam") or child:IsA("Highlight") or child:IsA("Trail") then
+                        child.Enabled = shouldEnable
+                    end
+                end
+                
+            end
+        end
+    end
+end
 function EquipmentService.Init()
     local holdItemRE = Instance.new("RemoteEvent")
     holdItemRE.Name = "HoldItemRE"
@@ -11,9 +37,7 @@ function EquipmentService.Init()
 
     holdItemRE.OnServerEvent:Connect(function(player, compositeId)
         EquipmentService.UpdateHoldItem(player, compositeId)
-
     end)
-    
 end
 
 -- [🌟 核心接口] 统一处理装备、卸下、物理锁定
@@ -46,26 +70,22 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
     track.Priority = Enum.AnimationPriority.Action 
     track:Play()
 
-    -- 3. [🌟 核心原理：根据标签寻找对应模型]
+    -- 3. [🌟 核心原理：根据标签寻找对应模型，并解析变异等级]
     local parts = string.split(compositeId, "_")
     local itemType = parts[1]
     local realId = parts[2]
+    local mutationLevel = tonumber(parts[3]) or 1 -- [🌟 提取变异等级]
 
     local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
     local realModel = nil
 
     if itemType == "Seed" then
-        local itemDetail = ItemConfig.Seeds[realId]
-        if itemDetail then
-            local modelName = itemDetail.ModelId or realId
-            realModel = itemModelsFolder and itemModelsFolder:FindFirstChild(modelName)
-        end
+        realModel = itemModelsFolder and itemModelsFolder:FindFirstChild("Seed")
     elseif itemType == "Plant" then
         local itemDetail = ItemConfig.Plants[realId]
         if itemDetail then
             realModel = itemModelsFolder and (itemModelsFolder:FindFirstChild(realId .. "_Plant") or itemModelsFolder:FindFirstChild(realId))
         end
-    -- [🌟 新增这段：如果是工具，直接去 ItemModels 里找对应的模型（比如 Shovel）]
     elseif itemType == "Tool" then
         realModel = itemModelsFolder and itemModelsFolder:FindFirstChild(realId)
     end
@@ -73,6 +93,11 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
     if realModel then
         local heldModel = realModel:Clone()
         heldModel.Name = "HeldItem_Custom"
+
+        -- [🌟 核心新增：在手里拿着的时候，过滤掉多余的特效，只显示正确的变异光效]
+        if itemType == "Plant" then
+            ApplyMutationEffects(heldModel, mutationLevel)
+        end
 
         -- [🌟 获取根节点]
         local modelRoot = heldModel
@@ -93,10 +118,10 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
                 part.CanQuery = false
                 part.Massless = true 
                 
-                -- 2. 🌟 绝对不能锚定！(修复五体投地 Bug 的关键)
+                -- 2. 绝对不能锚定！
                 part.Anchored = false 
                 
-                -- 3. 🌟 自动焊接内部零件！(防止铲子解除锚定后散架)
+                -- 3. 自动焊接内部零件
                 if part ~= modelRoot then
                     local internalWeld = Instance.new("WeldConstraint")
                     internalWeld.Part0 = modelRoot

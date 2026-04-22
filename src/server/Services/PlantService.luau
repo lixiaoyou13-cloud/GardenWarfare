@@ -12,6 +12,33 @@ local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local EquipmentService = require(script.Parent.EquipmentService)
 local CoinDropService = require(script.Parent.CoinDropService)
 
+-- [🌟 终极特效控制系统：支持 Attachment 容器穿透]
+local function ApplyMutationEffects(model, mutationLevel)
+    mutationLevel = mutationLevel or 1
+    local effectMap = { [2] = "Glow", [3] = "Lightning", [4] = "HolyLight" }
+    
+    for lvl, fxName in pairs(effectMap) do
+        local shouldEnable = (mutationLevel == lvl)
+        
+        -- 遍历模型中所有元件
+        for _, node in ipairs(model:GetDescendants()) do
+            -- 如果找到了对应名字的元件（比如 Glow 附件）
+            if node.Name == fxName then
+                
+         
+
+                -- 2. [🌟 核心修复] 如果这个节点是附件(Attachment)或文件夹，遍历并开关它【里面】的所有特效！
+                for _, child in ipairs(node:GetDescendants()) do
+                    if child:IsA("ParticleEmitter") or child:IsA("Light") or child:IsA("Beam") or child:IsA("Highlight") or child:IsA("Trail") then
+                        child.Enabled = shouldEnable
+                    end
+                end
+                
+            end
+        end
+    end
+end
+
 
 local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
     local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
@@ -31,9 +58,6 @@ local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
     grownPlant:SetAttribute("MaxYield", maxYield)
     grownPlant:SetAttribute("YieldCount", maxYield)
     
-    -- ==========================================
-    -- [🌟 核心：植物成熟时，根据配置表生成变异等级！]
-    -- ==========================================
     local mutationLevel = 1
     if ItemConfig.MutationProb then
         local totalWeight = 0
@@ -50,9 +74,7 @@ local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
             end
         end
     end
-    -- 将变异等级打入植物的身体里
     grownPlant:SetAttribute("MutationLevel", mutationLevel) 
-    -- ==========================================
 
     local ownerId = 0
     for _, p in ipairs(Players:GetPlayers()) do
@@ -88,6 +110,9 @@ local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
         local track = animator:LoadAnimation(anim); track.Priority = Enum.AnimationPriority.Idle; track.Looped = true; track:Play()
     end
 
+    -- [🌟 激活农田里的成熟变异植物特效！]
+    ApplyMutationEffects(grownPlant, mutationLevel)
+
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "MatureUI"
     billboard.Size = UDim2.new(0, 160, 0, 55)
@@ -111,7 +136,6 @@ local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
     statusLabel.TextScaled = true
     statusLabel.Font = Enum.Font.FredokaOne
     
-    -- [🌟 动态显示变异前缀]
     local mutName = ItemConfig.MutationName and ItemConfig.MutationName[mutationLevel] or ""
     statusLabel.Text = (mutationLevel > 1) and ("⭐" .. mutName) or "加载中..."
     statusLabel.Parent = bgFrame
@@ -250,6 +274,7 @@ local function StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt
         while newPlant and newPlant.Parent do
             local elapsed = os.time() - (newPlant:GetAttribute("PlantedTime") or os.time())
             local remaining = math.max(0, growthTime - elapsed)
+           
             local progressRatio = math.clamp(elapsed / growthTime, 0, 1)
             
             local billboard = newPlant:FindFirstChild("GrowthUI", true)
@@ -343,6 +368,20 @@ function PlantService.Init()
     local plotsFolder = Workspace:WaitForChild("Plots")
 
     Players.PlayerAdded:Connect(function(player)
+        local data = PlayerDataManager.GetPlayerData(player)
+        local waitLimit = 0
+        
+        while not data and waitLimit < 20 do 
+            task.wait(0.5)
+            waitLimit += 1
+            data = PlayerDataManager.GetPlayerData(player)
+        end
+        
+        if not data then 
+            warn("【植物还原】等待玩家数据超时，终止还原！")
+            return 
+        end
+
         local plot = nil
         for i = 1, 20 do
             plot = PlotService.GetPlayerPlot(player)
@@ -351,11 +390,11 @@ function PlantService.Init()
         end
         if not plot then return end
 
-        local data = PlayerDataManager.GetPlayerData(player)
-        if not data or not data.PlantedPlants then return end
+        if not data.PlantedPlants then return end
 
-        local soilsFolder = plot:WaitForChild("Soils")
-        local plantsFolder = plot:WaitForChild("Plants")
+        local soilsFolder = plot:FindFirstChild("Soils")
+        local plantsFolder = plot:FindFirstChild("Plants")
+        if not soilsFolder or not plantsFolder then return end
 
         for soilName, plantData in pairs(data.PlantedPlants) do
             local soil = soilsFolder:FindFirstChild(soilName)
@@ -384,8 +423,12 @@ function PlantService.Init()
     end)
 
     for _, plot in ipairs(plotsFolder:GetChildren()) do
-        local soilsFolder = plot:WaitForChild("Soils")
-        local plantsFolder = plot:WaitForChild("Plants")
+        if not string.match(plot.Name, "Plot") then continue end
+
+        local soilsFolder = plot:FindFirstChild("Soils")
+        local plantsFolder = plot:FindFirstChild("Plants")
+        
+        if not soilsFolder or not plantsFolder then continue end
 
         for _, soil in ipairs(soilsFolder:GetChildren()) do
             if string.find(soil.Name, "Soil") and soil:IsA("BasePart") then
@@ -413,12 +456,10 @@ function PlantService.Init()
                             local plantName = plantConfig and plantConfig.Name or plantId
                             local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                             
-                            -- [🌟 提取之前存在植物身上的变异等级]
                             local mutLevel = targetPlant:GetAttribute("MutationLevel") or 1
                             local mutPrefix = (mutLevel > 1) and ("[".. (ItemConfig.MutationName[mutLevel] or "变异") .."] ") or ""
 
                             if isOwner then
-                                -- [🌟 核心改动：收获时，传参变异等级，并解锁专属图鉴！]
                                 PlayerDataManager.GivePlant(player, plantId, currentYield, mutLevel)
                                 PlayerDataManager.UnlockMutation(player, plantId, mutLevel)
                                 

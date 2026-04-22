@@ -3,7 +3,6 @@ local ZombieService = {}
 
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService") 
 local PhysicsService = game:GetService("PhysicsService")
 
@@ -373,14 +372,17 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             if plot:GetAttribute("IsGameOver") then zombie:Destroy(); break end
             
             local speedMult = plot:GetAttribute("GameSpeed") or 1
-            -- [🌟 时间累加与物理循环等待，不再有干扰项！]
+            -- 时间累加与物理循环等待
             local dt = task.wait(0.1 / speedMult)
             timeAccumulated += (dt * speedMult)
 
-            if currentState == "Walk" and animTracks["Walk"] then
-                animTracks["Walk"]:AdjustSpeed(1.5 * speedMult)
-            elseif currentState == "Eat" and animTracks["Eat"] then
-                animTracks["Eat"]:AdjustSpeed(1.0 * speedMult)
+            -- [🌟 核心修复 1：在循环中实时更新 WalkSpeed，确保玩家中途点击倍速也能立刻生效]
+            if currentState == "Walk" then
+                if animTracks["Walk"] then animTracks["Walk"]:AdjustSpeed(1.5 * speedMult) end
+                humanoid.WalkSpeed = config.Speed * speedMult -- 动态物理加速！
+            elseif currentState == "Eat" then
+                if animTracks["Eat"] then animTracks["Eat"]:AdjustSpeed(1.0 * speedMult) end
+                humanoid.WalkSpeed = 0
             end
             
             local flatRootPos = Vector3.new(rootPart.Position.X, 0, rootPart.Position.Z)
@@ -391,7 +393,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             end
 
             if hasReachedEndBlock and not hasReachedHouseEnd then
-                if houseEndBlock then
+                 if houseEndBlock then
                     currentTargetPos = houseEndBlock.Position
                     local flatHouseEndPos = Vector3.new(houseEndBlock.Position.X, 0, houseEndBlock.Position.Z)
                     if (flatRootPos - flatHouseEndPos).Magnitude < 1 then hasReachedHouseEnd = true end
@@ -418,7 +420,6 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
 
             for _, part in ipairs(hitParts) do
                local hitModel = part:FindFirstAncestorOfClass("Model")
-                -- [🌟 修改：僵尸只吃活着的植物，无视已经隐身死亡的]
                 if hitModel and hitModel:GetAttribute("IsCombatPlant") and not hitModel:GetAttribute("IsDead") then
                     isFacingPlant = true
                     targetPlant = hitModel
@@ -449,7 +450,6 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                             end
                             p.Color = Color3.fromRGB(255, 50, 50)
                             
-                            -- 受击闪光足够短，不需要吃倍速
                             task.delay(0.15, function() 
                                 if p and p.Parent then 
                                     p.Color = p:GetAttribute("OriginalColor") 
@@ -459,28 +459,24 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                     end
 
                     if currentPlantHP <= 0 then
-                        -- [🌟 核心修改：植物死亡不再销毁！而是标记隐身！]
                         targetPlant:SetAttribute("IsDead", true)
                         
                         for _, p in pairs(targetPlant:GetDescendants()) do
                             if p:IsA("BasePart") then
-                                -- 记录原本的透明度（比如有的碰撞框本来就是透明的）
                                 if not p:GetAttribute("OriginalTransparency") then
                                     p:SetAttribute("OriginalTransparency", p.Transparency)
                                 end
-                                p.Transparency = 1 -- 瞬间隐身
+                                p.Transparency = 1 
                             end
                         end
-                        -- 彻底去除了原本的 TargetPlant:Destroy() 和 OccupiedBy = nil !
                     end
                 end
             else
-                humanoid.WalkSpeed = config.Speed 
+                -- [🌟 核心修复 2：恢复行走时，重新赋予包含倍速的移动速度]
+                humanoid.WalkSpeed = config.Speed * speedMult 
                 humanoid:MoveTo(currentTargetPos) 
                 switchState("Walk")
             end
-            
-            -- [🌟 重大 Bug 修复：删除了原本在这里冲突的 task.wait(0.1)！]
         end
         
         if humanoid.Health <= 0 then

@@ -1,0 +1,159 @@
+-- src/client/UI/UnlockAnimController.luau
+local UnlockAnimController = {}
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+
+function UnlockAnimController.PlayUnlockAnim(itemName, iconId, qualityColor, subText)
+    local player = Players.LocalPlayer
+    local playerGui = player:WaitForChild("PlayerGui")
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "TempUnlockUI"
+    screenGui.DisplayOrder = 9999 
+    screenGui.Parent = playerGui
+
+    -- ==========================================
+    -- [🌟 调整：回归正的长方形与水平位移]
+    -- ==========================================
+    local horizontalBand = Instance.new("Frame")
+    horizontalBand.Name = "HorizontalBand"
+    horizontalBand.AnchorPoint = Vector2.new(0.5, 0.5)
+    
+    -- 初始位置：屏幕左侧外 (水平居中对齐 0.5 Y轴)
+    horizontalBand.Position = UDim2.new(-1, 0, 0.5, 0) 
+    horizontalBand.Size = UDim2.new(1.5, 0, 0.5, 0) -- 恢复标准厚度，宽度略长
+    horizontalBand.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    horizontalBand.BackgroundTransparency = 0.3
+    horizontalBand.Rotation = 0 -- 保持水平，不倾斜
+    horizontalBand.BorderSizePixel = 0
+    horizontalBand.Parent = screenGui
+
+    local contentContainer = Instance.new("Frame")
+    contentContainer.AnchorPoint = Vector2.new(0.5, 0.5)
+    contentContainer.Position = UDim2.new(0.5, 0, 0.5, 0)
+    contentContainer.Size = UDim2.new(0, 500, 0, 250)
+    contentContainer.BackgroundTransparency = 1
+    contentContainer.Rotation = 0 -- 容器同样不旋转
+    contentContainer.Parent = horizontalBand
+
+    -- 物品图标
+    local itemIcon = Instance.new("ImageLabel")
+    itemIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+    itemIcon.Position = UDim2.new(0.5, 0, 0.35, 0)
+    itemIcon.Size = UDim2.new(0, 0, 0, 0) 
+    itemIcon.BackgroundTransparency = 1
+    itemIcon.Image = iconId or ""
+    itemIcon.Parent = contentContainer
+
+    -- 物品名称
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+    nameLabel.Position = UDim2.new(0.5, 0, 0.75, 0)
+    nameLabel.Size = UDim2.new(1, 0, 0, 50)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.FredokaOne
+    nameLabel.Text = itemName or "新植物"
+    nameLabel.TextColor3 = qualityColor or Color3.fromRGB(255, 255, 255)
+    nameLabel.TextSize = 40
+    nameLabel.TextTransparency = 1 
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.Parent = contentContainer
+
+    -- 副标题
+    local subLabel = Instance.new("TextLabel")
+    subLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+    subLabel.Position = UDim2.new(0.5, 0, 0.9, 0)
+    subLabel.Size = UDim2.new(1, 0, 0, 30)
+    subLabel.BackgroundTransparency = 1
+    subLabel.Font = Enum.Font.SourceSansBold
+    subLabel.Text = subText or "图鉴已更新"
+    subLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+    subLabel.TextSize = 26
+    subLabel.TextTransparency = 1
+    subLabel.Parent = contentContainer
+
+    -- ==========================================
+    -- 动画定义
+    -- ==========================================
+    -- 1. 从左向右切入屏幕中心
+    local bandSlideIn = TweenService:Create(horizontalBand, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { 
+        Position = UDim2.new(0.5, 0, 0.5, 0) 
+    })
+    
+    -- 2. 继续向右滑出屏幕
+    local bandSlideOut = TweenService:Create(horizontalBand, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In), { 
+        Position = UDim2.new(2, 0, 0.5, 0) 
+    })
+    
+    local iconPop = TweenService:Create(itemIcon, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { 
+        Size = UDim2.new(0, 180, 0, 180) 
+    })
+    
+    local function PlayShakeAnim()
+        local shakeAngles = {10, -10, 7, -7, 4, -4, 0}
+        for _, angle in ipairs(shakeAngles) do
+            local shakeTween = TweenService:Create(itemIcon, TweenInfo.new(0.04, Enum.EasingStyle.Linear), { Rotation = angle })
+            shakeTween:Play()
+            shakeTween.Completed:Wait()
+        end
+    end
+
+    local textFadeIn = TweenService:Create(nameLabel, TweenInfo.new(0.35), { TextTransparency = 0 })
+    local subFadeIn = TweenService:Create(subLabel, TweenInfo.new(0.35), { TextTransparency = 0 })
+
+    task.spawn(function()
+        -- 第 1 幕：横条从左侧滑入
+        bandSlideIn:Play()
+        bandSlideIn.Completed:Wait()
+        
+        -- 第 2 幕：内容弹出并轻微抖动
+        iconPop:Play()
+        iconPop.Completed:Wait() 
+        PlayShakeAnim()
+        
+        -- 第 3 幕：文字显示
+        textFadeIn:Play()
+        subFadeIn:Play()
+        
+        -- 第 4 幕：定格
+        task.wait(2.5) 
+        
+        -- 第 5 幕：内容先消失，让路给滑出动画
+        TweenService:Create(itemIcon, TweenInfo.new(0.2), { ImageTransparency = 1, Size = UDim2.new(0, 150, 0, 150) }):Play()
+        TweenService:Create(nameLabel, TweenInfo.new(0.2), { TextTransparency = 1 }):Play()
+        TweenService:Create(subLabel, TweenInfo.new(0.2), { TextTransparency = 1 }):Play()
+        task.wait(0.2)
+        
+        -- 第 6 幕：横条继续向右滑出销毁
+        bandSlideOut:Play()
+        bandSlideOut.Completed:Wait()
+        
+        screenGui:Destroy()
+    end)
+end
+
+function UnlockAnimController.Init()
+    local playUnlockAnimRE = ReplicatedStorage:WaitForChild("PlayUnlockAnimRE")
+    playUnlockAnimRE.OnClientEvent:Connect(function(plantId, mutationLevel)
+        local plantDetail = ItemConfig.Plants[plantId]
+        if not plantDetail then return end
+
+        local mutName = ItemConfig.MutationName[mutationLevel] or "普通"
+        local itemName = mutName .. "·" .. (plantDetail.Name or plantId)
+        local iconId = plantDetail.IconId or ""
+
+        local qualityColor = Color3.fromRGB(255, 255, 255)
+        if mutationLevel == 2 then qualityColor = Color3.fromRGB(85, 170, 255)
+        elseif mutationLevel == 3 then qualityColor = Color3.fromRGB(170, 85, 255)
+        elseif mutationLevel == 4 then qualityColor = Color3.fromRGB(255, 170, 0) end
+
+        local subText = mutationLevel > 1 and "⭐ 发现稀有变异！" or "📖 发现新物种！"
+        UnlockAnimController.PlayUnlockAnim(itemName, iconId, qualityColor, subText)
+    end)
+end
+
+return UnlockAnimController

@@ -52,7 +52,7 @@ function PlotService.Init()
                 local spawnPoint = assignedPlot:FindFirstChild("SpawnLocation")
                 if spawnPoint then
                     task.wait(0.1)
-                    character:PivotTo(spawnPoint.CFrame * CFrame.new(0, 3, 0))
+                   -- character:PivotTo(spawnPoint.CFrame * CFrame.new(0, 3, 0))
                 end
             end)
         else

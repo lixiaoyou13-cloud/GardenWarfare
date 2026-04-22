@@ -5,7 +5,7 @@ local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V8")
+local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V11")
 local sessionData = {}
 
 local function GetDefaultData()
@@ -15,15 +15,13 @@ local function GetDefaultData()
         Inventory = { Seeds = { { ID = "Peashooter", Quantity = 1 } }, Plants = {} },
         PlantedPlants = {}, CombatPlants = {},
         UnlockedSeeds = { ["Peashooter"] = true }, 
-        -- [🌟 新增：变异图鉴白名单] 默认拥有1级(普通)豌豆射手
-        UnlockedMutations = { ["Peashooter"] = { [1] = true } } 
+        UnlockedMutations = {} 
     }
 end
 
 local function saveWithRetry(userId, dataToSave)
     local dataForSave = table.clone(dataToSave)
     dataForSave.Hotbar = {} 
-    
     for attempt = 1, 3 do
         local success = pcall(function() PlayerDataStore:SetAsync(userId, dataForSave) end)
         if success then return true else task.wait(2) end
@@ -32,32 +30,48 @@ local function saveWithRetry(userId, dataToSave)
 end
 
 local function onPlayerAdded(player)
-    local success, savedData = pcall(function() return PlayerDataStore:GetAsync(player.UserId) end)
-    if success and savedData then
-        savedData.Hotbar = {"Tool_Shovel"} 
-        if not savedData.PlantedPlants then savedData.PlantedPlants = {} end 
-        if not savedData.CombatPlants then savedData.CombatPlants = {} end 
-        if type(savedData.UnlockedSeeds) ~= "table" then savedData.UnlockedSeeds = { ["Peashooter"] = true } end
-        
-        -- [🌟 老玩家补发图鉴数据结构]
-        if type(savedData.UnlockedMutations) ~= "table" then savedData.UnlockedMutations = { ["Peashooter"] = { [1] = true } } end
-        
-        sessionData[player.UserId] = savedData
-    else
-        sessionData[player.UserId] = GetDefaultData()
-    end
+    local isLoaded = false
+    task.spawn(function()
+        local success, savedData = pcall(function() return PlayerDataStore:GetAsync(player.UserId) end)
+        if not isLoaded then
+            isLoaded = true
+            if success and savedData then
+                savedData.Hotbar = {"Tool_Shovel"} 
+                if not savedData.PlantedPlants then savedData.PlantedPlants = {} end 
+                if not savedData.CombatPlants then savedData.CombatPlants = {} end 
+                if type(savedData.UnlockedSeeds) ~= "table" then savedData.UnlockedSeeds = { ["Peashooter"] = true } end
+                if type(savedData.UnlockedMutations) ~= "table" then savedData.UnlockedMutations = {} end
+
+                sessionData[player.UserId] = savedData
+                print("✅ [数据系统] 玩家 " .. player.Name .. " 数据拉取成功！")
+            else
+                sessionData[player.UserId] = GetDefaultData()
+                print("🆕 [数据系统] 玩家 " .. player.Name .. " 无存档，发放初始数据。")
+            end
+        end
+    end)
+    task.delay(5, function()
+        if not isLoaded then
+            isLoaded = true
+            warn("⚠️ [数据系统] Roblox数据服务请求超时卡死！已强制跳过并下发初始数据，保护游戏进程不崩溃！")
+            sessionData[player.UserId] = GetDefaultData()
+        end
+    end)
 end
 
 local function onPlayerRemoving(player)
     local dataToSave = sessionData[player.UserId]
     if dataToSave then
         sessionData[player.UserId] = nil 
-        saveWithRetry(player.UserId, dataToSave)
+        task.spawn(function() saveWithRetry(player.UserId, dataToSave) end)
     end
 end
 
 function PlayerDataManager.Init()
     Players.PlayerAdded:Connect(onPlayerAdded)
+    for _, player in ipairs(Players:GetPlayers()) do
+        task.spawn(function() onPlayerAdded(player) end)
+    end
     Players.PlayerRemoving:Connect(onPlayerRemoving)
 
     game:BindToClose(function()
@@ -80,6 +94,12 @@ function PlayerDataManager.Init()
         local updateInventoryRE = Instance.new("RemoteEvent")
         updateInventoryRE.Name = "UpdateInventoryRE"
         updateInventoryRE.Parent = ReplicatedStorage
+    end
+
+    if not ReplicatedStorage:FindFirstChild("PlayUnlockAnimRE") then
+        local animRE = Instance.new("RemoteEvent")
+        animRE.Name = "PlayUnlockAnimRE"
+        animRE.Parent = ReplicatedStorage
     end
 end
 
@@ -104,10 +124,12 @@ function PlayerDataManager.RemovePlantedPlant(player, soilName)
 end
 
 function PlayerDataManager.GiveSeed(player, seedId, amount)
-    local data = sessionData[player.UserId]; if not data then return end
+    local data = sessionData[player.UserId];
+    if not data then return end
     local found = false
     for _, seedData in ipairs(data.Inventory.Seeds) do
-        if seedData.ID == seedId then seedData.Quantity += amount; found = true; break end
+        if seedData.ID == seedId then seedData.Quantity += amount;
+            found = true; break end
     end
     if not found then table.insert(data.Inventory.Seeds, { ID = seedId, Quantity = amount }) end
     local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
@@ -121,7 +143,20 @@ function PlayerDataManager.ConsumeSeed(player, seedId, amount)
         if seedData.ID == seedId then
             if seedData.Quantity >= amount then
                 seedData.Quantity -= amount
-                if seedData.Quantity <= 0 then table.remove(data.Inventory.Seeds, i) end
+                if seedData.Quantity <= 0 then 
+                    table.remove(data.Inventory.Seeds, i) 
+                    
+                    -- [🌟 核心修复：种子耗尽时，强行从快捷栏数据中挖掉它的占位！]
+                    if data.Hotbar then
+                        for j = #data.Hotbar, 1, -1 do
+                            local parts = string.split(data.Hotbar[j], "_")
+                            if parts[1] == "Seed" and parts[2] == seedId then
+                                table.remove(data.Hotbar, j)
+                            end
+                        end
+                    end
+                    
+                end
                 local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
                 if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
                 return true
@@ -132,20 +167,16 @@ function PlayerDataManager.ConsumeSeed(player, seedId, amount)
     return false
 end
 
--- ==========================================
--- [🌟 核心升级：给予植物时支持变异等级，并支持同变异独立堆叠]
--- ==========================================
 function PlayerDataManager.GivePlant(player, plantId, amount, mutationLevel)
-    local data = sessionData[player.UserId]; if not data then return end
-    mutationLevel = mutationLevel or 1 -- 默认是 1(普通)
+    local data = sessionData[player.UserId];
+    if not data then return end
+    mutationLevel = mutationLevel or 1 
     
     local found = false
     for _, plantData in ipairs(data.Inventory.Plants) do
-        -- 必须 ID 一样 且 变异等级 一样，才能堆叠在一起
         if plantData.ID == plantId and (plantData.Mutation or 1) == mutationLevel then 
-            plantData.Quantity += amount; 
-            found = true; 
-            break 
+            plantData.Quantity += amount;
+            found = true; break 
         end
     end
     
@@ -157,9 +188,6 @@ function PlayerDataManager.GivePlant(player, plantId, amount, mutationLevel)
     if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
 end
 
--- ==========================================
--- [🌟 新增接口：解锁图鉴]
--- ==========================================
 function PlayerDataManager.UnlockMutation(player, plantId, mutationLevel)
     local data = sessionData[player.UserId]
     if not data then return end
@@ -167,14 +195,25 @@ function PlayerDataManager.UnlockMutation(player, plantId, mutationLevel)
     if not data.UnlockedMutations then data.UnlockedMutations = {} end
     if not data.UnlockedMutations[plantId] then data.UnlockedMutations[plantId] = {} end
     
+    local isFirstTimeUnlock = not data.UnlockedMutations[plantId][mutationLevel]
+    
     data.UnlockedMutations[plantId][mutationLevel] = true
     
     local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
     if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+
+    if isFirstTimeUnlock then
+        print("【服务端】首次解锁检测成功，正在给客户端发送动画信号：", plantId, "等级", mutationLevel)
+        local playUnlockAnimRE = ReplicatedStorage:FindFirstChild("PlayUnlockAnimRE")
+        if playUnlockAnimRE then 
+            playUnlockAnimRE:FireClient(player, plantId, mutationLevel) 
+        end
+    end
 end
 
 function PlayerDataManager.ConsumeCoins(player, amount)
-    local data = sessionData[player.UserId]; if not data then return false end
+    local data = sessionData[player.UserId];
+    if not data then return false end
     if data.Coins >= amount then
         data.Coins -= amount
         local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
@@ -185,15 +224,13 @@ function PlayerDataManager.ConsumeCoins(player, amount)
 end
 
 function PlayerDataManager.GiveCoins(player, amount)
-    local data = sessionData[player.UserId]; if not data then return end
+    local data = sessionData[player.UserId];
+    if not data then return end
     data.Coins += amount
     local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
     if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
 end
 
--- ==========================================
--- [🌟 战斗消耗：按变异等级精准扣除]
--- ==========================================
 function PlayerDataManager.ConsumePlant(player, plantId, amount, mutationLevel)
     local data = sessionData[player.UserId]
     if not data or not data.Inventory or not data.Inventory.Plants then return false end
@@ -203,7 +240,21 @@ function PlayerDataManager.ConsumePlant(player, plantId, amount, mutationLevel)
         if plantData.ID == plantId and (plantData.Mutation or 1) == mutationLevel then
             if plantData.Quantity >= amount then
                 plantData.Quantity -= amount
-                if plantData.Quantity <= 0 then table.remove(data.Inventory.Plants, i) end
+                if plantData.Quantity <= 0 then 
+                    table.remove(data.Inventory.Plants, i) 
+                    
+                    -- [🌟 核心修复：植物耗尽时，强行从快捷栏数据中挖掉它的占位！]
+                    if data.Hotbar then
+                        for j = #data.Hotbar, 1, -1 do
+                            local parts = string.split(data.Hotbar[j], "_")
+                            local mLevel = tonumber(parts[3]) or 1
+                            if parts[1] == "Plant" and parts[2] == plantId and mLevel == mutationLevel then
+                                table.remove(data.Hotbar, j)
+                            end
+                        end
+                    end
+                    
+                end
                 local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
                 if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
                 return true
@@ -224,10 +275,10 @@ function PlayerDataManager.UnlockNextLevel(player, completedLevelId)
     end
 end
 
-function PlayerDataManager.AddCombatPlant(player, gridName, plantId, hp)
+function PlayerDataManager.AddCombatPlant(player, gridName, plantId, hp, mutationLevel)
     local data = sessionData[player.UserId]
     if data and data.CombatPlants then
-        data.CombatPlants[gridName] = { PlantId = plantId }
+        data.CombatPlants[gridName] = { PlantId = plantId, Mutation = mutationLevel or 1 }
     end
 end
 

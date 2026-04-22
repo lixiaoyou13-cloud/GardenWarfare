@@ -15,6 +15,17 @@ local BaseItemConfig = {
             Name = "背包",
             IconId = "rbxassetid://126862599177625", -- 请替换真实的背包图片ID
         }
+    },
+    --道具背景类
+    Item = {
+        [1] = {
+            Name = "普通",
+            IconId = "rbxassetid://0", -- [请替换真实的随机种子图片ID]
+        },
+        [2] = {
+            Name = "特殊",
+            IconId = "rbxassetid://1", -- [请替换真实的随机种子图片ID]
+        },
     }
 }
 
