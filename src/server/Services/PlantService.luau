@@ -433,13 +433,46 @@ function PlantService.Init()
         for _, soil in ipairs(soilsFolder:GetChildren()) do
             if string.find(soil.Name, "Soil") and soil:IsA("BasePart") then
                 local prompt = Instance.new("ProximityPrompt")
+                prompt.Name = "PlantPrompt" -- 🌟 加个名字方便以后调试
                 prompt.ActionText = "种植"; prompt.ObjectText = "泥土"
                 prompt.KeyboardKeyCode = Enum.KeyCode.F
                 prompt.RequiresLineOfSight = false
                 prompt.MaxActivationDistance = 8
-                prompt.Parent = soil; prompt.HoldDuration = 0.5
+                prompt.Parent = soil
+                prompt.HoldDuration = 0.5
+
+                -- ==========================================
+                -- [🌟 核心修复1：初始隐藏未解锁土地的种植按键]
+                -- ==========================================
+                if soil:GetAttribute("IsUnlocked") ~= true then
+                    prompt.Enabled = false
+                end
+
+                -- ==========================================
+                -- [🌟 核心修复2：监听玩家买地，买完瞬间显示种植按键]
+                -- ==========================================
+                soil:GetAttributeChangedSignal("IsUnlocked"):Connect(function()
+                    if soil:GetAttribute("IsUnlocked") == true then
+                        -- 检查这块地上是不是空的（没有植物），如果是空的才显示种植
+                        local targetPlant = nil
+                        for _, plant in ipairs(plantsFolder:GetChildren()) do
+                            if plant:GetAttribute("PlantedOn") == soil.Name then targetPlant = plant; break end
+                        end
+                        if not targetPlant then
+                            prompt.ActionText = "种植"
+                            prompt.Enabled = true
+                        end
+                    else
+                        prompt.Enabled = false
+                    end
+                end)
 
                 prompt.Triggered:Connect(function(player)
+                    -- ==========================================
+                    -- [🌟 核心修复3：安全拦截！没解锁的绝对不让种]
+                    -- ==========================================
+                    if soil:GetAttribute("IsUnlocked") ~= true then return end
+                    
                     local myPlot = PlotService.GetPlayerPlot(player)
                     local isOwner = (myPlot == plot)
 
@@ -460,6 +493,7 @@ function PlantService.Init()
                             local mutPrefix = (mutLevel > 1) and ("[".. (ItemConfig.MutationName[mutLevel] or "变异") .."] ") or ""
 
                             if isOwner then
+                                -- [🌟 自己收获的逻辑，保持不变]
                                 PlayerDataManager.GivePlant(player, plantId, currentYield, mutLevel)
                                 PlayerDataManager.UnlockMutation(player, plantId, mutLevel)
                                 
@@ -471,22 +505,11 @@ function PlantService.Init()
                                     showNotifRE:FireClient(player, "收获成功！", "你获得了: " .. currentYield .. "x " .. mutPrefix .. plantName) 
                                 end
                             else
-                                if currentYield > 0 then
-                                    PlayerDataManager.GivePlant(player, plantId, 1, mutLevel)
-                                    targetPlant:SetAttribute("YieldCount", currentYield - 1)
-                                    
-                                    if showNotifRE then 
-                                        showNotifRE:FireClient(player, "偷取成功！", "你悄悄顺走了 1x " .. mutPrefix .. plantName) 
-                                    end
-                                    
-                                    if (currentYield - 1) <= 0 then
-                                        local ownerId = targetPlant:GetAttribute("OwnerId")
-                                        local ownerPlayer = Players:GetPlayerByUserId(ownerId)
-                                        if ownerPlayer then PlayerDataManager.RemovePlantedPlant(ownerPlayer, soil.Name) end
-                                        targetPlant:Destroy()
-                                        prompt.ActionText = "种植"
-                                    end
+                                -- [🌟 核心修改：关闭偷菜，改为提示]
+                                if showNotifRE then 
+                                    showNotifRE:FireClient(player, "提示", "暂时不能偷取别人的植物！") 
                                 end
+                                return
                             end
                         else
                             if not isOwner then

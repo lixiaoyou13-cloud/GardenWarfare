@@ -72,11 +72,16 @@ function PlantUIController.Init()
     end)
 
     -- 玩家刚上线时，扫描地图上已经存在的成熟植物并替换视觉
-    for _, desc in pairs(Workspace:GetDescendants()) do
-        if desc:IsA("Model") and desc:GetAttribute("IsMature") then
-            updatePlantUI(desc)
+    task.spawn(function()
+    local plotsFolder = Workspace:WaitForChild("Plots", 5)
+        if plotsFolder then
+            for _, desc in pairs(plotsFolder:GetDescendants()) do
+                if desc:IsA("Model") and desc:GetAttribute("IsMature") then
+                    updatePlantUI(desc)
+                end
+            end
         end
-    end
+    end)
 
     print("客户端：PlantUIController (植物状态显示) 加载完毕！偷菜视角已分配！")
 end

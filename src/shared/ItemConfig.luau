@@ -4,12 +4,18 @@ local ItemConfig = {
 		"Peashooter",
 		"Wall",
 		"PotatoMine",
+		"KernelPult",
 		"Jalapeno",
+		"CoconutTree",
+		"FumeShroom",
+		"Cactus",
+		"Sunflower",
+		"MegaPeashooter"
 	},
 	
 	Seeds = {
 		-- ==========================================
-		-- [第 1 阶段：新手体验期] (价格跨度：100 ~ 1,500)
+		-- [第 1 阶段：新手期]
 		-- ==========================================
 		["Peashooter"] = {
 			Id = 1,
@@ -18,7 +24,6 @@ local ItemConfig = {
 			GrowthTime = 5,
 			YieldPlant = "Peashooter",
 			BuyPrice = 100,       
-			RobuxPrice = 19,      
 			UnlockLevel = 0, 
 		},
 		["Wall"] = {
@@ -27,8 +32,7 @@ local ItemConfig = {
 			Quality = 1,
 			GrowthTime = 10,
 			YieldPlant = "Wall",
-			BuyPrice = 500,       -- (x5倍) 打完前两关就能买
-			RobuxPrice = 39,      
+			BuyPrice = 500,       
 			UnlockLevel = 0, 
 		},
 		["PotatoMine"] = {
@@ -37,13 +41,12 @@ local ItemConfig = {
 			Quality = 2,
 			GrowthTime = 60,
 			YieldPlant = "PotatoMine",
-			BuyPrice = 1500,      -- (x3倍) 稍微需要攒一攒
-			RobuxPrice = 79,      
+			BuyPrice = 1500,    
 			UnlockLevel = 0, 
 		},
 
 		-- ==========================================
-		-- [第 2 阶段：中期发育期] (价格跨度：4,500 ~ 35,000)
+		-- [第 2 阶段：成长期]
 		-- ==========================================
 		["KernelPult"] = {
 			Id = 4,
@@ -51,8 +54,7 @@ local ItemConfig = {
 			Quality = 2,
 			GrowthTime = 300,
 			YieldPlant = "KernelPult",
-			BuyPrice = 4500,      -- (x3倍) 此时玩家应该有了稳定的刷钱阵型
-			RobuxPrice = 149,      
+			BuyPrice = 4500,      
 			UnlockLevel = 10, 
 		},
 		["Jalapeno"] = {
@@ -61,8 +63,7 @@ local ItemConfig = {
 			Quality = 3,
 			GrowthTime = 600,
 			YieldPlant = "Jalapeno",
-			BuyPrice = 12000,     -- (x2.6倍) 强力清屏道具，卖贵一点
-			RobuxPrice = 249,     
+			BuyPrice = 12000,     
 			UnlockLevel = 16, 
 		},
 		["CoconutTree"] = {
@@ -71,13 +72,12 @@ local ItemConfig = {
 			Quality = 3,
 			GrowthTime = 600,
 			YieldPlant = "CoconutTree",
-			BuyPrice = 35000,     -- (x2.9倍) 开始感受到金币压力
-			RobuxPrice = 399,
+			BuyPrice = 35000,     
 			UnlockLevel = 24, 
 		},
 
 		-- ==========================================
-		-- [第 3 阶段：后期肝帝期] (价格跨度：10万 ~ 200万)
+		-- [第 3 阶段：爆发期]
 		-- ==========================================
 		["FumeShroom"] = {
 			Id = 7,
@@ -85,8 +85,7 @@ local ItemConfig = {
 			Quality = 3,
 			GrowthTime = 600,
 			YieldPlant = "FumeShroom",
-			BuyPrice = 100000,    -- (x2.8倍) 突破十万大关！
-			RobuxPrice = 599,
+			BuyPrice = 100000,    
 			UnlockLevel = 32, 
 		},
 		["Cactus"] = {
@@ -95,8 +94,7 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Cactus",
-			BuyPrice = 250000,    -- (x2.5倍)
-			RobuxPrice = 899,
+			BuyPrice = 350000,    
 			UnlockLevel = 40, 
 		},
 		["Sunflower"] = {
@@ -105,28 +103,25 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Sunflower",
-			BuyPrice = 750000,    -- (x3倍) 经济类植物，前期极难获取
-			RobuxPrice = 1299,
+			BuyPrice = 1000000,    
 			UnlockLevel = 48, 
 		},
-		["MegaPeashooter"] = {
+		["Melonpult"] = {
 			Id = 10,
-			Name = "超级豌豆射手",
-			Quality = 5,           -- 传说品质
+			Name = "西瓜投手",
+			Quality = 5,           
 			GrowthTime = 3600,     
-			YieldPlant = "MegaPeashooter",
-			BuyPrice = 2000000,    -- (x2.6倍) 两百万！毕业级追求！
-			RobuxPrice = 1999,     -- 标准终极道具定价 (约25美元)
+			YieldPlant = "Melonpult",
+			BuyPrice = 5000000,    
 			UnlockLevel = 50, 
 		},
-
 	},
 	
 	Plants = {
 		["Peashooter"] = {
 			Id = "Peashooter",
 			Name = "豌豆射手",
-			HP = 300,
+			HP = 100,
 			Quality = 1,
 			IdleAnimId = "rbxassetid://78336317659894",
 			CanAttack = true,
@@ -136,22 +131,20 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(85, 255, 127),
 			ProjectileName = "Pea", 
 			Description = "详情：发射豌豆造成基础伤害。",
-			Source = "商城购买",
 		},
 		["Wall"] = {
 			Id = "Wall",
 			Name = "坚果墙",
-			HP = 4000,
+			HP = 2000,
 			Quality = 1,
 			IdleAnimId = "rbxassetid://130556607788926",
 			CanAttack = false,
 			Description = "详情：拥有极高的生命值，阻挡僵尸前进。",
-			Source = "商城购买",
 		},
 		["PotatoMine"] = {
 			Id = "PotatoMine",
 			Name = "土豆地雷",
-			HP = 1000,
+			HP = 50,
 			Attack = 1000,
 			Quality = 2,
 			IdleAnimId = "rbxassetid://90962037485623",
@@ -159,141 +152,128 @@ local ItemConfig = {
 			ExplosionType = "Single",
 			ExplosionDamage = 1000,
 			Description = "详情：被吃掉时引发爆炸，造成巨额单体伤害。",
-			Source = "商城购买",
 		},
 		["KernelPult"] = {
 			Id = "KernelPult",
 			Name = "玉米投手",
-			HP = 300,
+			HP = 800,
 			Quality = 2,
 			IdleAnimId = "rbxassetid://135320524253878",
 			AttackAnimation = "rbxassetid://125434851620830",
 			ArcHeight = 20,
 			CanAttack = true,
-			Attack = 20,
+			Attack = 150,
 			AttackInterval = 2,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Kernel", 
 			Description = "详情：投掷玉米粒，造成基础伤害。",
-			Source = "商城购买",
 		},
 		["Jalapeno"] = {
 			Id = "Jalapeno",
 			Name = "火爆辣椒",
 			HP = 5,
-			Attack = 600,
+			Attack = 5000,
 			Quality = 2,
 			CanAttack = false,
 			ExplosionType = "Row",
-			ExplosionDamage = 600,
+			ExplosionDamage = 5000,
 			Description = "详情：极速引爆，对整条路线上的僵尸造成毁灭打击。",
-			Source = "商城购买",
 		},
-        -- ==========================================
-		-- [🌟 新增植物配置]
-		-- ==========================================
         ["CoconutTree"] = {
 			Id = "CoconutTree",
 			Name = "椰子树",
-			HP = 500,
+			HP = 3000,
 			Quality = 3,
 			CanAttack = true,
-			Attack = 90,
+			Attack = 2000,
 			IdleAnimId = "rbxassetid://82072725732014",
 			AttackAnimation = "rbxassetid://140311761151184s",
-			AttackInterval = 3, -- 攻击慢，但伤害高
+			AttackInterval = 3, 
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 170, 0),
-			ProjectileName = "Coconut", -- 如果有椰子炮弹模型，可以改为 "Coconut"
+			ProjectileName = "Coconut", 
 			Description = "详情：发射重型椰子炮弹，对僵尸造成高额单次伤害。",
-			Source = "商城购买",
 		},
         ["FumeShroom"] = {
 			Id = "FumeShroom",
 			Name = "大喷菇",
-			HP = 300,
+			HP = 10000,
 			Quality = 3,
 			CanAttack = true,
-			Attack = 35,
+			Attack = 8000,
 			AttackInterval = 1.5,
 			IdleAnimId = "rbxassetid://137165648071153",
 			AttackAnimation = "rbxassetid://106856862873566",
 			HitEffectTexture = "rbxassetid://243098098",
-			HitEffectColor = Color3.fromRGB(170, 85, 255), -- 紫色特效
-			ProjectileName = "Spore", -- 如果有孢子模型，可以改为 "Spore"
+			HitEffectColor = Color3.fromRGB(170, 85, 255), 
+			ProjectileName = "Spore", 
 			Description = "详情：喷射高伤害孢子，火力压制前方僵尸。",
-			Source = "商城购买",
 		},
         ["Cactus"] = {
 			Id = "Cactus",
 			Name = "仙人掌",
-			HP = 400,
+			HP = 50000,
 			Quality = 4,
 			CanAttack = true,
-			Attack = 40,
+			Attack = 40000,
 			AttackInterval = 1.5,
 			IdleAnimId = "rbxassetid://132507907086232",
 			AttackAnimation ="rbxassetid://87531231080785", 
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
-			ProjectileName = "Spike", -- 如果有尖刺模型，可以改为 "Spike"
+			ProjectileName = "Spike", 
 			Description = "详情：发射锐利的尖刺，拥有极强的穿透打击感。",
-			Source = "商城购买",
 		},
         ["Sunflower"] = {
 			Id = "Sunflower",
 			Name = "向日葵",
-			HP = 400,
+			HP = 80000,
 			Quality = 4,
 			CanAttack = true,
-			Attack = 40,
+			Attack = 80000,
 			AttackInterval = 1.5,
 			IdleAnimId = "rbxassetid://123013968700468",
 			AttackAnimation = "rbxassetid://100300439397971",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
 			ProjectileName = "Sunflower",  
-			Description = "详情：发射锐利的尖刺，拥有极强的穿透打击感。",
-			Source = "商城购买",
+			Description = "详情：全能的百万提款机兼高级打手。",
 		},
-        ["MegaPeashooter"] = {
-			Id = "MegaPeashooter",
-			Name = "超级豌豆射手",
-			HP = 600,
+        ["Melonpult"] = {
+			Id = "Melonpult",
+			Name = "西瓜投手",
+			HP = 	500000,
 			Quality = 5,
 			CanAttack = true,
-			Attack = 30,
-			AttackInterval = 0.5, -- 极快攻速，机枪豌豆体验
-			IdleAnimId = "rbxassetid://78336317659894",
-			AttackAnimation = "rbxassetid://84912090941129",
+			ArcHeight = 20,
+			Attack = 300000,
+			AttackInterval = 0.5, 
+			IdleAnimId = "rbxassetid://117331055474996",
+			AttackAnimation = "rbxassetid://125434851620830",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
-			ProjectileName = "Pea", 
+			ProjectileName = "Melon", 
 			Description = "详情：以极其恐怖的射速倾泻火力，传说级的战场收割机！",
-			Source = "商城购买",
 		},
-
 	},
 	
-	MutationProb = { [1] = 70, [2] = 20, [3] = 7, [4] = 3 }, -- 调整为 4 个等级
+	MutationProb = { [1] = 70, [2] = 20, [3] = 7, [4] = 3 },
 	MutationName = { 
 		[1] = "普通", 
 		[2] = "闪耀", 
 		[3] = "雷电", 
 		[4] = "圣光" 
 	},
-	QualityName = { [1] = "常见", [2] = "不常见", [3] = "稀有", [4] = "史诗", [5] = "传奇" , [6] = "神话", [7] = "秘密" , [8] = "神圣" },
-	-- [🌟 新增：全局品质颜色映射]
 	QualityColor = {
-		[1] = Color3.fromRGB(255, 255, 255), -- 常见：白色
-		[2] = Color3.fromRGB(85, 255, 127),  -- 不常见：绿色
-		[3] = Color3.fromRGB(85, 170, 255),  -- 稀有：蓝色
-		[4] = Color3.fromRGB(170, 85, 255),  -- 史诗：紫色
-		[5] = Color3.fromRGB(255, 170, 0),   -- 传奇：橙色
-		[6] = Color3.fromRGB(255, 85, 85),   -- 神话：红色
-		[7] = Color3.fromRGB(255, 85, 255),  -- 秘密：粉色
-		[8] = Color3.fromRGB(0, 255, 255),   -- 神圣：青色
+		[1] = Color3.fromRGB(255, 255, 255), 
+		[2] = Color3.fromRGB(85, 255, 127),  
+		[3] = Color3.fromRGB(85, 170, 255),  
+		[4] = Color3.fromRGB(170, 85, 255),  
+		[5] = Color3.fromRGB(255, 170, 0),   
+		[6] = Color3.fromRGB(255, 85, 85),   
+		[7] = Color3.fromRGB(255, 85, 255),  
+		[8] = Color3.fromRGB(0, 255, 255),   
 	},
 }
 

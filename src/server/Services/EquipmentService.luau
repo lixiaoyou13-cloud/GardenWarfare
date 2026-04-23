@@ -140,6 +140,12 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
             local rotationOffset = CFrame.new() 
             if itemType == "Plant" then
                 rotationOffset = CFrame.Angles(-90, 0, 0) 
+
+            elseif itemType == "Seed" then
+                -- 修改这里的 3 个数字 (X, Y, Z轴的旋转度数)
+                -- 比如现在是 X轴转90度，如果你觉得不对，可以尝试改成 (0, math.rad(90), 0) 等等
+                rotationOffset = CFrame.Angles(math.rad(-90), math.rad(0), math.rad(0))
+                
             end
             
             heldModel:PivotTo(rightHand.CFrame * rotationOffset)

@@ -16,10 +16,8 @@ local LevelConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("S
 
 ZombieService.AnimationCache = {}
 
-
-
 -- ==========================================
--- [🌟 新增：战斗结束，复活所有隐藏的植物]
+-- [战斗结束，复活所有隐藏的植物]
 -- ==========================================
 function ZombieService.RestorePlotPlants(plot, player)
     local lawnFolder = plot:FindFirstChild("Lawn")
@@ -32,18 +30,15 @@ function ZombieService.RestorePlotPlants(plot, player)
             for _, child in pairs(lawnPart:GetChildren()) do
                 if child:IsA("Model") and child:GetAttribute("IsCombatPlant") then
                     if child:GetAttribute("IsDead") then
-                        -- 1. 数据恢复
                         local maxHP = child:GetAttribute("MaxHealth") or 300
                         child:SetAttribute("Health", maxHP)
                         child:SetAttribute("IsDead", false)
                         child:SetAttribute("Exploded", false) 
-                        
-                        -- 2. 同步回数据库
+                    
                         if player then 
                             PlayerDataManager.UpdateCombatPlantHP(player, lawnPart.Name, maxHP) 
                         end
                         
-                        -- 3. 视觉恢复
                         for _, p in pairs(child:GetDescendants()) do
                             if p:IsA("BasePart") then
                                 local origT = p:GetAttribute("OriginalTransparency")
@@ -61,7 +56,6 @@ function ZombieService.RestorePlotPlants(plot, player)
     end
 end
 
--- src/server/Services/ZombieService.luau
 function ZombieService.TriggerGameOver(plot, player)
     if plot:GetAttribute("IsGameOver") then return end
     plot:SetAttribute("IsGameOver", true)
@@ -69,18 +63,12 @@ function ZombieService.TriggerGameOver(plot, player)
 
     print("【关卡系统】防守失败！僵尸进入了房间！")
 
-    -- 1. 恢复植物 (只需调用一次)
     ZombieService.RestorePlotPlants(plot, player)
-
-    -- 2. 触发最终结算 (内部会自动打包数据并发送 UI 弹窗，不需要在这重复写了)
     ZombieService.FinalSettlement(player, plot, false)
 
-    -- 3. 清理场上所有的僵尸
     for _, obj in pairs(Workspace:GetChildren()) do
-        if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") then
-            if obj.HumanoidRootPart.CollisionGroup == "Zombies" then
-                obj:Destroy()
-            end
+        if obj:IsA("Model") and obj:GetAttribute("IsZombie") then
+            obj:Destroy()
         end
     end
 end
@@ -125,24 +113,21 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
     plot:SetAttribute("ActiveZombies", (plot:GetAttribute("ActiveZombies") or 0) + 1)
 
     local zombie = zombieTemplate:Clone()
+    zombie:SetAttribute("IsZombie", true) 
     
     for _, part in pairs(zombie:GetDescendants()) do
         if part:IsA("BasePart") then 
-            -- [🌟 修改：破土期间设为 Default 组，植物的探测器会直接无视它，达成“无敌/不可选中”]
             part.CollisionGroup = "Default" 
-            
-            -- [🌟 新增：记录零件原本的碰撞状态，并强制关闭碰撞，实现彻底的“无碰撞模式”]
             part:SetAttribute("OriginalCanCollide", part.CanCollide)
             part.CanCollide = false
         end
         if part:IsA("Sound") then part:Destroy() end
     end
     
-  local rootPart = zombie:FindFirstChild("HumanoidRootPart") or zombie.PrimaryPart
+    local rootPart = zombie:FindFirstChild("HumanoidRootPart") or zombie.PrimaryPart
     local humanoid = zombie:FindFirstChildOfClass("Humanoid")
     if not rootPart or not humanoid then return end
 
-    -- [🌟 核心双重保险：剥夺僵尸“摔倒”、“趴下”的能力]
     humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
     humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
     humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
@@ -182,21 +167,19 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
     humanoid.MaxHealth = config.HP
     humanoid.Health = config.HP
     humanoid.WalkSpeed = 0 
-    -- ==========================================
-    -- [🌟 新增：动态血条 UI 与 防具击碎特效]
-    -- ==========================================
+
+    -- [动态血条与防具逻辑]
     local dropPart = zombie:FindFirstChild("Drop", true)
-    local baseZombieHP = 270 -- 普通僵尸的裸体血量
+    local baseZombieHP = 270 
     local hasDropped = false
 
-    -- 1. 纯代码构建精致血条 (挂在僵尸头顶)
     local hpBillboard = Instance.new("BillboardGui")
     hpBillboard.Name = "HPBar"
-    hpBillboard.Size = UDim2.new(0, 50, 0, 6) -- 细长优雅的尺寸
+    hpBillboard.Size = UDim2.new(0, 50, 0, 6) 
     hpBillboard.StudsOffset = Vector3.new(0, 2.5, 0)
     hpBillboard.AlwaysOnTop = true
     hpBillboard.MaxDistance = 80
-    hpBillboard.Enabled = false -- 默认隐藏，只有挨打才显示！
+    hpBillboard.Enabled = false 
     
     local bgFrame = Instance.new("Frame")
     bgFrame.Size = UDim2.new(1, 0, 1, 0)
@@ -204,12 +187,10 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
     bgFrame.BackgroundTransparency = 0.5
     Instance.new("UICorner", bgFrame).CornerRadius = UDim.new(0, 4)
 
-    -- [🌟 新增：为血条背景添加黑色描边]
     local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(0, 0, 0) -- 纯黑色
-    stroke.Thickness = 1.5 -- 描边粗细，1.5 看起来最精致
+    stroke.Color = Color3.fromRGB(0, 0, 0) 
+    stroke.Thickness = 1.5 
     stroke.Parent = bgFrame
-
     bgFrame.Parent = hpBillboard
 
     local fillFrame = Instance.new("Frame")
@@ -220,16 +201,12 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
     
     hpBillboard.Parent = zombie:FindFirstChild("Head") or rootPart
 
-    -- 2. 统一监听血量变化 (同时处理血条刷新与防具掉落)
     humanoid.HealthChanged:Connect(function(newHealth)
-        
-        -- 【更新血条】
         if newHealth < config.HP and newHealth > 0 then
             hpBillboard.Enabled = true
             local ratio = math.clamp(newHealth / config.HP, 0, 1)
             fillFrame.Size = UDim2.new(ratio, 0, 1, 0)
             
-            -- 细节：如果有防具，防具没碎之前显示银色血条，碎了变成红色！
             if config.HP > baseZombieHP and newHealth > baseZombieHP then
                 fillFrame.BackgroundColor3 = Color3.fromRGB(200, 200, 200) 
             else
@@ -239,14 +216,12 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             hpBillboard.Enabled = false
         end
 
-        -- 【防具掉落物理运算】
         if dropPart and config.HP > baseZombieHP then
             if not hasDropped and newHealth <= baseZombieHP and newHealth > 0 then
                 hasDropped = true
                 dropPart.Anchored = false
                 dropPart.CanCollide = true
                 
-                -- 剪断物理连接
                 for _, joint in pairs(zombie:GetDescendants()) do
                     if joint:IsA("JointInstance") or joint:IsA("WeldConstraint") then
                         if joint.Part0 == dropPart or joint.Part1 == dropPart then
@@ -255,7 +230,6 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                     end
                 end
                 
-                -- 赋予击飞弹力
                 local randomX = math.random(-8, 8)
                 local randomZ = math.random(-8, 8)
                 dropPart.AssemblyLinearVelocity = Vector3.new(randomX, 15, randomZ)
@@ -266,7 +240,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             end
         end
     end)
-    -- ==========================================
+    
     local currentState = "None"
     local function switchState(newState)
         if currentState == newState then return end
@@ -287,35 +261,24 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
 
     task.spawn(function()
         switchState("Walk")
-        
-        -- ==========================================
-        -- [🌟 关键修复：对抗 Humanoid 自动重置碰撞！]
-        -- 等待一帧，让 Humanoid 进 Workspace 的默认物理重置先跑完
-        -- 然后我们再强行把所有零件碰撞设为 false，确保万无一失！
-        -- ==========================================
         task.wait() 
  
-        -- ==========================================
-        -- [🌟 破土修复：手写平滑算法，完美适配动态二倍速]
-        -- ==========================================
-       local riseTime = 2.5
+        local riseTime = 2.5
         local currentRiseTime = 0
         while currentRiseTime < riseTime do
-            if plot:GetAttribute("IsGameOver") then return end
+            if plot:GetAttribute("IsGameOver") then 
+                if zombie then zombie:Destroy() end
+                return 
+            end
             
             local speedMult = plot:GetAttribute("GameSpeed") or 1
-            local dt = task.wait(0.03) -- 帧同步刷新
+            local dt = task.wait(0.03) 
             currentRiseTime += (dt * speedMult)
             
             local alpha = math.clamp(currentRiseTime / riseTime, 0, 1)
             rootPart.CFrame = startCFrame:Lerp(targetCFrame, alpha)
         end
         
-        -- ==========================================
-        -- [🌟 终极防摔倒修复 1：严格切断四肢碰撞]
-        -- 不再盲目恢复所有碰撞！强制让手脚变成幻影，只保留核心躯干的碰撞，
-        -- 彻底杜绝走路动画中脚底板撞击地面把躯干掀翻的 Bug！
-        -- ==========================================
         for _, part in pairs(zombie:GetDescendants()) do
             if part:IsA("BasePart") then
                 if part.Name == "HumanoidRootPart" or part.Name == "Torso" or part.Name == "UpperTorso" then
@@ -326,36 +289,28 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             end
         end
 
-        --- 结束破土动画 (必须先解除固定，僵尸才会往下掉)
         rootPart.Anchored = false
         
-        -- ==========================================
-        -- [🌟 终极防摔倒修复 2：锁定服务器物理所有权]
-        -- 强制剥夺客户端对僵尸的物理接管权，防止玩家靠近时产生抢夺卡顿！
-        -- ==========================================
         pcall(function()
             rootPart:SetNetworkOwner(nil)
         end)
         
-        -- ==========================================
-        -- [核心逻辑：着地检测 + 激活战斗身份]
-        -- ==========================================
         local landWaitTime = 0
-        -- 1. 等待双脚着地，防止在空中就开始跑导致绊倒
         while humanoid.FloorMaterial == Enum.Material.Air and landWaitTime < 1 do
+            if plot:GetAttribute("IsGameOver") then 
+                if zombie then zombie:Destroy() end
+                return 
+            end
             landWaitTime += task.wait(0.07)
         end
-        task.wait(0.2) -- 给物理引擎一点缓冲时间回正重心
-      
+        task.wait(0.2) 
 
-        -- 2. 只有此时，才正式把碰撞组改回 "Zombies"，让植物开始攻击它
         for _, part in pairs(zombie:GetDescendants()) do
             if part:IsA("BasePart") then 
                 part.CollisionGroup = "Zombies" 
             end
         end
 
-        -- 3. 此时再给速度，开始前进
         humanoid.WalkSpeed = config.Speed
 
         local overlapParams = OverlapParams.new()
@@ -368,18 +323,19 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
 
         local timeAccumulated = config.AttackInterval 
         
-        while zombie.Parent and humanoid.Health > 0 do
-            if plot:GetAttribute("IsGameOver") then zombie:Destroy(); break end
+        while zombie and zombie.Parent and humanoid and humanoid.Health > 0 do
+            if plot:GetAttribute("IsGameOver") then 
+                if zombie then zombie:Destroy() end
+                break 
+            end
             
             local speedMult = plot:GetAttribute("GameSpeed") or 1
-            -- 时间累加与物理循环等待
             local dt = task.wait(0.1 / speedMult)
             timeAccumulated += (dt * speedMult)
 
-            -- [🌟 核心修复 1：在循环中实时更新 WalkSpeed，确保玩家中途点击倍速也能立刻生效]
             if currentState == "Walk" then
                 if animTracks["Walk"] then animTracks["Walk"]:AdjustSpeed(1.5 * speedMult) end
-                humanoid.WalkSpeed = config.Speed * speedMult -- 动态物理加速！
+                humanoid.WalkSpeed = config.Speed * speedMult 
             elseif currentState == "Eat" then
                 if animTracks["Eat"] then animTracks["Eat"]:AdjustSpeed(1.0 * speedMult) end
                 humanoid.WalkSpeed = 0
@@ -472,49 +428,39 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                     end
                 end
             else
-                -- [🌟 核心修复 2：恢复行走时，重新赋予包含倍速的移动速度]
                 humanoid.WalkSpeed = config.Speed * speedMult 
                 humanoid:MoveTo(currentTargetPos) 
                 switchState("Walk")
             end
         end
         
-        if humanoid.Health <= 0 then
+        -- [🌟 修复]：由于手动撤退会调用 obj:Destroy()，在此处增加安全判断，防止访问已销毁的实例
+        if zombie and zombie.Parent and humanoid and humanoid.Parent and humanoid.Health <= 0 then
             plot:SetAttribute("ZombiesDefeated", (plot:GetAttribute("ZombiesDefeated") or 0) + 1)
             
-            -- 确保击杀数被正确统计到结算面板
             if activeSessions[player.UserId] then
                 activeSessions[player.UserId].TotalKills += 1
             end
             
-            -- 掉落金币
             local dropPos = rootPart.Position + Vector3.new(0, 3, 0)
             CoinDropService.DropCoins(player, dropPos, math.random(1, 2), math.random(10, 20))
 
-            -- ==========================================
-            -- [🌟 终极融合版：原汁原味的击飞 + 完美穿透]
-            -- ==========================================
-            -- 1. 瞬间销毁 Humanoid，变成纯物理模型
             humanoid:Destroy() 
             rootPart.Anchored = false 
 
-            -- 2. 设置碰撞组为“尸体”，只和地面碰撞，绝对无视其他僵尸
             for _, p in pairs(zombie:GetDescendants()) do
                 if p:IsA("BasePart") then
-                    p.CanCollide = true  -- 保证不掉进虚空
+                    p.CanCollide = true  
                     p.CanTouch = false   
                     p.CanQuery = false   
                     p.CollisionGroup = "Corpses" 
                 end
             end
             
-            -- 3. 核心修改：取消所有平移动能，只给一个向后仰倒的旋转力
-            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0) -- 强制清零移动速度，绝不后退！
-            rootPart.AssemblyAngularVelocity = rootPart.CFrame.RightVector * -8 -- 像木板一样原地向后倒下
+            rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0) 
+            rootPart.AssemblyAngularVelocity = rootPart.CFrame.RightVector * -8 
             
-            -- 4. 尸体平滑渐隐消失逻辑 (支持倍速)
             task.spawn(function()
-                -- 倒在地上躺 1.5 秒
                 local dieTime = 1.5
                 local currentDieTime = 0
                 while currentDieTime < dieTime do
@@ -523,16 +469,15 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                 end
 
                 if zombie and zombie.Parent then
-                    -- 使用 Tween 平滑变透明
                     local fadeInfo = TweenInfo.new(0.5, Enum.EasingStyle.Linear)
                     for _, p in pairs(zombie:GetDescendants()) do
                         if p:IsA("BasePart") then
-                            p.Color = Color3.fromRGB(50, 50, 50) -- 尸体变暗
+                            p.Color = Color3.fromRGB(50, 50, 50) 
                             TweenService:Create(p, fadeInfo, {Transparency = 1}):Play()
                         end
                     end
                     
-                    task.wait(0.5) -- 等待透明动画播放完毕
+                    task.wait(0.5) 
                     if zombie and zombie.Parent then
                         zombie:Destroy()
                     end
@@ -543,6 +488,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
         plot:SetAttribute("ActiveZombies", (plot:GetAttribute("ActiveZombies") or 0) - 1)
     end)
 end
+
 function ZombieService.StartLevel(plot, levelId, player)
     if not activeSessions[player.UserId] or levelId == 1 then
         activeSessions[player.UserId] = { TotalCoins = 0, TotalSeeds = 0, TotalKills = 0 }
@@ -558,16 +504,12 @@ function ZombieService.StartLevel(plot, levelId, player)
     local syncBattleUI_RE = game:GetService("ReplicatedStorage"):FindFirstChild("SyncBattleUI_RE")
     if syncBattleUI_RE then syncBattleUI_RE:FireClient(player, true, levelId) end
 
-    -- ==========================================
-    -- [🌟 核心一：获取关卡数据，如果没有手配，则调用无尽生成器！]
-    -- ==========================================
     local levelData = LevelConfig[levelId] or ZombieService.GenerateInfiniteLevel(levelId)
-    
-    -- [🌟 核心二：同屏防卡顿限流器]
     local MAX_ACTIVE_ZOMBIES = 30 
     
     if levelData and levelData.Waves then
         for waveIndex, wave in ipairs(levelData.Waves) do
+            -- [🌟 修复]：如果手动点击了撤退，立即跳出波次生成循环
             if plot:GetAttribute("IsGameOver") then break end
             
             task.spawn(function()
@@ -576,7 +518,6 @@ function ZombieService.StartLevel(plot, levelId, player)
                         for i = 1, zombieGroup.Count do
                             if plot:GetAttribute("IsGameOver") then break end
                             
-                            -- [🌟 核心排队：如果场上僵尸满了，出怪口暂时塞车等待！]
                             while (plot:GetAttribute("ActiveZombies") or 0) >= MAX_ACTIVE_ZOMBIES do
                                 if plot:GetAttribute("IsGameOver") then return end
                                 task.wait(0.5) 
@@ -607,62 +548,59 @@ function ZombieService.StartLevel(plot, levelId, player)
         task.wait(1)
     until (plot:GetAttribute("ActiveZombies") <= 0) or (plot:GetAttribute("IsGameOver") == true)
 
-    if not plot:GetAttribute("IsGameOver") then
-        local waveCoins = 100 + (levelId * 20)
-        local waveSeeds = (levelId % 3 == 0) and 1 or 0
-        
-        session.TotalCoins += waveCoins
-        session.TotalSeeds += waveSeeds
-
-        local nextLevelId = levelId + 1
-        print("【关卡连战】第 "..levelId.." 关清理完毕，2秒后开始下一关...")
-        task.wait(2)
-        -- 无限模式，这里永远会执行 StartLevel！
-        ZombieService.StartLevel(plot, nextLevelId, player)
+    -- [🌟 修复核心逻辑]：确保无论是手动结束还是正常递归，状态都能被正确清理
+    if plot:GetAttribute("IsGameOver") then
+        -- 这里不需要重复调用 FinalSettlement，因为 LevelService 已经调过了
+        -- 但我们需要确保 activeSessions 即使在手动结束时也能被清理
+        return 
     end
+
+    -- 正常通关逻辑
+    local waveCoins = 100 + (levelId * 20)
+    local waveSeeds = (levelId % 3 == 0) and 1 or 0
+    
+    session.TotalCoins += waveCoins
+    session.TotalSeeds += waveSeeds
+
+    local nextLevelId = levelId + 1
+    print("【关卡连战】第 "..levelId.." 关清理完毕，2秒后开始下一关...")
+    task.wait(2)
+    ZombieService.StartLevel(plot, nextLevelId, player)
 end
+
 function ZombieService.FinalSettlement(player, plot, isVictory)
     local session = activeSessions[player.UserId]
-    if not session then return end
+    if not session then 
+        -- 如果 session 已经没了，说明已经结算过了，直接重置状态
+        plot:SetAttribute("IsLevelActive", false)
+        return 
+    end
 
     local lastLevel = plot:GetAttribute("CurrentLevel") or 1
     local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
     local data = PlayerDataManager.GetPlayerData(player)
     
-    -- [🌟 修复：只有当前关卡超过存档里的最高解锁关卡时，才算破纪录！]
     local isNewRecord = data and lastLevel > (data.UnlockedLevel or 1)
-    
     local showResultRE = ReplicatedStorage:FindFirstChild("ShowBattleResultRE")
     
     if showResultRE then
-        -- 这里的第四个参数换成 isNewRecord
         showResultRE:FireClient(player, isVictory, lastLevel, isNewRecord, session.TotalKills, session.TotalCoins, session.TotalSeeds)
     end
     
-    -- 锁定领地状态
+    -- 清理缓存并释放锁定
+    activeSessions[player.UserId] = nil 
     plot:SetAttribute("IsLevelActive", false)
 end
+
 function ZombieService.Init()
-   -- ==========================================
-    -- [🌟 从物理底层断绝所有异常碰撞！(终极防打断版)]
-    -- ==========================================
-    -- 1. 独立注册，防止因为某个组已存在而导致整体代码罢工
     pcall(function() PhysicsService:RegisterCollisionGroup("Zombies") end)
     pcall(function() PhysicsService:RegisterCollisionGroup("Corpses") end) 
-    pcall(function() PhysicsService:RegisterCollisionGroup("Players") end) -- 确保 Players 组存在
+    pcall(function() PhysicsService:RegisterCollisionGroup("Players") end) 
     
-    -- 2. 独立设置规则，确保 100% 被执行
     pcall(function()
-        -- 规则 1：活僵尸和活僵尸之间绝对不碰撞（完美解决出生时互相挤压、绊倒！）
         PhysicsService:CollisionGroupSetCollidable("Zombies", "Zombies", false)
-        
-        -- 规则 2：活僵尸和尸体互不碰撞
         PhysicsService:CollisionGroupSetCollidable("Zombies", "Corpses", false)
-        
-        -- 规则 3：尸体和尸体之间互不碰撞
         PhysicsService:CollisionGroupSetCollidable("Corpses", "Corpses", false)
-
-        -- [🌟 新增终极规则：彻底断绝僵尸（含存活与尸体）与玩家的任何碰撞]
         PhysicsService:CollisionGroupSetCollidable("Players", "Zombies", false)
         PhysicsService:CollisionGroupSetCollidable("Players", "Corpses", false)
     end)
@@ -710,24 +648,6 @@ function ZombieService.Init()
         end
     end
 end
-
-
--- ==========================================
--- [🌟 新增：玩家确认领奖，核销会话数据]
--- ==========================================
-function ZombieService.ClaimBattleRewards(player)
-    local session = activeSessions[player.UserId]
-    if session then
-        local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
-        PlayerDataManager.ApplyBattleRewards(player, session.TotalCoins, session.TotalSeeds)
-        -- 领完立刻清空，防止利用漏洞重复领奖！
-        activeSessions[player.UserId] = nil 
-    end
-end
-
--- ==========================================
--- [🌟 新增：服务端的无尽关卡生成引擎]
--- ==========================================
 function ZombieService.GenerateInfiniteLevel(levelId)
     local waveCount = math.clamp(math.floor(levelId / 2) + 2, 4, 15) 
     local waves = {}
@@ -749,7 +669,8 @@ function ZombieService.GenerateInfiniteLevel(levelId)
             
             local rand = math.random(1, totalWeight)
             local currentWeight = 0
-            local selectedType = "NormalZombie"
+            -- [修复：将默认保底僵尸改回 "Zombie"]
+            local selectedType = "Zombie" 
             
             for _, zInfo in ipairs(pool) do
                 currentWeight += zInfo.Weight

@@ -10,7 +10,7 @@ local HighlightController = require(script.Services.HighlightController)
 local PlantHoverController = require(script.UI.PlantHoverController)
 local ToolController = require(script.Services.ToolController)
 local EncyclopediaController = require(script.UI.EncyclopediaController)
-local BattleResultController = require(script.UI.BattleResultController)
+-- [🌟 已经删除了 BattleResultController]
 local UnlockAnimController = require(script.UI.UnlockAnimController)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage") 
@@ -22,12 +22,16 @@ task.spawn(function()
     local player = game:GetService("Players").LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
     local basicGui = playerGui:WaitForChild("BasicGui")
+
+    basicGui:WaitForChild("InventoryGui")
+    basicGui:WaitForChild("ShopGui")
+    basicGui:WaitForChild("Codex")
+    basicGui:WaitForChild("PlayProperty")
     
     local TWEEN_TIME = 0.4
     local POS_CENTER = UDim2.new(0.5, 0, 0.5, 0)
     local POS_BOTTOM = UDim2.new(0.5, 0, 1.5, 0)
 
-    -- [🌟 系统一：Q弹中心缩放]
     local function applyGlobalButtonEffect(button)
         if button:IsA("TextButton") or button:IsA("ImageButton") then
             if button:GetAttribute("HoverAnimBound") then return end
@@ -57,7 +61,6 @@ task.spawn(function()
     for _, uiNode in pairs(playerGui:GetDescendants()) do applyGlobalButtonEffect(uiNode) end
     playerGui.DescendantAdded:Connect(applyGlobalButtonEffect)
 
-    -- [🌟 系统二：沉浸式黑幕与滑动动效系统]
     local blurEffect = Lighting:FindFirstChild("GlobalUIBlur") or Instance.new("BlurEffect", Lighting)
     blurEffect.Name = "GlobalUIBlur"
     blurEffect.Size = 0
@@ -85,11 +88,10 @@ task.spawn(function()
     local codexGui = basicGui:WaitForChild("Codex")
     local playProperty = basicGui:WaitForChild("PlayProperty")
 
-    -- 【🌟 核心修复】：使用 WaitForChild 确保 MainFrame 被加载，防止动画目标丢失
-local panels = {
+    local panels = {
         { gui = inventoryGui, frame = inventoryGui:WaitForChild("MainFrame", 5) },
         { gui = shopGui, frame = shopGui:FindFirstChild("ShopFrame") or shopGui:WaitForChild("MainFrame", 5) },
-        { gui = codexGui, frame = codexGui:WaitForChild("MainFrame", 5) } -- 只要它叫 MainFrame，动画就会生效
+        { gui = codexGui, frame = codexGui:WaitForChild("MainFrame", 5) } 
     }
 
     local isAnyOpen = false
@@ -98,7 +100,6 @@ local panels = {
         if enabled then
             bgOverlay.Visible = true
             if playProperty:IsA("ScreenGui") then playProperty.DisplayOrder = 1 end
-            -- [🌟 修复]：0.8 不透明度 = 0.2 透明度
             TweenService:Create(bgOverlay, TweenInfo.new(TWEEN_TIME), {BackgroundTransparency = 0.8}):Play()
             TweenService:Create(blurEffect, TweenInfo.new(TWEEN_TIME), {Size = 24}):Play()
             TweenService:Create(camera, TweenInfo.new(TWEEN_TIME), {FieldOfView = 60}):Play()
@@ -122,7 +123,12 @@ local panels = {
         end
         p.gui.Enabled = false
         local stillOpen = false
-        for _, item in ipairs(panels) do if item.gui.Enabled then stillOpen = true break end end
+        for _, item in ipairs(panels) do 
+            if item.gui.Enabled then 
+                stillOpen = true 
+                break 
+            end 
+        end
         if not stillOpen then
             isAnyOpen = false
             setBackgroundEffects(false)
@@ -146,7 +152,6 @@ local panels = {
                     TweenService:Create(p.frame, TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = POS_CENTER}):Play()
                 end
 
-                -- 【🌟 核心修复】：增加识别名为 "Close" 的按钮，适配图鉴新结构
                 local closeBtn = p.frame and (
                     p.frame:FindFirstChild("CloseBtn", true) or 
                     p.frame:FindFirstChild("CloseButton", true) or 
@@ -158,7 +163,12 @@ local panels = {
                 end
             else
                 local stillOpen = false
-                for _, item in ipairs(panels) do if item.gui.Enabled then stillOpen = true break end end
+                for _, item in ipairs(panels) do 
+                    if item.gui.Enabled then 
+                        stillOpen = true 
+                        break 
+                    end 
+                end
                 if not stillOpen and isAnyOpen then
                     isAnyOpen = false
                     setBackgroundEffects(false)
@@ -191,19 +201,16 @@ local panels = {
         player:SetAttribute("AutoBattle", false)
         if autoGrad then autoGrad.Color = autoRed end
 
-        -- 【这里绑定了开始战斗的点击事件】
         startBattleBtn.MouseButton1Click:Connect(function()
             ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer()
         end)
 
-        -- 【这里绑定了结束战斗的点击事件】
         if endBattleBtn then
             endBattleBtn.MouseButton1Click:Connect(function()
                 ReplicatedStorage:WaitForChild("EndBattleRE"):FireServer()
             end)
         end
 
-        -- 【自动战斗逻辑】
         btnAutoBattle.MouseButton1Click:Connect(function()
             local isAuto = not player:GetAttribute("AutoBattle")
             player:SetAttribute("AutoBattle", isAuto)
@@ -212,7 +219,6 @@ local panels = {
             if isAuto and startBattleBtn.Visible then ReplicatedStorage.StartBattleRE:FireServer() end
         end)
 
-        -- 【战斗速度逻辑】
         local setSpeedRE = ReplicatedStorage:WaitForChild("SetSpeedRE")
         local currentSpeed = 1
         local grad4RotationConn = nil
@@ -235,7 +241,6 @@ local panels = {
         btnSpeed4.MouseButton1Click:Connect(function() setSpeedRE:FireServer(currentSpeed == 4 and 1 or 4) end)
         setSpeedRE.OnClientEvent:Connect(updateSpeedUI)
 
-        -- 【战斗 UI 状态同步】
         ReplicatedStorage:WaitForChild("SyncBattleUI_RE").OnClientEvent:Connect(function(isActive, currentLevelId)
             if isActive then
                 startBattleBtn.Visible = false
@@ -262,5 +267,5 @@ HighlightController.Init()
 PlantHoverController.Init()
 ToolController.Init()
 EncyclopediaController.Init()
-BattleResultController.Init()
+-- [🌟 彻底删除了 BattleResultController.Init()]
 UnlockAnimController.Init()

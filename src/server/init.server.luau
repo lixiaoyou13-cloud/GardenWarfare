@@ -69,6 +69,7 @@ LevelService.Init()
 local ToolService = require(script.Services.ToolService)
 ToolService.Init()
 
+require(script.Services.BaseSunflowerService).Init()
 
 
 print("所有服务端模块加载完毕！")

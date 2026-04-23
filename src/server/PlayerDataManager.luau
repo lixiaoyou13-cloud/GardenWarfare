@@ -5,12 +5,14 @@ local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V11")
+local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V12")
 local sessionData = {}
 
 local function GetDefaultData()
    return {
-        Coins = 500, Level = 1, UnlockedLevel = 1,
+        Coins = 1000, Level = 1, UnlockedLevel = 1,
+        TotalSun = 0, -- [🌟 新增：累计收集的阳光总量]
+        UnlockedPlots = 4,
         Hotbar = {"Tool_Shovel"}, 
         Inventory = { Seeds = { { ID = "Peashooter", Quantity = 1 } }, Plants = {} },
         PlantedPlants = {}, CombatPlants = {},
@@ -305,4 +307,48 @@ function PlayerDataManager.ApplyBattleRewards(player, coins, seeds)
     if seeds > 0 then PlayerDataManager.GiveSeed(player, "RandomSeed", seeds) end
 end
 
+
+-- [新增：更新阳光的函数]
+function PlayerDataManager.AddTotalSun(player, amount)
+    local data = sessionData[player.UserId]
+    if data then
+        data.TotalSun = (data.TotalSun or 0) + amount
+        -- 同步给客户端，以便更新 UI 和向日葵大小
+        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+        if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    end
+end
+
+
+function PlayerDataManager.CollectAllSun(player)
+    local data = sessionData[player.UserId]
+    if data and data.TotalSun and data.TotalSun > 0 then
+        local amount = data.TotalSun
+        data.Coins += amount -- 全部转为金币
+        data.TotalSun = 0    -- 阳光重置为 0，这会自动让向日葵体型回到 1
+        
+        -- 同步数据给客户端更新 UI 和向日葵大小
+        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+        if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+        
+        return amount
+    end
+    return 0
+end
+
+-- [🌟 新增：获取和增加玩家土地数量]
+function PlayerDataManager.GetUnlockedPlots(player)
+    local data = sessionData[player.UserId]
+    return data and data.UnlockedPlots or 4
+end
+
+function PlayerDataManager.IncrementUnlockedPlots(player)
+    local data = sessionData[player.UserId]
+    if data then
+        data.UnlockedPlots = (data.UnlockedPlots or 4) + 1
+        -- 同步最新数据给客户端
+        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+        if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    end
+end
 return PlayerDataManager

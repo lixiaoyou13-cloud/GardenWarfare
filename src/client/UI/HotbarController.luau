@@ -8,66 +8,7 @@ local TweenService = game:GetService("TweenService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local BaseItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("BaseItemConfig"))
-
--- [🌟 引入通用特效系统]
-local function ApplyMutationEffects(model, mutationLevel)
-    mutationLevel = mutationLevel or 1
-    local effectMap = { [2] = "Glow", [3] = "Lightning", [4] = "HolyLight" }
-    
-    for lvl, fxName in pairs(effectMap) do
-        local shouldEnable = (mutationLevel == lvl)
-        for _, node in ipairs(model:GetDescendants()) do
-            if node.Name == fxName then
-                
-                for _, child in ipairs(node:GetDescendants()) do
-                    if child:IsA("ParticleEmitter") or child:IsA("Light") or child:IsA("Beam") or child:IsA("Highlight") or child:IsA("Trail") then
-                        child.Enabled = shouldEnable
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function RenderToViewport(viewport, modelName, itemType, mutationLevel)
-    if not viewport or not viewport:IsA("ViewportFrame") then return end
-    for _, c in pairs(viewport:GetChildren()) do if c:IsA("Model") or c:IsA("Camera") then c:Destroy() end end
-    viewport.Ambient = Color3.fromRGB(200, 200, 200);
-    viewport.LightColor = Color3.fromRGB(255, 255, 255)
-
-    local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
-    if not itemModelsFolder then return nil end
-
-    local targetModel = nil
-    if itemType == "Seed" then targetModel = itemModelsFolder:FindFirstChild("Seed")
-    elseif itemType == "Plant" then targetModel = itemModelsFolder:FindFirstChild(modelName .. "_Plant") or itemModelsFolder:FindFirstChild(modelName)
-    elseif itemType == "Tool" or itemType == "System" then targetModel = itemModelsFolder:FindFirstChild(modelName) end
-
-    if targetModel then
-        local displayModel = targetModel:Clone()
-        for _, desc in pairs(displayModel:GetDescendants()) do 
-            if desc:IsA("Script") or desc:IsA("LocalScript") then desc:Destroy() end 
-        end
-        if not displayModel.PrimaryPart then displayModel.PrimaryPart = displayModel:FindFirstChildWhichIsA("BasePart", true) end
-        
-        if itemType == "Plant" then
-            ApplyMutationEffects(displayModel, mutationLevel)
-        end
-
-        if displayModel.PrimaryPart then displayModel:PivotTo(CFrame.new(0, 0, 0) * CFrame.Angles(0, math.rad(210), 0)) end
-        
-        displayModel.Parent = viewport
-        local camera = Instance.new("Camera")
-        camera.FieldOfView = 40;
-        viewport.CurrentCamera = camera; camera.Parent = viewport
-
-        local cframe, size = displayModel:GetBoundingBox()
-        local maxDim = math.max(size.X, size.Y, size.Z)
-        if maxDim == 0 then maxDim = 2 end 
-        local zDist = maxDim * 1.5 + 1
-        camera.CFrame = CFrame.lookAt(Vector3.new(cframe.Position.X, cframe.Position.Y + size.Y/6, cframe.Position.Z + zDist), cframe.Position)
-    end
-end
+local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) -- [🌟 引入模块]
 
 function HotbarController.Init()
     local player = Players.LocalPlayer
@@ -98,8 +39,6 @@ function HotbarController.Init()
             ReplicatedStorage:WaitForChild("HoldItemRE"):FireServer(nil)
         else
             currentEquippedId = targetId;
-            -- [🌟 核心修复]：移除了 `if targetId then` 判断！
-            -- 哪怕 targetId 是 nil，也必须向服务器发送指令来卸下手里拿着的东西！
             ReplicatedStorage:WaitForChild("HoldItemRE"):FireServer(targetId)
         end
         
@@ -139,14 +78,11 @@ function HotbarController.Init()
             local qty, itemDetail = 0, nil
 
             if itemType == "Seed" then 
-                qty = seedQuantityMap[realId] or 0;
-                itemDetail = ItemConfig.Seeds and ItemConfig.Seeds[realId]
+                qty = seedQuantityMap[realId] or 0; itemDetail = ItemConfig.Seeds and ItemConfig.Seeds[realId]
             elseif itemType == "Plant" then 
-                qty = plantQuantityMap[realId .. "_" .. mutLvl] or 0;
-                itemDetail = ItemConfig.Plants and ItemConfig.Plants[realId]
+                qty = plantQuantityMap[realId .. "_" .. mutLvl] or 0; itemDetail = ItemConfig.Plants and ItemConfig.Plants[realId]
             elseif itemType == "Tool" then 
-                qty = "∞";
-                itemDetail = BaseItemConfig.Tools and BaseItemConfig.Tools[realId] 
+                qty = "∞"; itemDetail = BaseItemConfig.Tools and BaseItemConfig.Tools[realId] 
             end
 
             if (type(qty) == "string" or qty > 0) and itemDetail then
@@ -155,86 +91,51 @@ function HotbarController.Init()
                 
                 local lastClickTick = 0
                 local function onSlotClicked() 
-                    if os.clock() - lastClickTick < 0.1 then return end;
-                    lastClickTick = os.clock(); toggleEquip(targetSlot) 
+                    if os.clock() - lastClickTick < 0.1 then return end; lastClickTick = os.clock(); toggleEquip(targetSlot) 
                 end
 
                 if not targetSlot then
-                    targetSlot = slotTemplate:Clone();
-                    targetSlot.Name = compositeId; targetSlot.Visible = true; targetSlot.Parent = hotbarFrame
+                    targetSlot = slotTemplate:Clone(); targetSlot.Name = compositeId; targetSlot.Visible = true; targetSlot.Parent = hotbarFrame
 
-                    local isHoveringSlot = false
-                    local isHoveringBtn = false
+                    local isHoveringSlot = false; local isHoveringBtn = false
 
                     if itemType == "Seed" or itemType == "Plant" then
                         local cBtn = closeBtnTemplate:Clone()
                         cBtn.Name = "CloseBtn"
-                    
-                        -- [🌟 重点 2：强制锁定在 UI 的中上方]
                         cBtn.AnchorPoint = Vector2.new(0.5, 1) 
                         cBtn.Position = UDim2.new(0.5, 0, 0, 0) 
-                        -- [🌟 层级修复]：将 100 调低到了 10
-                        cBtn.ZIndex = 0
-                        cBtn.Visible = false
-                        cBtn.Parent = targetSlot
+                        cBtn.ZIndex = 0; cBtn.Visible = false; cBtn.Parent = targetSlot
                         
                         local function updateVisibility()
-                            task.delay(0.05, function()
-                                if cBtn and cBtn.Parent then
-                                    cBtn.Visible = (isHoveringSlot or isHoveringBtn)
-                                end
-                            end)
+                            task.delay(0.05, function() if cBtn and cBtn.Parent then cBtn.Visible = (isHoveringSlot or isHoveringBtn) end end)
                         end
 
-                        targetSlot.MouseEnter:Connect(function()
-                            isHoveringSlot = true
-                            updateVisibility()
-                        end)
-                        
-                        targetSlot.MouseLeave:Connect(function()
-                            isHoveringSlot = false
-                            updateVisibility()
-                        end)
-
-                        cBtn.MouseEnter:Connect(function()
-                            isHoveringBtn = true
-                            updateVisibility()
-                        end)
-                        
-                        cBtn.MouseLeave:Connect(function()
-                            isHoveringBtn = false
-                            updateVisibility()
-                        end)
+                        targetSlot.MouseEnter:Connect(function() isHoveringSlot = true; updateVisibility() end)
+                        targetSlot.MouseLeave:Connect(function() isHoveringSlot = false; updateVisibility() end)
+                        cBtn.MouseEnter:Connect(function() isHoveringBtn = true; updateVisibility() end)
+                        cBtn.MouseLeave:Connect(function() isHoveringBtn = false; updateVisibility() end)
 
                         local function handleRemove()
                             ReplicatedStorage:WaitForChild("RemoveHotbarRE"):FireServer(compositeId)
-                            -- [🌟 重点]：如果删除的是当前手里的物品，强制传 nil 卸下！
-                            if currentEquippedId == compositeId then 
-                                toggleEquip(nil) 
-                            end
+                            if currentEquippedId == compositeId then toggleEquip(nil) end
                         end
 
-                        if cBtn:IsA("GuiButton") then
-                            cBtn.Activated:Connect(handleRemove)
+                        if cBtn:IsA("GuiButton") then cBtn.Activated:Connect(handleRemove)
                         else
                             cBtn.InputBegan:Connect(function(input)
-                                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                                    handleRemove()
-                                end
+                                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then handleRemove() end
                             end)
                         end
                     end
                     
                     targetSlot.InputBegan:Connect(function(input) 
                         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
-                            if isHoveringBtn then return end
-                            onSlotClicked() 
+                            if isHoveringBtn then return end; onSlotClicked() 
                         end 
                     end)
                 end
 
                 targetSlot.LayoutOrder = targetLayoutOrder
-                
                 local bgImag = targetSlot:FindFirstChild("BGImag", true)
                 local icomNode = targetSlot:FindFirstChild("Icom", true)
                 local customIcon = targetSlot:FindFirstChild("CustomIcon", true)
@@ -257,15 +158,13 @@ function HotbarController.Init()
                     if icomNode then
                         icomNode.Visible = true
                         if icomNode:IsA("ViewportFrame") then 
-                            RenderToViewport(icomNode, realId, itemType, mutLvl) 
+                            UIEffectUtil.RenderToViewport(icomNode, realId, itemType, mutLvl) -- [🌟 模块化调用]
                         elseif icomNode:IsA("ImageLabel") or icomNode:IsA("ImageButton") then 
                             icomNode.Image = itemDetail.IconId or "" 
                         end
                         if not icomNode:GetAttribute("ClickBound") then
                             icomNode:SetAttribute("ClickBound", true)
-                            icomNode.InputBegan:Connect(function(input) 
-                                -- 穿透事件
-                            end)
+                            icomNode.InputBegan:Connect(function(input) end)
                         end
                     end
                 end
@@ -273,9 +172,7 @@ function HotbarController.Init()
                 local nameLabel = targetSlot:FindFirstChild("ItemName", true)
                 if nameLabel then 
                     local mutPrefix = ""
-                    if itemType == "Plant" and mutLvl > 1 then
-                        mutPrefix = "[" .. (ItemConfig.MutationName and ItemConfig.MutationName[mutLvl] or "变异") .. "] "
-                    end
+                    if itemType == "Plant" and mutLvl > 1 then mutPrefix = "[" .. (ItemConfig.MutationName and ItemConfig.MutationName[mutLvl] or "变异") .. "] " end
                     nameLabel.Text = mutPrefix .. (itemDetail.Name or "")
                     nameLabel.ZIndex = 3; nameLabel.Visible = true
                 end
@@ -285,10 +182,7 @@ function HotbarController.Init()
                 
                 if targetSlot:FindFirstChild("Quantity") then
                     if itemType == "Tool" then targetSlot.Quantity.Visible = false
-                    else 
-                        targetSlot.Quantity.Text = (type(qty) == "number" and "x" or "") .. tostring(qty)
-                        targetSlot.Quantity.ZIndex = 3; targetSlot.Quantity.Visible = true 
-                    end
+                    else targetSlot.Quantity.Text = (type(qty) == "number" and "x" or "") .. tostring(qty); targetSlot.Quantity.ZIndex = 3; targetSlot.Quantity.Visible = true end
                 end
             end
         end
@@ -300,18 +194,15 @@ function HotbarController.Init()
         local backpackSlot = hotbarFrame:FindFirstChild(backpackId)
         local lastBpClickTick = 0
         local function onBackpackClicked()
-            if os.clock() - lastBpClickTick < 0.1 then return end;
-            lastBpClickTick = os.clock()
+            if os.clock() - lastBpClickTick < 0.1 then return end; lastBpClickTick = os.clock()
             local scaleObj = backpackSlot and backpackSlot:FindFirstChild("UIScale")
-            if scaleObj then TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play();
-            task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) end
+            if scaleObj then TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play(); task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) end
             local invGui = basicGui:FindFirstChild("InventoryGui")
             if invGui then invGui.Enabled = not invGui.Enabled end
         end
 
         if not backpackSlot then
-            backpackSlot = slotTemplate:Clone();
-            backpackSlot.Name = backpackId; backpackSlot.Visible = true; backpackSlot.Parent = hotbarFrame
+            backpackSlot = slotTemplate:Clone(); backpackSlot.Name = backpackId; backpackSlot.Visible = true; backpackSlot.Parent = hotbarFrame
             backpackSlot.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then onBackpackClicked() end end)
         end
         
@@ -344,7 +235,7 @@ function HotbarController.Init()
                 if currentEquippedId == slot.Name then toggleEquip(nil) end
                 slot:Destroy()
             end
-        end
+         end
     end
 
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -365,8 +256,7 @@ function HotbarController.Init()
         local activeSlots = {}
         for _, child in pairs(hotbarFrame:GetChildren()) do
             if child:IsA("Frame") then 
-                local prefix = string.split(child.Name, "_")[1]; 
-                if prefix == "Seed" or prefix == "Plant" then table.insert(activeSlots, child) end 
+                local prefix = string.split(child.Name, "_")[1]; if prefix == "Seed" or prefix == "Plant" then table.insert(activeSlots, child) end 
             end
         end
         table.sort(activeSlots, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
@@ -378,7 +268,7 @@ function HotbarController.Init()
     local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF")
     RefreshHotbar(getPlayerDataRF:InvokeServer())
     ReplicatedStorage:WaitForChild("UpdateInventoryRE").OnClientEvent:Connect(RefreshHotbar)
-    print("客户端：HotbarController 加载完毕！删除按钮坐标已强制居中浮空！")
+    print("客户端：HotbarController 精简版加载完毕！")
 end
 
 return HotbarController

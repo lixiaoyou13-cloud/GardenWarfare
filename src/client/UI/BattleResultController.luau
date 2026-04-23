@@ -87,17 +87,14 @@ function BattleResultController.Init()
     showResultRE.OnClientEvent:Connect(function(isVictory, levelId, isNewRecord, zombiesDefeated, coins, seeds)
         lastBattleWasVictory = isVictory
         
-        -- [🌟 核心：自动战斗拦截并重开逻辑]
+        -- 自动战斗继续判定
         if player:GetAttribute("AutoBattle") then
             task.delay(1.2, function()
                 if not player:GetAttribute("AutoBattle") then return end
                 
-                local claimRE = ReplicatedStorage:FindFirstChild("ClaimBattleRewardsRE")
-                if claimRE then claimRE:FireServer() end 
-
                 local startRE = ReplicatedStorage:FindFirstChild("StartBattleRE")
                 if startRE then
-                    startRE:FireServer(isVictory and nil or 1) -- 胜利传空(下一关)，失败传1(第一关)
+                    startRE:FireServer(isVictory and nil or 1)
                 end
             end)
             return 
@@ -120,11 +117,15 @@ function BattleResultController.Init()
     end)
 
     okBtn.MouseButton1Click:Connect(function()
-        ReplicatedStorage.ClaimBattleRewardsRE:FireServer()
+        -- 移除了所有 ClaimBattleRewardsRE 逻辑，仅保留 UI 动画和重开逻辑
         local t = TweenService:Create(uiScale, TweenInfo.new(0.2), {Scale = 0})
         t:Play(); t.Completed:Wait()
         bgOverlay.Visible = false
-        if lastBattleWasVictory then ReplicatedStorage.StartBattleRE:FireServer() end
+        
+        if lastBattleWasVictory then 
+            local startRE = ReplicatedStorage:FindFirstChild("StartBattleRE")
+            if startRE then startRE:FireServer() end
+        end
     end)
 end
 

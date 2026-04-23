@@ -5,9 +5,74 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local RunService = game:GetService("RunService")
+
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 
-function UnlockAnimController.PlayUnlockAnim(itemName, iconId, qualityColor, subText)
+-- [🌟 新增：创建 3D ViewportFrame 并自动适配模型大小与旋转]
+local function CreateViewportForModel(plantId, parentFrame)
+    -- 1. 创建 ViewportFrame
+    local viewport = Instance.new("ViewportFrame")
+    viewport.Name = "ModelViewport"
+    viewport.Size = UDim2.new(1, 0, 1, 0)
+    viewport.Position = UDim2.new(0.5, 0, 0.5, 0)
+    viewport.AnchorPoint = Vector2.new(0.5, 0.5)
+    viewport.BackgroundTransparency = 1
+    viewport.Parent = parentFrame
+
+    -- 2. 从 ReplicatedStorage 获取真实模型
+    local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
+    if not itemModelsFolder then return viewport end
+    
+    -- 尝试寻找对应的植物模型 (支持带后缀或者不带后缀)
+    local modelTemplate = itemModelsFolder:FindFirstChild(plantId .. "_Plant") or itemModelsFolder:FindFirstChild(plantId)
+    
+    if not modelTemplate then 
+        warn("⚠️ 找不到用于 ViewportFrame 展示的 3D 模型: " .. tostring(plantId))
+        return viewport 
+    end
+
+    -- 3. 克隆模型
+    local displayModel = modelTemplate:Clone()
+    
+    -- 清理可能影响 UI 渲染的杂物（比如特效、声音、脚本）
+    for _, child in ipairs(displayModel:GetDescendants()) do
+        if child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ParticleEmitter") or child:IsA("Light") or child:IsA("Sound") then
+            child:Destroy()
+        end
+    end
+    displayModel.Parent = viewport
+
+    -- 4. 设置专属摄像机
+    local camera = Instance.new("Camera")
+    viewport.CurrentCamera = camera
+    camera.Parent = viewport
+
+    -- 5. 计算模型的碰撞箱，自动调整镜头距离，防止模型太大出框或太小看不见
+    local cframe, size = displayModel:GetBoundingBox()
+    local maxDim = math.max(size.X, size.Y, size.Z)
+    local cameraDistance = maxDim * 1.5 -- 1.5 倍的距离刚刚好
+    
+    -- 将相机摆放在模型正前方偏上一点，看向模型中心
+    local cameraPos = cframe.Position + Vector3.new(0, maxDim * 0.2, cameraDistance)
+    camera.CFrame = CFrame.lookAt(cameraPos, cframe.Position)
+
+    -- 6. 开启帅气的自转效果！
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        -- 如果 UI 被关闭（ViewportFrame 被销毁），立刻停止旋转循环，防止内存泄漏
+        if not viewport or not viewport.Parent then
+            if connection then connection:Disconnect() end
+            return
+        end
+        -- 每帧旋转一点点
+        displayModel:PivotTo(displayModel:GetPivot() * CFrame.Angles(0, math.rad(1), 0))
+    end)
+
+    return viewport
+end
+
+function UnlockAnimController.PlayUnlockAnim(plantId, itemName, qualityColor, subText)
     local player = Players.LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
 
@@ -41,13 +106,9 @@ function UnlockAnimController.PlayUnlockAnim(itemName, iconId, qualityColor, sub
     contentContainer.Parent = horizontalBand
 
     -- 物品图标
-    local itemIcon = Instance.new("ImageLabel")
-    itemIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+    local itemIcon = CreateViewportForModel(plantId, contentContainer)
     itemIcon.Position = UDim2.new(0.5, 0, 0.35, 0)
-    itemIcon.Size = UDim2.new(0, 0, 0, 0) 
-    itemIcon.BackgroundTransparency = 1
-    itemIcon.Image = iconId or ""
-    itemIcon.Parent = contentContainer
+    itemIcon.Size = UDim2.new(0, 0, 0, 0) -- 初始大小为0，靠弹出的Tween动画
 
     -- 物品名称
     local nameLabel = Instance.new("TextLabel")
@@ -123,7 +184,7 @@ function UnlockAnimController.PlayUnlockAnim(itemName, iconId, qualityColor, sub
         task.wait(2.5) 
         
         -- 第 5 幕：内容先消失，让路给滑出动画
-        TweenService:Create(itemIcon, TweenInfo.new(0.2), { ImageTransparency = 1, Size = UDim2.new(0, 150, 0, 150) }):Play()
+        TweenService:Create(itemIcon, TweenInfo.new(0.2), { Size = UDim2.new(0, 0, 0, 0) }):Play()
         TweenService:Create(nameLabel, TweenInfo.new(0.2), { TextTransparency = 1 }):Play()
         TweenService:Create(subLabel, TweenInfo.new(0.2), { TextTransparency = 1 }):Play()
         task.wait(0.2)
@@ -152,7 +213,7 @@ function UnlockAnimController.Init()
         elseif mutationLevel == 4 then qualityColor = Color3.fromRGB(255, 170, 0) end
 
         local subText = mutationLevel > 1 and "⭐ 发现稀有变异！" or "📖 发现新物种！"
-        UnlockAnimController.PlayUnlockAnim(itemName, iconId, qualityColor, subText)
+        UnlockAnimController.PlayUnlockAnim(plantId, itemName, qualityColor, subText)
     end)
 end
 

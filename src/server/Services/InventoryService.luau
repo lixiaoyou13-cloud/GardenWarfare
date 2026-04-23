@@ -98,14 +98,18 @@ function InventoryService.Init()
         if itemType == "Seed" then
             if data.Inventory.Seeds then
                 for _, seedData in ipairs(data.Inventory.Seeds) do
-                    if seedData.ID == realId and seedData.Quantity > 0 then hasItem = true break end
+                    if seedData.ID == realId and seedData.Quantity > 0 then 
+                        hasItem = true 
+                        break 
+                    end
                 end
             end
         elseif itemType == "Plant" then
             if data.Inventory.Plants then
                 for _, plantData in ipairs(data.Inventory.Plants) do
                     if plantData.ID == realId and (plantData.Mutation or 1) == mutLvl and plantData.Quantity > 0 then 
-                        hasItem = true break 
+                        hasItem = true 
+                        break 
                     end
                 end
             end
@@ -113,9 +117,11 @@ function InventoryService.Init()
 
         if hasItem then
             if not data.Hotbar then data.Hotbar = {} end
-            local inHotbar = false
-            for _, id in ipairs(data.Hotbar) do
-                if id == compositeId then inHotbar = true break end
+                local inHotbar = false
+                for _, id in ipairs(data.Hotbar) do
+                    if id == compositeId then inHotbar = true 
+                    break 
+                end
             end
 
             if inHotbar then
