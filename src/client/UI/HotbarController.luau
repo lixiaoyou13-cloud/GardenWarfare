@@ -268,7 +268,23 @@ function HotbarController.Init()
     local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF")
     RefreshHotbar(getPlayerDataRF:InvokeServer())
     ReplicatedStorage:WaitForChild("UpdateInventoryRE").OnClientEvent:Connect(RefreshHotbar)
+
+    -- [🌟 新增]：监听服务端的强制选中指令（在背包中点击物品时自动举起）
+    local forceSelectRE = ReplicatedStorage:WaitForChild("ForceSelectRE", 5)
+    if forceSelectRE then
+        forceSelectRE.OnClientEvent:Connect(function(compositeId)
+            -- 寻找快捷栏中对应的槽位
+            local targetSlot = hotbarFrame:FindFirstChild(compositeId)
+            if targetSlot then
+                -- 如果当前手里拿的不是这个物品，就自动触发装备逻辑
+                if currentEquippedId ~= compositeId then
+                    toggleEquip(targetSlot)
+                end
+            end
+        end)
+    end
     print("客户端：HotbarController 精简版加载完毕！")
 end
+
 
 return HotbarController

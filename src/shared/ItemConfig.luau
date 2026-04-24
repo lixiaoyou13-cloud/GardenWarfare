@@ -258,7 +258,7 @@ local ItemConfig = {
 		},
 	},
 	
-	MutationProb = { [1] = 0, [2] = 70, [3] = 20, [4] = 10 },
+	MutationProb = { [1] = 90, [2] = 7, [3] = 3, [4] = 1 },
 	MutationName = { 
 		[1] = "普通", 
 		[2] = "闪耀", 

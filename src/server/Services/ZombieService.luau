@@ -467,7 +467,22 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             end
             
             local dropPos = rootPart.Position + Vector3.new(0, 3, 0)
-            CoinDropService.DropCoins(player, dropPos, math.random(1, 2), math.random(10, 20))
+            
+            -- [🌟 新增：动态掉落逻辑]
+            -- 以 200 血（普通僵尸基础血量）为 1 倍掉落基准
+            local dropMultiplier = math.max(1, finalHP / 200)
+            
+            -- 计算掉落数量和单价
+            local coinCount = math.random(1, 2) + math.floor(dropMultiplier / 5) -- 稍微增加掉落的模型数量
+            local coinValue = math.floor(math.random(10, 20) * dropMultiplier)   -- 核心：价值随血量倍率翻倍
+            
+            -- 【性能保护】防止后期数量太多导致物理引擎卡顿，限制最多掉出 5 个金币模型，多余的倍率算到单价里
+            if coinCount > 5 then
+                coinValue = math.floor(coinValue * (coinCount / 5))
+                coinCount = 5
+            end
+            
+            CoinDropService.DropCoins(player, dropPos, coinCount, coinValue)
 
             humanoid:Destroy() 
             rootPart.Anchored = false 

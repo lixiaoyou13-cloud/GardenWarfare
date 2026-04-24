@@ -131,6 +131,10 @@ function InventoryService.Init()
                 if #data.Hotbar < 10 then
                     table.insert(data.Hotbar, compositeId) 
                     ReplicatedStorage.UpdateInventoryRE:FireClient(player, data)
+                    
+                    -- [🌟 新增核心]：成功放入快捷栏后，同样触发自动举起指令
+                    forceSelectRE:FireClient(player, compositeId)
+
                 else
                     -- 可选：给玩家发个通知说快捷栏满了
                     local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
