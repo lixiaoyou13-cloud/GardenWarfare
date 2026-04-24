@@ -140,40 +140,54 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
             -- ==========================================
             -- [🌟 新增核心：一键收割感应区]
             -- ==========================================
-            local sensor = Instance.new("Part")
-            sensor.Name = "HarvestSensor"
-            sensor.Size = Vector3.new(12, 6, 12)
-            sensor.CFrame = collectSunPart.CFrame
-            sensor.Transparency = 1
-            sensor.CanCollide = false
-            sensor.Anchored = true
-            sensor.Parent = sunflower
+           -- 清除该地块上可能残留的旧提示（防止重复生成）
+            local oldPrompt = collectSunPart:FindFirstChild("HarvestPrompt")
+            if oldPrompt then oldPrompt:Destroy() end
+
+            -- 在收集地块（CollectSun）上创建交互提示，而不是向日葵身上
+            local prompt = Instance.new("ProximityPrompt")
+            prompt.Name = "HarvestPrompt"
+            prompt.ActionText = "收集阳光"
+            prompt.ObjectText = "基地地块" -- 文本改成地块相关
+            prompt.KeyboardKeyCode = Enum.KeyCode.F
+            prompt.RequiresLineOfSight = false
+            prompt.MaxActivationDistance = 15 -- 稍微加大一点距离，让踩上去更容易触发
+            prompt.HoldDuration = 0.2
+            prompt.Parent = collectSunPart -- 【🌟核心修改】：绑定到地块零件上
 
             local isHarvesting = false
-            sensor.Touched:Connect(function(hit)
+            prompt.Triggered:Connect(function(triggeringPlayer)
                 if isHarvesting then return end
-                local char = hit.Parent
-                local p = Players:GetPlayerFromCharacter(char)
                 
-                -- 只有向日葵的主人踩上去才会触发
-                if p and p.UserId == player.UserId then
+                -- 只有基地的所有者才能按 F 收集
+                if triggeringPlayer.UserId == player.UserId then
                     local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
-                    local amount = PlayerDataManager.CollectAllSun(p)
+                    
+                    -- 检查玩家是否有阳光
+                    local pData = PlayerDataManager.GetPlayerData(triggeringPlayer)
+                    if not pData or (pData.TotalSun or 0) <= 0 then return end
+                    
+                    local amount = PlayerDataManager.CollectAllSun(triggeringPlayer)
                     
                     if amount > 0 then
                         isHarvesting = true
                         
-                        -- 触发客户端的 2D 飞行金币特效
+                        -- 触发客户端飞行金币特效
                         local harvestRE = ReplicatedStorage:FindFirstChild("HarvestSunRE")
-                        if harvestRE then harvestRE:FireClient(p, amount) end
+                        if harvestRE then harvestRE:FireClient(triggeringPlayer, amount) end
                         
-                        -- 1秒防抖动冷却
+                        -- 1秒防抖冷却
                         task.wait(1)
                         isHarvesting = false
                     end
+                else
+                    -- 非主人警告
+                    local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                    if showNotifRE then 
+                        showNotifRE:FireClient(triggeringPlayer, "⚠️ 无法操作", "这不是你的基地！") 
+                    end
                 end
             end)
-
             -- ==========================================
             -- [装载动画]
             -- ==========================================

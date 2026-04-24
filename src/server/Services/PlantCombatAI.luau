@@ -246,6 +246,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             anim.AnimationId = itemDetail.AttackAnimation
             attackAnimTrack = animator:LoadAnimation(anim)
             attackAnimTrack.Priority = Enum.AnimationPriority.Action
+            attackAnimTrack.Looped = false
         end
 
         local idleAnimTrack = nil
@@ -317,6 +318,11 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                     idleAnimTrack:Play(0.1)
                 end
             else
+                -- 【🌟修复2】：如果没有僵尸，立刻停止可能残留的攻击动作
+                if attackAnimTrack and attackAnimTrack.IsPlaying then
+                    attackAnimTrack:Stop(0.1)
+                end
+
                 if idleAnimTrack and not idleAnimTrack.IsPlaying then
                     idleAnimTrack:Play(0.1)
                 end
@@ -405,7 +411,12 @@ function PlantCombatAI.StartExplosiveAI(plant, itemDetail, mutationLevel)
             Debris:AddItem(effectPart, 2)
             
             for _, p in pairs(plant:GetDescendants()) do
-                if p:IsA("BasePart") then p.Transparency = 1 end
+                if p:IsA("BasePart") then 
+                    p.Transparency = 1 
+                -- 【🌟修复】：自爆后立即关闭植物身上的变异光效和粒子
+                elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
+                    p.Enabled = false
+                end
             end
             task.delay(1, function() if plant then plant:Destroy() end end)
         end

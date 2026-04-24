@@ -31,12 +31,14 @@ function ShopController.Init()
 
     -- [渲染逻辑保持不变]
     local function RenderShop()
-        if not localPlayerData or not currentStockData then return end
+        if not localPlayerData or not currentStockData then 
+            return 
+        end
         for _, child in pairs(itemList:GetChildren()) do
             if child:IsA("Frame") and child ~= shopSlotTemplate then child:Destroy() end
         end
 
-        for i = 1, 10 do
+        for i = 1 , 10 do
             local slotData = currentStockData[i]
             local slot = shopSlotTemplate:Clone()
             slot.Name = string.format("%02d_Slot", i); slot.LayoutOrder = i

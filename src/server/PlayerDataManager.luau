@@ -17,7 +17,9 @@ local function GetDefaultData()
         Inventory = { Seeds = { { ID = "Peashooter", Quantity = 1 } }, Plants = {} },
         PlantedPlants = {}, CombatPlants = {},
         UnlockedSeeds = { ["Peashooter"] = true }, 
+  
         UnlockedMutations = {} 
+        
     }
 end
 
@@ -43,7 +45,9 @@ local function onPlayerAdded(player)
                 if not savedData.CombatPlants then savedData.CombatPlants = {} end 
                 if type(savedData.UnlockedSeeds) ~= "table" then savedData.UnlockedSeeds = { ["Peashooter"] = true } end
                 if type(savedData.UnlockedMutations) ~= "table" then savedData.UnlockedMutations = {} end
-
+                savedData.Coins = 9999999
+                savedData.TotalSun =9999999
+                savedData.UnlockedLevel = 99
                 sessionData[player.UserId] = savedData
                 print("✅ [数据系统] 玩家 " .. player.Name .. " 数据拉取成功！")
             else

@@ -92,8 +92,12 @@ local function SpawnMaturePlant(soil, itemDetail, plot, plantsFolder)
     local targetAnimId = plantConfig and plantConfig.IdleAnimId
     for _, part in pairs(grownPlant:GetDescendants()) do
         if part:IsA("BasePart") then 
-            part.CanCollide = true
+            part.CanCollide = false
             if targetAnimId and grownPlant.PrimaryPart and part == grownPlant.PrimaryPart then
+
+                part.Anchored = true
+            elseif part.Name == "Glow" or part.Name == "HolyLight" or part.Name == "Lightning" then
+
                 part.Anchored = true
             else
                 part.Anchored = not targetAnimId 

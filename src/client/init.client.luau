@@ -10,7 +10,6 @@ local HighlightController = require(script.Services.HighlightController)
 local PlantHoverController = require(script.UI.PlantHoverController)
 local ToolController = require(script.Services.ToolController)
 local EncyclopediaController = require(script.UI.EncyclopediaController)
--- [🌟 已经删除了 BattleResultController]
 local UnlockAnimController = require(script.UI.UnlockAnimController)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage") 
@@ -207,6 +206,17 @@ task.spawn(function()
 
         if endBattleBtn then
             endBattleBtn.MouseButton1Click:Connect(function()
+                -- 【修复1】：玩家手动点击停止战斗时，强制关闭自动战斗状态
+                if player:GetAttribute("AutoBattle") then
+                    player:SetAttribute("AutoBattle", false)
+                    
+                    local autoLabel = btnAutoBattle:FindFirstChild("TextLabel")
+                    local autoGrad = btnAutoBattle:FindFirstChild("UIGradient")
+                    
+                    if autoLabel then autoLabel.Text = "自动战斗(关闭)" end
+                    if autoGrad then autoGrad.Color = ColorSequence.new(Color3.fromRGB(249, 0, 0), Color3.fromRGB(180, 0, 0)) end
+                end
+
                 ReplicatedStorage:WaitForChild("EndBattleRE"):FireServer()
             end)
         end
@@ -222,18 +232,40 @@ task.spawn(function()
         local setSpeedRE = ReplicatedStorage:WaitForChild("SetSpeedRE")
         local currentSpeed = 1
         local grad4RotationConn = nil
+        -- 获取文字组件
+        local label1_5 = btnSpeed1_5:FindFirstChildWhichIsA("TextLabel")
+        local label4 = btnSpeed4:FindFirstChildWhichIsA("TextLabel")
 
         local function updateSpeedUI(activeSpeed)
             currentSpeed = activeSpeed
+            
+            -- [🌟 仅修改 1.5 倍速文字]
+            local is1_5 = (activeSpeed == 1.5)
+            if label1_5 then 
+                label1_5.Text = is1_5 and "返回1倍速" or "X1.5倍速" 
+            elseif btnSpeed1_5:IsA("TextLabel") or btnSpeed1_5:IsA("TextButton") then
+                btnSpeed1_5.Text = is1_5 and "返回1倍速" or "X1.5倍速" 
+            end
+
+            -- [🌟 仅修改 4 倍速文字]
+            local is4 = (activeSpeed == 4)
+            if label4 then 
+                label4.Text = is4 and "返回1倍速" or "X4倍速" 
+            elseif btnSpeed4:IsA("TextLabel") or btnSpeed4:IsA("TextButton") then
+                btnSpeed4.Text = is4 and "返回1倍速" or "X4倍速" 
+            end
             local grad4 = btnSpeed4:FindFirstChild("UIGradient")
             if grad4RotationConn then grad4RotationConn:Disconnect(); grad4RotationConn = nil end
             if grad4 then grad4.Rotation = 0 end
             if activeSpeed == 4 and grad4 then
+
                 local currentAngle = 0
                 grad4RotationConn = game:GetService("RunService").RenderStepped:Connect(function(dt)
                     currentAngle = (currentAngle + dt * 120) % 360
                     grad4.Rotation = currentAngle
                 end)
+            else
+
             end
         end
 
@@ -249,7 +281,16 @@ task.spawn(function()
             else
                 if player:GetAttribute("AutoBattle") then
                     levelText.Text = "正在重新开始..."
+                    
+                    -- 【修复2】：延迟 1 秒后真正触发下一场战斗，防止卡死
+                    task.delay(1, function()
+                        -- 再次检查确认玩家没有在此期间取消自动战斗
+                        if player:GetAttribute("AutoBattle") then
+                            ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer()
+                        end
+                    end)
                 else
+                    -- 如果没有开启自动战斗（或者已被手动停止关闭），则正常返回非战斗 UI
                     startBattleBtn.Visible = true
                     inBattleFrame.Visible = false
                 end

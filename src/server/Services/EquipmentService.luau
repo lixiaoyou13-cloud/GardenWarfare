@@ -133,6 +133,7 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
 
         heldModel.Parent = character
         character:SetAttribute("EquippedSeed", compositeId) 
+        
 
         -- 焊接至右手
         local rightHand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")

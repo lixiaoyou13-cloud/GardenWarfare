@@ -47,6 +47,12 @@ function ZombieService.RestorePlotPlants(plot, player)
                                 else 
                                     p.Transparency = 0 
                                 end
+                            -- 【🌟修复】：复活时恢复特效原本的开启状态
+                            elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
+                                local origE = p:GetAttribute("OriginalEnabled")
+                                if origE ~= nil then
+                                    p.Enabled = origE
+                                end
                             end
                         end
                     end
@@ -159,15 +165,25 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
         animTracks[name] = track
     end
 
-    local config = ZombieConfig[zombieId]
+   local config = ZombieConfig[zombieId]
+    
+    -- 获取当前关卡数，如果没有则默认为1
+    local currentLevel = plot:GetAttribute("CurrentLevel") or 1
+    
+    -- 动态血量计算：从第11关开始（无尽模式），每关增加 15% 的最大生命值
+    local hpMultiplier = 1
+    if currentLevel > 10 then
+        hpMultiplier = 1 + (currentLevel - 10) * 0.15 
+    end
+    
+    local finalHP = math.floor(config.HP * hpMultiplier)
     
     loadAnimation("Walk", config.Anims.Walk)
     loadAnimation("Eat", config.Anims.Eat)
     
-    humanoid.MaxHealth = config.HP
-    humanoid.Health = config.HP
-    humanoid.WalkSpeed = 0 
-
+    humanoid.MaxHealth = finalHP
+    humanoid.Health = finalHP
+    humanoid.WalkSpeed = 0
     -- [动态血条与防具逻辑]
     local dropPart = zombie:FindFirstChild("Drop", true)
     local baseZombieHP = 270 
@@ -202,12 +218,12 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
     hpBillboard.Parent = zombie:FindFirstChild("Head") or rootPart
 
     humanoid.HealthChanged:Connect(function(newHealth)
-        if newHealth < config.HP and newHealth > 0 then
+        if newHealth < finalHP and newHealth > 0 then
             hpBillboard.Enabled = true
-            local ratio = math.clamp(newHealth / config.HP, 0, 1)
+            local ratio = math.clamp(newHealth / finalHP, 0, 1)
             fillFrame.Size = UDim2.new(ratio, 0, 1, 0)
             
-            if config.HP > baseZombieHP and newHealth > baseZombieHP then
+            if finalHP > baseZombieHP and newHealth > baseZombieHP then
                 fillFrame.BackgroundColor3 = Color3.fromRGB(200, 200, 200) 
             else
                 fillFrame.BackgroundColor3 = Color3.fromRGB(255, 60, 60) 
@@ -216,7 +232,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             hpBillboard.Enabled = false
         end
 
-        if dropPart and config.HP > baseZombieHP then
+        if dropPart and finalHP > baseZombieHP then
             if not hasDropped and newHealth <= baseZombieHP and newHealth > 0 then
                 hasDropped = true
                 dropPart.Anchored = false
@@ -418,11 +434,19 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                         targetPlant:SetAttribute("IsDead", true)
                         
                         for _, p in pairs(targetPlant:GetDescendants()) do
+                            -- 1. 隐藏实体零件
                             if p:IsA("BasePart") then
                                 if not p:GetAttribute("OriginalTransparency") then
                                     p:SetAttribute("OriginalTransparency", p.Transparency)
                                 end
                                 p.Transparency = 1 
+                                
+                            -- 【🌟修复】：2. 关闭所有特效与光影，并记录原本的状态
+                            elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
+                                if p:GetAttribute("OriginalEnabled") == nil then
+                                    p:SetAttribute("OriginalEnabled", p.Enabled)
+                                end
+                                p.Enabled = false
                             end
                         end
                     end
