@@ -25,19 +25,38 @@ local function UpdateSunflowerScale(sunflower, totalSun)
         sunflower:ScaleTo(scale)
     end
 
-    local rootPart = sunflower.PrimaryPart or sunflower:FindFirstChildWhichIsA("BasePart")
-    if rootPart then
-        local gui = rootPart:FindFirstChild("SunCounterGui")
-        if gui and gui:FindFirstChild("Container") and gui.Container:FindFirstChild("SunText") then
-            local displaySun = totalSun
-            -- 大数值转换 (K, M)
-            if totalSun >= 1000000 then
-                displaySun = string.format("%.1fM", totalSun / 1000000)
-            elseif totalSun >= 1000 then
-                displaySun = string.format("%.1fK", totalSun / 1000)
+    -- 🌟 修复：去我们创建的虚拟独立 UI 锚点方块上寻找 UI
+    local plot = sunflower.Parent
+    if not plot then return end
+    
+    local collectSunPart = nil
+    local elementBtn = plot:FindFirstChild("ElementButton", true)
+    if elementBtn then collectSunPart = elementBtn:FindFirstChild("CollectSun") end
+    
+    if not collectSunPart then
+        collectSunPart = plot:FindFirstChild("CollectSun")
+    end
+    
+    if collectSunPart then
+        local guiAnchor = collectSunPart:FindFirstChild("SunGuiAnchor")
+        if guiAnchor then
+            -- 🌟 遍历前后两面的 SurfaceGui 同步更新数值
+            for _, gui in ipairs(guiAnchor:GetChildren()) do
+                if gui:IsA("SurfaceGui") and gui.Name == "SunCounterGui" then
+                    local container = gui:FindFirstChild("Container")
+                    local textLabel = container and container:FindFirstChild("SunText")
+                    if textLabel then
+                        local displaySun = totalSun
+                        -- 大数值转换 (K, M)
+                        if totalSun >= 1000000 then
+                            displaySun = string.format("%.1fM", totalSun / 1000000)
+                        elseif totalSun >= 1000 then
+                            displaySun = string.format("%.1fK", totalSun / 1000)
+                        end
+                        textLabel.Text = tostring(displaySun)
+                    end
+                end
             end
-            gui.Container.SunText.Text = tostring(displaySun)
-            gui.ExtentsOffset = Vector3.new(0, 3 + (scale * 1.5), 0)
         end
     end
 end
@@ -111,83 +130,113 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
             sunflower.Parent = plot
             
             -- ==========================================
-            -- [创建悬浮UI]
+            -- [创建悬浮UI (🌟 完美静止挂载中枢：悬空+防遮挡+双面显示)]
             -- ==========================================
-            local rootPart = sunflower.PrimaryPart or sunflower:FindFirstChildWhichIsA("BasePart")
-            if rootPart then
-                local bgGui = Instance.new("BillboardGui")
-                bgGui.Name = "SunCounterGui"; bgGui.Size = UDim2.new(4, 0, 1.5, 0)
-                bgGui.ExtentsOffset = Vector3.new(0, 3, 0); bgGui.AlwaysOnTop = true; bgGui.MaxDistance = 150
+            if collectSunPart then
+                -- 1. 销毁可能存在的旧独立锚点
+                local oldAnchor = collectSunPart:FindFirstChild("SunGuiAnchor")
+                if oldAnchor then oldAnchor:Destroy() end
+
+                -- 2. 创建一个绝对静止、透明的不碰撞看板部件
+                local guiAnchor = Instance.new("Part")
+                guiAnchor.Name = "SunGuiAnchor"
+                guiAnchor.Size = Vector3.new(4, 1.5, 0.05) 
+                guiAnchor.Transparency = 1       -- 隐形
+                guiAnchor.Anchored = true        -- 静止不动
+                guiAnchor.CanCollide = false     -- 无碰撞
+                guiAnchor.CanQuery = false       -- 防鼠标点击拦截
+                guiAnchor.CanTouch = false
+
+                -- 3. 悬浮在 CollectSun 上方固定 5 格高空（可根据视线随意微调高度）
+                guiAnchor.CFrame = collectSunPart.CFrame * CFrame.new(0, 5, 0)
+                guiAnchor.Parent = collectSunPart
+
+                -- 4. 🌟 双面渲染渲染逻辑：同时渲染正面和背面，防止转镜头时转到反面看不见
+                local renderFaces = { Enum.NormalId.Front, Enum.NormalId.Back }
                 
-                local container = Instance.new("Frame")
-                container.Name = "Container"; container.Size = UDim2.new(1, 0, 1, 0)
-                container.BackgroundTransparency = 1; container.Parent = bgGui
-                
-                local icon = Instance.new("ImageLabel")
-                icon.Name = "SunIcon"; icon.Size = UDim2.new(0.3, 0, 0.8, 0); icon.Position = UDim2.new(0, 0, 0.1, 0)
-                icon.BackgroundTransparency = 1; icon.Image = "rbxassetid://102426033120992"
-                icon.ScaleType = Enum.ScaleType.Fit; icon.Parent = container
-                
-                local textLabel = Instance.new("TextLabel")
-                textLabel.Name = "SunText"; textLabel.Size = UDim2.new(0.65, 0, 0.8, 0); textLabel.Position = UDim2.new(0.35, 0, 0.1, 0)
-                textLabel.BackgroundTransparency = 1; textLabel.Text = "0"
-                textLabel.TextColor3 = Color3.fromRGB(255, 230, 50); textLabel.TextStrokeTransparency = 0
-                textLabel.Font = Enum.Font.GothamBold; textLabel.TextScaled = true; textLabel.Parent = container
-                
-                bgGui.Parent = rootPart
+                for _, faceDirection in ipairs(renderFaces) do
+                    local sGui = Instance.new("SurfaceGui")
+                    sGui.Name = "SunCounterGui"
+                    sGui.Face = faceDirection
+                    sGui.LightInfluence = 0          -- 纯亮发光字，不受全地图阴影影响
+                    
+                    -- 🌟 核心修复：开启 AlwaysOnTop！
+                    -- 这样即便向日葵模型膨胀把这个锚点Part整个吞进肚子里，UI 依然会雷打不动地穿透渲染在最前面！
+                    sGui.AlwaysOnTop = true 
+                    sGui.CanvasSize = Vector2.new(400, 150)
+                    
+                    local container = Instance.new("Frame")
+                    container.Name = "Container"
+                    container.Size = UDim2.new(1, 0, 1, 0)
+                    container.BackgroundTransparency = 1
+                    container.Parent = sGui
+                    
+                    local icon = Instance.new("ImageLabel")
+                    icon.Name = "SunIcon"
+                    icon.Size = UDim2.new(0, 100, 0, 100)
+                    icon.Position = UDim2.new(0, 30, 0.5, -50)
+                    icon.BackgroundTransparency = 1
+                    icon.Image = "rbxassetid://102426033120992"
+                    icon.ScaleType = Enum.ScaleType.Fit
+                    icon.Parent = container
+                    
+                    local textLabel = Instance.new("TextLabel")
+                    textLabel.Name = "SunText"
+                    textLabel.Size = UDim2.new(1, -150, 1, 0)
+                    textLabel.Position = UDim2.new(0, 140, 0, 0)
+                    textLabel.BackgroundTransparency = 1
+                    textLabel.Text = "0"
+                    textLabel.TextColor3 = Color3.fromRGB(255, 230, 50)
+                    textLabel.TextStrokeTransparency = 0
+                    textLabel.Font = Enum.Font.GothamBold
+                    textLabel.TextScaled = true
+                    textLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    textLabel.Parent = container
+                    
+                    sGui.Parent = guiAnchor
+                end
             end
 
             -- ==========================================
-            -- [🌟 新增核心：一键收割感应区]
+            -- [🌟 修改核心：自动靠近底座方块收割]
             -- ==========================================
-           -- 清除该地块上可能残留的旧提示（防止重复生成）
             local oldPrompt = collectSunPart:FindFirstChild("HarvestPrompt")
             if oldPrompt then oldPrompt:Destroy() end
 
-            -- 在收集地块（CollectSun）上创建交互提示，而不是向日葵身上
-            local prompt = Instance.new("ProximityPrompt")
-            prompt.Name = "HarvestPrompt"
-            prompt.ActionText = "收集阳光"
-            prompt.ObjectText = "基地地块" -- 文本改成地块相关
-            prompt.KeyboardKeyCode = Enum.KeyCode.F
-            prompt.RequiresLineOfSight = false
-            prompt.MaxActivationDistance = 15 -- 稍微加大一点距离，让踩上去更容易触发
-            prompt.HoldDuration = 0.2
-            prompt.Parent = collectSunPart -- 【🌟核心修改】：绑定到地块零件上
-
-            local isHarvesting = false
-            prompt.Triggered:Connect(function(triggeringPlayer)
-                if isHarvesting then return end
+            task.spawn(function()
+                local isHarvesting = false
+                local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
+                local harvestRE = ReplicatedStorage:FindFirstChild("HarvestSunRE")
                 
-                -- 只有基地的所有者才能按 F 收集
-                if triggeringPlayer.UserId == player.UserId then
-                    local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
+                while collectSunPart and collectSunPart.Parent and sunflower and sunflower.Parent do
+                    task.wait(0.3)
+
+                    if isHarvesting then continue end
+
+                    local character = player.Character
+                    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+                    if not rootPart then continue end
+
+                    local distance = (rootPart.Position - collectSunPart.Position).Magnitude
                     
-                    -- 检查玩家是否有阳光
-                    local pData = PlayerDataManager.GetPlayerData(triggeringPlayer)
-                    if not pData or (pData.TotalSun or 0) <= 0 then return end
-                    
-                    local amount = PlayerDataManager.CollectAllSun(triggeringPlayer)
-                    
-                    if amount > 0 then
-                        isHarvesting = true
+                    if distance <= 15 then 
+                        local pData = PlayerDataManager.GetPlayerData(player)
                         
-                        -- 触发客户端飞行金币特效
-                        local harvestRE = ReplicatedStorage:FindFirstChild("HarvestSunRE")
-                        if harvestRE then harvestRE:FireClient(triggeringPlayer, amount) end
-                        
-                        -- 1秒防抖冷却
-                        task.wait(1)
-                        isHarvesting = false
-                    end
-                else
-                    -- 非主人警告
-                    local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
-                    if showNotifRE then 
-                        showNotifRE:FireClient(triggeringPlayer, "⚠️ 无法操作", "这不是你的基地！") 
+                        if pData and (pData.TotalSun or 0) > 0 then
+                            isHarvesting = true
+                            
+                            local amount = PlayerDataManager.CollectAllSun(player)
+                            if amount > 0 then
+                                if harvestRE then harvestRE:FireClient(player, amount, collectSunPart.Position) end
+                                task.wait(1) 
+                            end
+                            
+                            isHarvesting = false
+                        end
                     end
                 end
             end)
+
             -- ==========================================
             -- [装载动画]
             -- ==========================================
@@ -201,7 +250,8 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                 local anim = Instance.new("Animation")
                 anim.AnimationId = sunflowerConfig.IdleAnimId
                 local track = animator:LoadAnimation(anim)
-                track.Looped = true; track:Play()
+                track.Looped = true;
+                track:Play()
             end
             
             local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
@@ -216,14 +266,12 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
 end
 
 function BaseSunflowerService.Init()
-    -- 注册客户端 UI 特效通讯通道
     if not ReplicatedStorage:FindFirstChild("HarvestSunRE") then
         local re = Instance.new("RemoteEvent")
         re.Name = "HarvestSunRE"
         re.Parent = ReplicatedStorage
     end
 
-    -- 体型与UI实时同步器
     task.spawn(function()
         local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
         while true do
@@ -236,7 +284,6 @@ function BaseSunflowerService.Init()
                         UpdateSunflowerScale(sunflower, pData.TotalSun or 0)
                     end
                 else
-                    -- 玩家退出或向日葵被毁，清理缓存
                     activeSunflowers[userId] = nil
                 end
             end

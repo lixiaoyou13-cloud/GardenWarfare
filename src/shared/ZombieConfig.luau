@@ -2,7 +2,7 @@
 local ZombieConfig = {
     ["Zombie"] = {
         Id = "Zombie",
-        Name = "普通僵尸",         
+        Name = "Zombie",         
         HP = 200,             
         Attack = 100,             
         Speed = 1.6,                
@@ -18,7 +18,7 @@ local ZombieConfig = {
     },
     ["ConeheadZombie"] = {
         Id = "ConeheadZombie",
-        Name = "路障僵尸",         
+        Name = "Conehead Zombie",         
         HP = 500,             
         Attack = 150,             
         Speed = 1.6,                
@@ -34,7 +34,7 @@ local ZombieConfig = {
     },
     ["BucketheadZombie"] = {
         Id = "BucketheadZombie",
-        Name = "铁桶僵尸",         
+        Name = "Buckethead Zombie",         
         HP = 1200,             
         Attack = 300,             
         Speed = 1.6,                
@@ -50,7 +50,7 @@ local ZombieConfig = {
     },
     ["ScreenDoorZombie"] = {
         Id = "ScreenDoorZombie",
-        Name = "铁门僵尸",         
+        Name = "Screen Door Zombie",         
         HP = 2500,             
         Attack = 500,             
         Speed = 1.6,                

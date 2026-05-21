@@ -52,8 +52,12 @@ function InventoryController.Init()
                     local itemDetail = ItemConfig.Seeds[seedData.ID]
                     if itemDetail then
                         local newSlot = itemTemplate:Clone()
-                        newSlot.Index.Visible = false; newSlot.Name = seedData.ID 
-                        newSlot.ItemName.Text = itemDetail.Name; newSlot.Quantity.Text = "x" .. tostring(seedData.Quantity)
+                        newSlot.Index.Visible = false
+                        newSlot.Name = seedData.ID 
+                        newSlot.ItemName.Text = itemDetail.Name
+                        newSlot.ItemName.TextWrapped = true  -- 开启自动换行
+                        newSlot.ItemName.TextScaled = true   -- 开启文字缩放，确保长单词能完整显示
+                        newSlot.Quantity.Text = "x" .. tostring(seedData.Quantity)
                         
                         local lastClickTick = 0
                         local function onSeedEquip() 
@@ -89,11 +93,16 @@ function InventoryController.Init()
                     local itemDetail = ItemConfig.Plants[plantData.ID]
                     if itemDetail then
                         local newSlot = itemTemplate:Clone()
-                        newSlot.Index.Visible = false; newSlot.Name = uniqueSlotId 
+                        newSlot.Index.Visible = false
+                        newSlot.Name = uniqueSlotId 
+                        newSlot.ItemName.TextWrapped = true  -- 开启自动换行
+                        newSlot.ItemName.TextScaled = true   -- 开启文字缩放
                         
-                        local mutName = ItemConfig.MutationName and ItemConfig.MutationName[mutLevel] or "未知"
+                        local mutName = ItemConfig.MutationName and ItemConfig.MutationName[mutLevel] or "Unknown"
                         if mutLevel > 1 then newSlot.ItemName.Text = "[" .. mutName .. "] " .. itemDetail.Name
-                        else newSlot.ItemName.Text = itemDetail.Name end
+                        else 
+                            newSlot.ItemName.Text = itemDetail.Name 
+                        end
                         newSlot.Quantity.Text = "x" .. tostring(plantData.Quantity)
     
                         local lastClickTick = 0
@@ -142,6 +151,32 @@ function InventoryController.Init()
                 end
             end
         end
+    end
+
+    -- [🌟 新增/修改代码：监听服务端发来的打开背包指令，支持传参切换分页]
+    local openInvRE = ReplicatedStorage:WaitForChild("OpenInventoryRE", 5)
+    if openInvRE then
+        openInvRE.OnClientEvent:Connect(function(targetPageName)
+            -- 1. 强制显示背包 UI
+            inventoryGui.Enabled = true
+            
+            -- 2. 根据服务端传来的参数决定打开哪个页面（如果没有参数，默认打开 SeedPage）
+            local pageToOpen = targetPageName or "SeedPage"
+            switchTab(pageToOpen)
+            
+            -- 3. 智能判断提示文本（植物页显示战斗部署提示，种子页显示农田种植提示）
+            local titleStr = (pageToOpen == "PlantPage") and "⚔️ Deploy Notice" or "🌱 Plant Notice"
+            local textStr = (pageToOpen == "PlantPage") and "Please select a combat plant from your inventory to deploy!" or "Please select a seed from your inventory to plant!"
+            
+            -- 4. 调用 Roblox 原生的右下角提示框
+            pcall(function()
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = titleStr,
+                    Text = textStr,
+                    Duration = 4,
+                })
+            end)
+        end)
     end
 
     switchTab("SeedPage")

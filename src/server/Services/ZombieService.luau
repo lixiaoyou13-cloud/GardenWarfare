@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService") 
 local PhysicsService = game:GetService("PhysicsService")
+local AnalyticsService = game:GetService("AnalyticsService")
 
 
 local ZombieConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ZombieConfig"))
@@ -16,6 +17,14 @@ local LevelConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("S
 
 ZombieService.AnimationCache = {}
 
+local function IsBattleCancelled(plot, player)
+    if not plot then return true end
+    if plot:GetAttribute("IsGameOver") then return true end
+    if not player or not player.Parent then return true end
+    if plot:GetAttribute("OwnerId") ~= player.UserId then return true end
+    return false
+end
+
 -- ==========================================
 -- [战斗结束，复活所有隐藏的植物]
 -- ==========================================
@@ -23,36 +32,36 @@ function ZombieService.RestorePlotPlants(plot, player)
     local lawnFolder = plot:FindFirstChild("Lawn")
     if not lawnFolder then return end
     
-    local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
-    
+    local MUTATION_TAGS = { Glow = true, Lightning = true, HolyLight = true }
+
     for _, lawnPart in ipairs(lawnFolder:GetChildren()) do
         if lawnPart:IsA("BasePart") then
             for _, child in pairs(lawnPart:GetChildren()) do
                 if child:IsA("Model") and child:GetAttribute("IsCombatPlant") then
-                    if child:GetAttribute("IsDead") then
-                        local maxHP = child:GetAttribute("MaxHealth") or 300
-                        child:SetAttribute("Health", maxHP)
-                        child:SetAttribute("IsDead", false)
-                        child:SetAttribute("Exploded", false) 
                     
-                        if player then 
-                            PlayerDataManager.UpdateCombatPlantHP(player, lawnPart.Name, maxHP) 
-                        end
-                        
-                        for _, p in pairs(child:GetDescendants()) do
-                            if p:IsA("BasePart") then
+                    -- 1. 恢复基础状态
+                    local maxHP = child:GetAttribute("MaxHealth") or 300
+                    child:SetAttribute("Health", maxHP)
+                    child:SetAttribute("IsDead", false)
+                    child:SetAttribute("Exploded", false)
+                    
+                    -- 2. 核心透明度恢复
+                    for _, p in pairs(child:GetDescendants()) do
+                        if p:IsA("BasePart") then
+                            -- [🌟 规则1：如果名字是特效标签，强制 Transparency 为 1]
+                            if MUTATION_TAGS[p.Name] then
+                                p.Transparency = 1
+                            else
+                                -- [🌟 规则2：其他零件，严格按照出生时记录的状态恢复]
                                 local origT = p:GetAttribute("OriginalTransparency")
-                                if origT then 
-                                    p.Transparency = origT 
-                                else 
-                                    p.Transparency = 0 
-                                end
-                            -- 【🌟修复】：复活时恢复特效原本的开启状态
-                            elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
-                                local origE = p:GetAttribute("OriginalEnabled")
-                                if origE ~= nil then
-                                    p.Enabled = origE
-                                end
+                                -- 如果 origT 还是 nil，则根据它当前是否可见来决定（防止意外显示）
+                                p.Transparency = origT or p.Transparency
+                            end
+                        elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
+                            -- 恢复特效开启状态
+                            local origE = p:GetAttribute("OriginalEnabled")
+                            if origE ~= nil then
+                                p.Enabled = origE
                             end
                         end
                     end
@@ -72,8 +81,9 @@ function ZombieService.TriggerGameOver(plot, player)
     ZombieService.RestorePlotPlants(plot, player)
     ZombieService.FinalSettlement(player, plot, false)
 
+    -- 👇【修改这里】增加对 OwnerId 的判断
     for _, obj in pairs(Workspace:GetChildren()) do
-        if obj:IsA("Model") and obj:GetAttribute("IsZombie") then
+        if obj:IsA("Model") and obj:GetAttribute("IsZombie") and obj:GetAttribute("OwnerId") == player.UserId then
             obj:Destroy()
         end
     end
@@ -120,6 +130,10 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
 
     local zombie = zombieTemplate:Clone()
     zombie:SetAttribute("IsZombie", true) 
+
+    if player then
+        zombie:SetAttribute("OwnerId", player.UserId)
+    end
     
     for _, part in pairs(zombie:GetDescendants()) do
         if part:IsA("BasePart") then 
@@ -171,12 +185,16 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
     local currentLevel = plot:GetAttribute("CurrentLevel") or 1
     
     -- 动态血量计算：从第11关开始（无尽模式），每关增加 15% 的最大生命值
+    -- [🌟 究极加强版：僵尸成长倍率] 从第21关开始，每关增加 38% 的最大生命值和攻击力
     local hpMultiplier = 1
-    if currentLevel > 10 then
-        hpMultiplier = 1 + (currentLevel - 10) * 0.15 
+    local atkMultiplier = 1
+    if currentLevel > 20 then
+        hpMultiplier = 1 + (currentLevel - 20) * 0.38 
+        atkMultiplier = 1 + (currentLevel - 20) * 0.38 
     end
     
     local finalHP = math.floor(config.HP * hpMultiplier)
+    local finalAttack = math.floor(config.Attack * atkMultiplier)
     
     loadAnimation("Walk", config.Anims.Walk)
     loadAnimation("Eat", config.Anims.Eat)
@@ -282,7 +300,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
         local riseTime = 2.5
         local currentRiseTime = 0
         while currentRiseTime < riseTime do
-            if plot:GetAttribute("IsGameOver") then 
+            if IsBattleCancelled(plot, player) then 
                 if zombie then zombie:Destroy() end
                 return 
             end
@@ -313,7 +331,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
         
         local landWaitTime = 0
         while humanoid.FloorMaterial == Enum.Material.Air and landWaitTime < 1 do
-            if plot:GetAttribute("IsGameOver") then 
+            if IsBattleCancelled(plot, player) then 
                 if zombie then zombie:Destroy() end
                 return 
             end
@@ -340,7 +358,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
         local timeAccumulated = config.AttackInterval 
         
         while zombie and zombie.Parent and humanoid and humanoid.Health > 0 do
-            if plot:GetAttribute("IsGameOver") then 
+            if IsBattleCancelled(plot, player) then 
                 if zombie then zombie:Destroy() end
                 break 
             end
@@ -407,7 +425,8 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                     timeAccumulated = 0 
                     
                     local currentPlantHP = targetPlant:GetAttribute("Health") or 0
-                    currentPlantHP = currentPlantHP - config.Attack
+                    -- [🌟 修改：使用经过 38% 倍率放大的最终攻击力]
+                    currentPlantHP = currentPlantHP - finalAttack
                     targetPlant:SetAttribute("Health", currentPlantHP)
                     
                     local gridName = targetPlant:GetAttribute("GridName")
@@ -434,14 +453,12 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                         targetPlant:SetAttribute("IsDead", true)
                         
                         for _, p in pairs(targetPlant:GetDescendants()) do
-                            -- 1. 隐藏实体零件
                             if p:IsA("BasePart") then
-                                if not p:GetAttribute("OriginalTransparency") then
+                                -- [🌟 修复：只有在没有初始记录的情况下才记录，防止把受击过程中的中间状态记下来]
+                                if p:GetAttribute("OriginalTransparency") == nil then
                                     p:SetAttribute("OriginalTransparency", p.Transparency)
                                 end
-                                p.Transparency = 1 
-                                
-                            -- 【🌟修复】：2. 关闭所有特效与光影，并记录原本的状态
+                                p.Transparency = 1 -- 死亡消失
                             elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
                                 if p:GetAttribute("OriginalEnabled") == nil then
                                     p:SetAttribute("OriginalEnabled", p.Enabled)
@@ -468,21 +485,29 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             
             local dropPos = rootPart.Position + Vector3.new(0, 3, 0)
             
+            plot:SetAttribute("LastZombieDeathPos", rootPart.Position)
             -- [🌟 新增：动态掉落逻辑]
             -- 以 200 血（普通僵尸基础血量）为 1 倍掉落基准
             local dropMultiplier = math.max(1, finalHP / 200)
             
             -- 计算掉落数量和单价
-            local coinCount = math.random(1, 2) + math.floor(dropMultiplier / 5) -- 稍微增加掉落的模型数量
-            local coinValue = math.floor(math.random(10, 20) * dropMultiplier)   -- 核心：价值随血量倍率翻倍
+            local coinCount = math.random(1, 2) + math.floor(dropMultiplier / 5) 
+            local coinValue = math.floor(math.random(10, 20) * dropMultiplier)   
             
-            -- 【性能保护】防止后期数量太多导致物理引擎卡顿，限制最多掉出 5 个金币模型，多余的倍率算到单价里
             if coinCount > 5 then
                 coinValue = math.floor(coinValue * (coinCount / 5))
                 coinCount = 5
             end
             
             CoinDropService.DropCoins(player, dropPos, coinCount, coinValue)
+
+            -- 👇 =================【新增：1% 概率掉落盲盒宝箱】================= 👇
+            if math.random(1, 100) == 1 then
+                local ZombieBoxService = require(script.Parent.ZombieBoxService)
+                ZombieBoxService.SpawnBox(player, dropPos)
+            end
+            -- 👆 =============================================================== 👆
+
 
             humanoid:Destroy() 
             rootPart.Anchored = false 
@@ -529,6 +554,8 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
 end
 
 function ZombieService.StartLevel(plot, levelId, player)
+    if IsBattleCancelled(plot, player) then return end
+
     if not activeSessions[player.UserId] or levelId == 1 then
         activeSessions[player.UserId] = { TotalCoins = 0, TotalSeeds = 0, TotalKills = 0 }
         plot:SetAttribute("ZombiesDefeated", 0)
@@ -549,18 +576,20 @@ function ZombieService.StartLevel(plot, levelId, player)
     if levelData and levelData.Waves then
         for waveIndex, wave in ipairs(levelData.Waves) do
             -- [🌟 修复]：如果手动点击了撤退，立即跳出波次生成循环
-            if plot:GetAttribute("IsGameOver") then break end
+            if IsBattleCancelled(plot, player) then break end
             
             task.spawn(function()
                 if wave.Zombies then
                     for _, zombieGroup in ipairs(wave.Zombies) do
                         for i = 1, zombieGroup.Count do
-                            if plot:GetAttribute("IsGameOver") then break end
+                            if IsBattleCancelled(plot, player) then break end
                             
                             while (plot:GetAttribute("ActiveZombies") or 0) >= MAX_ACTIVE_ZOMBIES do
-                                if plot:GetAttribute("IsGameOver") then return end
+                                if IsBattleCancelled(plot, player) then return end
                                 task.wait(0.5) 
                             end
+
+                            if IsBattleCancelled(plot, player) then return end
                             
                             local randomRow = math.random(1, 6)
                             ZombieService.SpawnZombie(plot, randomRow, zombieGroup.Type, player)
@@ -575,7 +604,7 @@ function ZombieService.StartLevel(plot, levelId, player)
             if wave.NextWaveTime and wave.NextWaveTime > 0 then
                 local currentWait = 0
                 while currentWait < wave.NextWaveTime do
-                    if plot:GetAttribute("IsGameOver") then break end
+                    if IsBattleCancelled(plot, player) then break end
                     local speedMult = plot:GetAttribute("GameSpeed") or 1
                     currentWait += task.wait(0.5) * speedMult
                 end
@@ -585,10 +614,10 @@ function ZombieService.StartLevel(plot, levelId, player)
 
     repeat
         task.wait(1)
-    until (plot:GetAttribute("ActiveZombies") <= 0) or (plot:GetAttribute("IsGameOver") == true)
+    until (plot:GetAttribute("ActiveZombies") <= 0) or IsBattleCancelled(plot, player)
 
     -- [🌟 修复核心逻辑]：确保无论是手动结束还是正常递归，状态都能被正确清理
-    if plot:GetAttribute("IsGameOver") then
+    if IsBattleCancelled(plot, player) then
         -- 这里不需要重复调用 FinalSettlement，因为 LevelService 已经调过了
         -- 但我们需要确保 activeSessions 即使在手动结束时也能被清理
         return 
@@ -600,6 +629,61 @@ function ZombieService.StartLevel(plot, levelId, player)
     
     session.TotalCoins += waveCoins
     session.TotalSeeds += waveSeeds
+
+    PlayerDataManager.UnlockNextLevel(player, levelId)
+
+   local AnalyticsService = game:GetService("AnalyticsService")
+    local data = PlayerDataManager.GetPlayerData(player)
+    local currentCoins = data and data.Coins or 0
+    -- 👇 [修复] 正确获取 RandomSeed 的最新库存
+    local currentSeeds = 0
+    if data and data.Inventory and data.Inventory.Seeds then
+        for _, sInfo in ipairs(data.Inventory.Seeds) do
+            if sInfo.ID == "RandomSeed" then
+                currentSeeds = sInfo.Quantity
+                break
+            end
+        end
+    end
+
+    -- 记录金币获取 (Source)
+    AnalyticsService:LogEconomyEvent(
+        player, 
+        Enum.AnalyticsEconomyFlowType.Source, -- 表示获取/产出
+        "Coins", -- 货币名称
+        waveCoins, -- 本次增加的数量
+        currentCoins, -- 变动后的余额
+        Enum.AnalyticsEconomyTransactionType.Gameplay.Name, -- 交易场景 (转为字符串)
+        "LevelClearReward_Level_" .. tostring(levelId) -- 物品/明细
+    )
+
+    -- 记录种子获取 (Source)
+    if waveSeeds > 0 then
+        AnalyticsService:LogEconomyEvent(
+            player, 
+            Enum.AnalyticsEconomyFlowType.Source, 
+            "Seeds", 
+            waveSeeds, 
+            currentSeeds, 
+            Enum.AnalyticsEconomyTransactionType.Gameplay.Name, 
+            "LevelClearReward_Level_" .. tostring(levelId)
+        )
+    end
+
+   -- 👇 =================【修改：在最后一个僵尸死亡的地方掉落盲盒宝箱】================= 👇
+    local ZombieBoxService = require(script.Parent.ZombieBoxService)
+    
+    -- 读取刚才记录的坐标。如果因为某种意外没记录到，给一个地块中心的保底坐标
+    local lastDeathPos = plot:GetAttribute("LastZombieDeathPos")
+    local dropPos = plot:GetPivot().Position + Vector3.new(0, 5, 0) 
+    
+    if lastDeathPos then
+        -- 在死亡坐标的正上方 5 格处生成，方便它稳稳地落到地上
+        dropPos = lastDeathPos + Vector3.new(0, 5, 0)
+    end
+    
+    ZombieBoxService.SpawnBox(player, dropPos)
+    -- 👆 =============================================================== 👆
 
     local nextLevelId = levelId + 1
     print("【关卡连战】第 "..levelId.." 关清理完毕，2秒后开始下一关...")
@@ -620,12 +704,27 @@ function ZombieService.FinalSettlement(player, plot, isVictory)
     local data = PlayerDataManager.GetPlayerData(player)
     
     local isNewRecord = data and lastLevel > (data.UnlockedLevel or 1)
+    -- 👇 【新增埋点代码】
+    if isVictory and isNewRecord then
+        if lastLevel == 1 then
+            AnalyticsService:LogFunnelStepEvent(player, "Progression", nil, 1, "Cleared_Level_1")
+            AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 3, "Step_3_First_Victory") 
+        elseif lastLevel == 5 then
+            AnalyticsService:LogFunnelStepEvent(player, "Progression", nil, 5, "Cleared_Level_5")
+        elseif lastLevel == 10 then
+            AnalyticsService:LogFunnelStepEvent(player, "Progression", nil, 10, "Cleared_Level_10")
+        end
+    end
     local showResultRE = ReplicatedStorage:FindFirstChild("ShowBattleResultRE")
     
     if showResultRE then
         showResultRE:FireClient(player, isVictory, lastLevel, isNewRecord, session.TotalKills, session.TotalCoins, session.TotalSeeds)
     end
-    
+    -- 👇 【新增埋点代码】：带数值的事件，记录单局击杀数
+    if session.TotalKills > 0 then
+        AnalyticsService:LogCustomEvent(player, "Level_Kill_Efficiency", session.TotalKills)
+    end
+        
     -- 清理缓存并释放锁定
     activeSessions[player.UserId] = nil 
     plot:SetAttribute("IsLevelActive", false)
@@ -688,50 +787,28 @@ function ZombieService.Init()
     end
 end
 function ZombieService.GenerateInfiniteLevel(levelId)
-    local waveCount = math.clamp(math.floor(levelId / 2) + 2, 4, 15) 
-    local waves = {}
+    -- [🌟 修改：无尽模式固定阵容] 直接复制第 20 关的配置，数量和种类不再随机
+    local baseLevelConfig = LevelConfig[20]
 
-    for w = 1, waveCount do
-        local waveZombies = {}
-        local totalZombiesInWave = math.floor(levelId * 0.8) + math.random(3, 6)
-        
-        for i = 1, totalZombiesInWave do
-            local pool = {}
-            local totalWeight = 0
-            
-            for _, zInfo in ipairs(LevelConfig.InfiniteZombiePool) do
-                if levelId >= zInfo.UnlockLevel then
-                    table.insert(pool, zInfo)
-                    totalWeight += zInfo.Weight
-                end
-            end
-            
-            local rand = math.random(1, totalWeight)
-            local currentWeight = 0
-            -- [修复：将默认保底僵尸改回 "Zombie"]
-            local selectedType = "Zombie" 
-            
-            for _, zInfo in ipairs(pool) do
-                currentWeight += zInfo.Weight
-                if rand <= currentWeight then
-                    selectedType = zInfo.Type
-                    break
-                end
-            end
-            
-            local found = false
-            for _, group in ipairs(waveZombies) do
-                if group.Type == selectedType then
-                    group.Count += 1
-                    found = true; break
-                end
-            end
-            if not found then table.insert(waveZombies, { Type = selectedType, Count = 1 }) end
-        end
-
-        table.insert(waves, { NextWaveTime = math.random(15, 22), Zombies = waveZombies })
+    return { 
+        LevelName = "Infinite Challenge Level " .. levelId, 
+        Waves = baseLevelConfig.Waves 
+    }
+end
+-- [🌟 准确功能：玩家退出时强制清理战斗会话与僵尸]
+function ZombieService.CleanupPlayerBattle(player)
+    local userId = player.UserId
+    
+    -- 1. 清理战斗会话记录，防止内存泄漏
+    if activeSessions[userId] then
+        activeSessions[userId] = nil
     end
 
-    return { LevelName = "无尽挑战 第 " .. levelId .. " 关", Waves = waves }
+    -- 2. 强力销毁该玩家地块关联的所有僵尸
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and obj:GetAttribute("IsZombie") and obj:GetAttribute("OwnerId") == userId then
+            obj:Destroy()
+        end
+    end
 end
 return ZombieService

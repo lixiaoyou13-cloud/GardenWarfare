@@ -2,12 +2,70 @@
 local PlotService = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AnalyticsService = game:GetService("AnalyticsService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local PlotUnlockConfig = require(ReplicatedStorage.Shared.PlotUnlockConfig)
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 
 local playerPlots = {}
+
+local function ResetPlotForNextOwner(plot)
+    local soilsFolder = plot:FindFirstChild("Soils")
+    if soilsFolder then
+        for _, soil in ipairs(soilsFolder:GetChildren()) do
+            if soil:IsA("BasePart") and string.find(soil.Name, "Soil") then
+                soil:SetAttribute("IsUnlocked", false)
+
+                local unlockPrompt = soil:FindFirstChild("UnlockPrompt")
+                if unlockPrompt then
+                    unlockPrompt:Destroy()
+                end
+
+                -- 👇 [🌟 新增：玩家退出时清理木牌]
+                local woodenSign = soil:FindFirstChild("WoodenSign")
+                if woodenSign then
+                    woodenSign:Destroy()
+                end
+                -- 👆 新增结束
+
+                local plantPrompt = soil:FindFirstChild("PlantPrompt")
+                if plantPrompt and plantPrompt:IsA("ProximityPrompt") then
+                    plantPrompt.ActionText = "Plant"
+                    plantPrompt.ObjectText = "Soil"
+                    plantPrompt.Enabled = false
+                    plantPrompt.HoldDuration = 0.5
+                end
+            end
+        end
+    end
+
+    local lawnFolder = plot:FindFirstChild("Lawn")
+    if lawnFolder then
+        for _, lawnPart in ipairs(lawnFolder:GetChildren()) do
+            if lawnPart:IsA("BasePart") then
+                lawnPart:SetAttribute("OccupiedBy", nil)
+                local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
+                if prompt then
+                    prompt.Enabled = true
+                end
+            end
+        end
+    end
+
+    local dave = plot:FindFirstChild("CrazyDave")
+    if dave then
+        local targetPart = dave.PrimaryPart or dave:FindFirstChildWhichIsA("BasePart")
+        if targetPart then
+            local prompt = targetPart:FindFirstChild("ShopPrompt")
+            if prompt and prompt:IsA("ProximityPrompt") then
+                prompt.ActionText = "Open Shop"
+                prompt.ObjectText = "Crazy Dave"
+                prompt.Enabled = true
+            end
+        end
+    end
+end
 
 function PlotService.AssignPlot(player)
     if playerPlots[player.UserId] then return playerPlots[player.UserId] end
@@ -27,6 +85,10 @@ function PlotService.AssignPlot(player)
 
     if chosenPlot then
        chosenPlot:SetAttribute("GameSpeed", 1) 
+        chosenPlot:SetAttribute("IsGameOver", false)
+        chosenPlot:SetAttribute("IsLevelActive", false)
+
+        ResetPlotForNextOwner(chosenPlot)
         
         -- 生成基地向日葵
         local BaseSunflowerService = require(script.Parent.BaseSunflowerService)
@@ -38,65 +100,142 @@ function PlotService.AssignPlot(player)
         -- ==========================================
         -- [🌟 新增：生成玩家领地身份牌 (所有人可见)]
         -- ==========================================
-        task.spawn(function()
-            -- 找到基地的中心点（通常是出生点，如果没有就随便找个能挂载的零件）
-            local spawnPart = chosenPlot:FindFirstChild("SpawnPoint") or chosenPlot:FindFirstChild("SpawnLocation") or chosenPlot:FindFirstChildWhichIsA("BasePart", true)
+      task.spawn(function()
+        
+            -- 获取头像数据
+            local avatarUrl = Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+
+            -- ---------- 功能 A：恢复旧版的基地上方悬浮牌 (BillboardGui) ----------
+           -- ---------- 功能 A：恢复旧版的基地上方悬浮牌 (BillboardGui) ----------
+            -- 🚀 1. 改为查找基地内名为 "NameTag" 的模型或零件
+            local nameTagObj = chosenPlot:FindFirstChild("NameTag", true)
+
+            print("【排错】系统分配给玩家的地块是: " .. chosenPlot.Name .. " | 是否找到 NameTag: " .. tostring(nameTagObj ~= nil))
+            local targetPart = nil
             
-            if spawnPart and not spawnPart:FindFirstChild("OwnerBillboard") then
+            if nameTagObj then
+                if nameTagObj:IsA("Model") then
+                    -- 【修改这里】：在找 BasePart 的时候加上 true，开启递归深度查找
+                    targetPart = nameTagObj.PrimaryPart or nameTagObj:FindFirstChildWhichIsA("BasePart", true)
+                elseif nameTagObj:IsA("BasePart") then
+                    targetPart = nameTagObj
+                end
+            end
+
+            -- 如果没有找到 NameTag，兜底使用原本的出生点
+            if not targetPart then
+                targetPart = chosenPlot:FindFirstChild("SpawnPoint") or chosenPlot:FindFirstChild("SpawnLocation") or chosenPlot:FindFirstChildWhichIsA("BasePart", true)
+            end
+            
+            if targetPart then
+                -- 清理可能残留的旧悬浮牌
+                local existingBillboard = targetPart:FindFirstChild("OwnerBillboard")
+                if existingBillboard then existingBillboard:Destroy() end
+
                 local billboard = Instance.new("BillboardGui")
                 billboard.Name = "OwnerBillboard"
-                billboard.Size = UDim2.new(0, 320, 0, 85)
-                -- 将身份牌悬浮在出生点正上方 25 格高的地方 (根据你的建筑高度自己微调 Y 轴数值)
-                billboard.StudsOffset = Vector3.new(0, 25, 0) 
-                billboard.AlwaysOnTop = true -- 开启穿透，隔着山或者墙也能看见
-                billboard.MaxDistance = 250 -- 离得太远就隐藏，防止满屏幕乱糟糟
+                billboard.Size = UDim2.new(24, 0, 6, 0) 
+                
+                -- 🚀 2. 位置修改：悬浮在 NameTag 正上方 (可微调中间的 8 来改变高度)
+                billboard.StudsOffset = Vector3.new(0, 20, 0) 
+                
+                billboard.AlwaysOnTop = true
+                billboard.MaxDistance = 250 
 
-                -- 半透明黑色背景框
+                -- 1. 背景框
                 local bgFrame = Instance.new("Frame")
                 bgFrame.Size = UDim2.new(1, 0, 1, 0)
                 bgFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
                 bgFrame.BackgroundTransparency = 0.5
                 local bgCorner = Instance.new("UICorner")
-                bgCorner.CornerRadius = UDim.new(0, 16)
+                bgCorner.CornerRadius = UDim.new(0.2, 0)
                 bgCorner.Parent = bgFrame
                 bgFrame.Parent = billboard
 
-                -- 1. 玩家真实头像 (使用 Roblox 官方 API 拉取)
+                -- 2. 玩家头像
                 local avatarImg = Instance.new("ImageLabel")
-                avatarImg.Size = UDim2.new(0, 65, 0, 65)
-                avatarImg.Position = UDim2.new(0, 10, 0.5, -32.5) -- 垂直居中，靠左
+                avatarImg.Size = UDim2.new(0.2, 0, 0.8, 0)
+                avatarImg.Position = UDim2.new(0.05, 0, 0.1, 0)
                 avatarImg.BackgroundTransparency = 1
-                -- 拉取高清的 420x420 大头贴
-                local content, isReady = Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
-                avatarImg.Image = content
+                avatarImg.Image = avatarUrl
                 local avatarCorner = Instance.new("UICorner")
-                avatarCorner.CornerRadius = UDim.new(1, 0) -- 圆形遮罩
+                avatarCorner.CornerRadius = UDim.new(1, 0)
                 avatarCorner.Parent = avatarImg
                 avatarImg.Parent = bgFrame
 
-                -- 2. 装饰小图标 (例如：一个小房子、小皇冠或植物图标)
+                -- 3. 装饰小图标
                 local decIcon = Instance.new("ImageLabel")
-                decIcon.Size = UDim2.new(0, 35, 0, 35)
-                decIcon.Position = UDim2.new(0, 85, 0.5, -17.5)
+                decIcon.Size = UDim2.new(0.1, 0, 0.4, 0)
+                decIcon.Position = UDim2.new(0.28, 0, 0.3, 0)
                 decIcon.BackgroundTransparency = 1
-                decIcon.Image = "rbxassetid://10886326447" -- 🌟 [请在这里替换成你想用的家园图标 ID]
+                decIcon.Image = "rbxassetid://10886326447"
                 decIcon.Parent = bgFrame
 
-                -- 3. 玩家昵称 (使用 DisplayName 支持玩家自己改的名字)
+               -- 4. 玩家昵称
                 local nameLabel = Instance.new("TextLabel")
-                nameLabel.Size = UDim2.new(1, -135, 1, 0)
-                nameLabel.Position = UDim2.new(0, 125, 0, 0)
+                nameLabel.Size = UDim2.new(0.55, 0, 1, 0)
+                nameLabel.Position = UDim2.new(0.4, 0, 0, 0)
                 nameLabel.BackgroundTransparency = 1
                 nameLabel.Text = player.DisplayName 
                 nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-                nameLabel.TextStrokeTransparency = 0.4 -- 微微加一点描边，让白色文字在白天也能看清
+                nameLabel.TextStrokeTransparency = 0.4
                 nameLabel.Font = Enum.Font.FredokaOne
-                nameLabel.TextSize = 28
+                nameLabel.TextScaled = true
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.Parent = bgFrame
 
-                -- 挂载！
-                billboard.Parent = spawnPart
+                -- 👇 ============= 这里是关键修改区 ============= 👇
+                
+                -- 🚀 3. 显式指定 UI 要挂载的实体零件 (必须加这一句)
+                billboard.Adornee = targetPart 
+                
+                billboard.Parent = targetPart
+                
+                -- 顺便打印一下到底挂在了哪个零件上，方便排错
+                print("【UI生成】成功！已挂载至目标: " .. tostring(targetPart.Name))
+            end
+
+            -- ---------- 功能 B：额外功能 - 木牌上的表面显示 (SurfaceGui) ----------
+            local paiModel = chosenPlot:FindFirstChild("pai", true)
+            local targetPart = paiModel and paiModel:FindFirstChild("Text")
+
+
+            
+            if targetPart and targetPart:IsA("BasePart") then
+                -- 清理旧的木牌 GUI
+                if targetPart:FindFirstChild("PlayerIdentitySurfaceGui") then
+                    targetPart.PlayerIdentitySurfaceGui:Destroy()
+                end
+
+                local surfaceGui = Instance.new("SurfaceGui")
+                surfaceGui.Name = "PlayerIdentitySurfaceGui"
+                surfaceGui.Face = Enum.NormalId.Front 
+                surfaceGui.MaxDistance = 300 -- 您要求的300米可见
+                surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+                surfaceGui.PixelsPerStud = 50
+
+                -- 木牌头像 (70% 高度)
+                local sImg = Instance.new("ImageLabel")
+                sImg.Size = UDim2.new(1, 0, 0.7, 0)
+                sImg.BackgroundTransparency = 1
+                sImg.Image = avatarUrl
+                sImg.ScaleType = Enum.ScaleType.Fit
+                sImg.Parent = surfaceGui
+
+                -- 木牌名称 (30% 高度)
+                local sText = Instance.new("TextLabel")
+                sText.Size = UDim2.new(1, 0, 0.3, 0)
+                sText.Position = UDim2.new(0, 0, 0.7, 0)
+                sText.BackgroundTransparency = 1
+                sText.Text = player.DisplayName
+                sText.TextColor3 = Color3.new(1, 1, 1)
+                sText.TextScaled = true
+                sText.Font = Enum.Font.FredokaOne
+                sText.TextStrokeTransparency = 0.5
+                sText.Parent = surfaceGui
+
+                surfaceGui.Parent = targetPart
+                print("【UI生成】头像获取完毕，开始创建牌子...2222222222222222222222222222")
             end
         end)
         local dave = chosenPlot:FindFirstChild("CrazyDave")
@@ -109,8 +248,8 @@ function PlotService.AssignPlot(player)
                 if not existingPrompt then
                     local prompt = Instance.new("ProximityPrompt")
                     prompt.Name = "ShopPrompt"
-                    prompt.ActionText = "打开商店"
-                    prompt.ObjectText = "疯狂戴夫"
+                    prompt.ActionText = "Open Shop"
+                    prompt.ObjectText = "Crazy Dave"
                     prompt.KeyboardKeyCode = Enum.KeyCode.F -- 绑定按键 F
                     prompt.RequiresLineOfSight = false
                     prompt.MaxActivationDistance = 10 -- 触发距离
@@ -162,6 +301,10 @@ function PlotService.Init()
     Players.PlayerAdded:Connect(function(player)
         task.wait(1) 
         PlotService.AssignPlot(player)
+        
+    end)
+    Players.PlayerRemoving:Connect(function(player)
+        PlotService.ReleasePlot(player)
     end)
     
     for _, player in ipairs(Players:GetPlayers()) do
@@ -171,12 +314,29 @@ function PlotService.Init()
         end)
     end
 
+    local MarketplaceService = game:GetService("MarketplaceService")
+    local SPEED_PASS_ID = 1811835638 
+    
     local setSpeedRE = ReplicatedStorage:FindFirstChild("SetSpeedRE") or Instance.new("RemoteEvent")
     setSpeedRE.Name = "SetSpeedRE"
     setSpeedRE.Parent = ReplicatedStorage
     setSpeedRE.OnServerEvent:Connect(function(player, speed)
         local plot = PlotService.GetPlayerPlot(player)
         if plot then
+            -- [🌟 服务端防作弊拦截]
+            if speed == 4 then
+                local hasPass = false
+                pcall(function()
+                    hasPass = MarketplaceService:UserOwnsGamePassAsync(player.UserId, SPEED_PASS_ID)
+                end)
+                
+                -- 如果服务端查明该玩家没付过钱，直接 return 拦截请求！
+                if not hasPass then
+                    warn("玩家 " .. player.Name .. " 未购买通行证，尝试非法开启 4 倍速！")
+                    return
+                end
+            end
+
             plot:SetAttribute("GameSpeed", speed)
             setSpeedRE:FireClient(player, speed)
         end
@@ -203,54 +363,225 @@ function PlotService.UpdateSoilVisuals(player, plot)
                 end
 
                 local prompt = soil:FindFirstChild("UnlockPrompt")
+                local woodenSign = soil:FindFirstChild("WoodenSign")
 
                 if soilId <= unlockedCount then
                     -- 🟢 情况1：已解锁
                     soil:SetAttribute("IsUnlocked", true)
                     soil.Color = soil:GetAttribute("OriginalColor") -- 恢复原本颜色
                     if prompt then prompt:Destroy() end -- 移除购买提示
+                    if woodenSign then woodenSign:Destroy() end -- 解锁后销毁木牌
 
                 elseif soilId == targetUnlockId then
                     -- 🟡 情况2：当前可解锁的下一块地
                     soil:SetAttribute("IsUnlocked", false)
-                    soil.Color = Color3.fromRGB(124, 160, 64) -- 变成黄色
+                    soil.Color = Color3.fromRGB(218, 179, 51) -- 变成黄色
 
-                    -- 挂载 F 键购买提示
+                    -- 生成待解锁提示木牌
+                    if not woodenSign then
+                        local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
+                        local signTemplate = itemModels and itemModels:FindFirstChild("WoodenSign")
+                        
+                        if signTemplate then
+                            woodenSign = signTemplate:Clone()
+                            woodenSign.Name = "WoodenSign"
+                            
+                            -- 坐标计算
+                            if woodenSign:IsA("Model") then
+                                local _, size = woodenSign:GetBoundingBox()
+                                local yOffset = (soil.Size.Y / 2) + (size.Y / 2)
+                                woodenSign:PivotTo(soil.CFrame * CFrame.new(0, yOffset, 0))
+                            elseif woodenSign:IsA("BasePart") then
+                                local yOffset = (soil.Size.Y / 2) + (woodenSign.Size.Y / 2)
+                                woodenSign.CFrame = soil.CFrame * CFrame.new(0, yOffset, 0)
+                            end
+                            
+                            -- 取消碰撞并焊死
+                            for _, part in ipairs(woodenSign:GetDescendants()) do
+                                if part:IsA("BasePart") then
+                                    part.CanCollide = false
+                                    part.Anchored = true
+                                end
+                            end
+            
+                            -- 在 NegativePart 上生成 Unlock 文本
+                            local negativePart = woodenSign:FindFirstChild("NegativePart", true)
+                            if negativePart and negativePart:IsA("BasePart") then
+                                if negativePart:FindFirstChild("UnlockTextGui") then
+                                    negativePart.UnlockTextGui:Destroy()
+                                end
+
+                                local surfaceGui = Instance.new("SurfaceGui")
+                                surfaceGui.Name = "UnlockTextGui"
+                                surfaceGui.Face = Enum.NormalId.Front
+                                surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+                                surfaceGui.PixelsPerStud = 50
+                                surfaceGui.AlwaysOnTop = false 
+
+                                local textLabel = Instance.new("TextLabel")
+                                textLabel.Size = UDim2.new(1, 0, 1, 0)
+                                textLabel.BackgroundTransparency = 1
+                                textLabel.Text = "Unlock"
+                                textLabel.TextColor3 = Color3.new(1, 1, 1)
+                                textLabel.TextScaled = true
+                                textLabel.Font = Enum.Font.FredokaOne
+                                textLabel.TextStrokeTransparency = 0.5
+                                textLabel.Parent = surfaceGui
+
+                                surfaceGui.Parent = negativePart
+                            end
+                            woodenSign.Parent = soil
+                        end
+                    end
+
+                    -- 👇 [🌟 核心修复区：挂载购买提示，且仅对目标地块生效]
                     if not prompt then
                         prompt = Instance.new("ProximityPrompt")
                         prompt.Name = "UnlockPrompt"
-                        prompt.ActionText = "解锁土地"
+                        prompt.ActionText = "Unlock Plot"
                         prompt.KeyboardKeyCode = Enum.KeyCode.F
                         prompt.RequiresLineOfSight = false
                         prompt.MaxActivationDistance = 8
+                        prompt.HoldDuration = 0.5 -- [🌟 修复2] 必须长按0.5秒，杜绝按键连发穿透多块地！
                         prompt.Parent = soil
 
-                        -- 当玩家按下 F 键时触发购买
+                        -- 当玩家长按 F 键时触发购买
                         prompt.Triggered:Connect(function(triggerPlayer)
                             if triggerPlayer ~= player then return end -- 只有地块主人能买
                             local price = PlotUnlockConfig.UnlockPrices[soilId]
                             
                             -- 扣除金币，如果成功则解锁
                             if price and PlayerDataManager.ConsumeCoins(player, price) then
+                                local data = PlayerDataManager.GetPlayerData(player)
+                                AnalyticsService:LogEconomyEvent(
+                                    player,
+                                    Enum.AnalyticsEconomyFlowType.Sink,
+                                    "Coins",
+                                    price,
+                                    data and data.Coins or 0,
+                                    Enum.AnalyticsEconomyTransactionType.Gameplay.Name,
+                                    "UnlockPlot_Soil_" .. tostring(soilId)
+                                )
                                 PlayerDataManager.IncrementUnlockedPlots(player)
                                 PlotService.UpdateSoilVisuals(player, plot) -- 刷新所有土地状态
                             else
-                                -- 这里你可以将来换成 UI 提示：金币不足
-                                print("金币不足，需要: " .. tostring(price))
+                                local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                                if showNotifRE then 
+                                    showNotifRE:FireClient(player, "Notice", "Not enough coins!") 
+                                end
                             end
                         end)
                     end
                     -- 更新提示框上显示的价格
-                    prompt.ObjectText = "价格: " .. tostring(PlotUnlockConfig.UnlockPrices[soilId])
+                    prompt.ObjectText = "Price:" .. tostring(PlotUnlockConfig.UnlockPrices[soilId])
+                    -- 👆 [核心修复区结束]
 
                 else
-                    -- 🟢 情况3：未来才能解锁的地（跳级的地）
+                    -- 🔴 情况3：未来才能解锁的地（跳级的地）
                     soil:SetAttribute("IsUnlocked", false)
-                    soil.Color = Color3.fromRGB(22, 170, 46) -- 变成绿色
+                    soil.Color = Color3.fromRGB(163, 124, 18) -- 变成绿色
                     if prompt then prompt:Destroy() end -- 没有任何交互
+                    if woodenSign then woodenSign:Destroy() end -- 兜底销毁
                 end
             end
         end
+    end
+end
+-- [🌟 新增：玩家退出时彻底清理地块]
+function PlotService.ReleasePlot(player)
+    local userId = player.UserId
+    local plot = playerPlots[userId]
+    
+    if plot then
+        print("【地块系统】玩家 " .. player.Name .. " 已退出，正在回收地块: " .. plot.Name)
+        
+        -- 0. 先停止战斗状态，避免后台刷怪协程继续运行
+        plot:SetAttribute("IsGameOver", true)
+        plot:SetAttribute("IsLevelActive", false)
+
+        local okZombie, ZombieService = pcall(function()
+            return require(script.Parent.ZombieService)
+        end)
+        if okZombie and ZombieService and ZombieService.CleanupPlayerBattle then
+            ZombieService.CleanupPlayerBattle(player)
+        end
+        
+        -- 1. 彻底销毁地块上的所有植物
+        local plantsFolder = plot:FindFirstChild("Plants")
+        if plantsFolder then
+            for _, plant in ipairs(plantsFolder:GetChildren()) do
+                plant:Destroy()
+            end
+        end
+
+        -- 1.5 彻底销毁草坪上的战斗植物
+        local lawnFolder = plot:FindFirstChild("Lawn")
+        if lawnFolder then
+            for _, lawnPart in ipairs(lawnFolder:GetChildren()) do
+                if lawnPart:IsA("BasePart") then
+                    for _, child in ipairs(lawnPart:GetChildren()) do
+                        if child:GetAttribute("IsCombatPlant") then
+                            child:Destroy()
+                        end
+                    end
+                end
+            end
+        end
+        -- 2.1 销毁悬浮牌 (OwnerBillboard)
+        local spawnPart = plot:FindFirstChild("SpawnPoint") or plot:FindFirstChild("SpawnLocation") or plot:FindFirstChildWhichIsA("BasePart", true)
+        if spawnPart then
+            local billboard = spawnPart:FindFirstChild("OwnerBillboard")
+            if billboard then billboard:Destroy() end
+        end
+
+       -- 2. 销毁身份名牌 (PlayerIdentitySurfaceGui)
+        local paiModel = plot:FindFirstChild("pai", true)
+        local targetPart = paiModel and paiModel:FindFirstChild("Text")
+        
+        if targetPart then
+            local identityGui = targetPart:FindFirstChild("PlayerIdentitySurfaceGui")
+            if identityGui then identityGui:Destroy() end
+            
+            -- 兜底清理旧版的纯名字名牌
+            local oldNameGui = targetPart:FindFirstChild("PlayerNameSurfaceGui")
+            if oldNameGui then oldNameGui:Destroy() end
+        end
+
+        local collectSunPart = plot:FindFirstChild("CollectSun", true)
+        if collectSunPart then
+            local harvestPrompt = collectSunPart:FindFirstChild("HarvestPrompt")
+            if harvestPrompt then
+                harvestPrompt:Destroy()
+            end
+        end
+
+        -- 3. 兜底销毁场上的 OwnerId 关联对象（僵尸、基地向日葵、其他专属模型）
+        for _, obj in pairs(game.Workspace:GetChildren()) do
+            if obj:IsA("Model") and obj:GetAttribute("OwnerId") == userId then
+                obj:Destroy()
+            end
+        end
+
+        for _, obj in ipairs(plot:GetChildren()) do
+            if obj:IsA("Model") and obj:GetAttribute("OwnerId") == userId then
+                obj:Destroy()
+            end
+        end
+
+        -- 4. 重置地块交互与视觉状态，让下一个玩家接手时是干净的
+        ResetPlotForNextOwner(plot)
+
+        -- 5. 重置地块属性，让其他新玩家可以占用
+        plot:SetAttribute("OwnerId", nil)
+        plot:SetAttribute("IsLevelActive", false)
+        plot:SetAttribute("IsGameOver", false)
+        plot:SetAttribute("CurrentLevel", 1)
+        plot:SetAttribute("ActiveZombies", 0)
+        plot:SetAttribute("ZombiesDefeated", 0)
+        plot:SetAttribute("GameSpeed", 1)
+        
+        -- 6. 从缓存中移除
+        playerPlots[userId] = nil
     end
 end
 

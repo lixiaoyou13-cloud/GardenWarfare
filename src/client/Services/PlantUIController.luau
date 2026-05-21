@@ -27,10 +27,10 @@ function PlantUIController.Init()
             if statusLabel then
                 -- 身份识别变装！
                 if isMine then
-                    statusLabel.Text = "✅ 已成熟"
+                    statusLabel.Text = "✅ Mature"
                     statusLabel.TextColor3 = Color3.fromRGB(85, 255, 127)
                 else
-                    statusLabel.Text = "✋ 可偷取"
+                    statusLabel.Text = "✋ Stealable"
                     statusLabel.TextColor3 = Color3.fromRGB(255, 170, 0)
                 end
             end
@@ -54,9 +54,9 @@ function PlantUIController.Init()
                     
                     if prompt then
                         if isMine then
-                            prompt.ActionText = "收获"
+                            prompt.ActionText = "Harvest"
                         else
-                            prompt.ActionText = "偷取"
+                            prompt.ActionText = "Steal"
                         end
                     end
                 end

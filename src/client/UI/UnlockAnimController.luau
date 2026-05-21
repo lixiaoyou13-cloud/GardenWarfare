@@ -78,6 +78,7 @@ function UnlockAnimController.PlayUnlockAnim(plantId, itemName, qualityColor, su
 
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "TempUnlockUI"
+    screenGui.ResetOnSpawn = false
     screenGui.DisplayOrder = 9999 
     screenGui.Parent = playerGui
 
@@ -117,7 +118,7 @@ function UnlockAnimController.PlayUnlockAnim(plantId, itemName, qualityColor, su
     nameLabel.Size = UDim2.new(1, 0, 0, 50)
     nameLabel.BackgroundTransparency = 1
     nameLabel.Font = Enum.Font.FredokaOne
-    nameLabel.Text = itemName or "新植物"
+    nameLabel.Text = itemName or "New Plant"
     nameLabel.TextColor3 = qualityColor or Color3.fromRGB(255, 255, 255)
     nameLabel.TextSize = 40
     nameLabel.TextTransparency = 1 
@@ -131,7 +132,7 @@ function UnlockAnimController.PlayUnlockAnim(plantId, itemName, qualityColor, su
     subLabel.Size = UDim2.new(1, 0, 0, 30)
     subLabel.BackgroundTransparency = 1
     subLabel.Font = Enum.Font.SourceSansBold
-    subLabel.Text = subText or "图鉴已更新"
+    subLabel.Text = subText or "Collection Updated"
     subLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
     subLabel.TextSize = 26
     subLabel.TextTransparency = 1
@@ -203,7 +204,7 @@ function UnlockAnimController.Init()
         local plantDetail = ItemConfig.Plants[plantId]
         if not plantDetail then return end
 
-        local mutName = ItemConfig.MutationName[mutationLevel] or "普通"
+        local mutName = ItemConfig.MutationName[mutationLevel] or "Normal"
         local itemName = mutName .. "·" .. (plantDetail.Name or plantId)
         local iconId = plantDetail.IconId or ""
 
@@ -212,7 +213,7 @@ function UnlockAnimController.Init()
         elseif mutationLevel == 3 then qualityColor = Color3.fromRGB(170, 85, 255)
         elseif mutationLevel == 4 then qualityColor = Color3.fromRGB(255, 170, 0) end
 
-        local subText = mutationLevel > 1 and "⭐ 发现稀有变异！" or "📖 发现新物种！"
+        local subText = mutationLevel > 1 and "⭐ Rare Mutation Discovered!" or "📖 New Species Discovered!"
         UnlockAnimController.PlayUnlockAnim(plantId, itemName, qualityColor, subText)
     end)
 end

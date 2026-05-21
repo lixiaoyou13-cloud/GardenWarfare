@@ -8,7 +8,7 @@ local TweenService = game:GetService("TweenService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local BaseItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("BaseItemConfig"))
-local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) -- [🌟 引入模块]
+local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) 
 
 function HotbarController.Init()
     local player = Players.LocalPlayer
@@ -65,12 +65,10 @@ function HotbarController.Init()
             end 
         end
 
+        local displayIndex = 1
         for index, compositeId in ipairs(hotbarList) do
-            if index > 8 then break end 
-            local targetLayoutOrder, keyHint = index, ""
-            if index == 1 then targetLayoutOrder = 1; keyHint = "1" 
-            else targetLayoutOrder = index + 1; keyHint = tostring(index + 1) end
-            
+            if compositeId == "System_Backpack" then continue end 
+
             local parts = string.split(compositeId, "_")
             local itemType, realId = parts[1], parts[2]
             local mutLvl = tonumber(parts[3]) or 1
@@ -78,33 +76,52 @@ function HotbarController.Init()
             local qty, itemDetail = 0, nil
 
             if itemType == "Seed" then 
-                qty = seedQuantityMap[realId] or 0; itemDetail = ItemConfig.Seeds and ItemConfig.Seeds[realId]
+                qty = seedQuantityMap[realId] or 0;
+                itemDetail = ItemConfig.Seeds and ItemConfig.Seeds[realId]
             elseif itemType == "Plant" then 
-                qty = plantQuantityMap[realId .. "_" .. mutLvl] or 0; itemDetail = ItemConfig.Plants and ItemConfig.Plants[realId]
+                qty = plantQuantityMap[realId .. "_" .. mutLvl] or 0;
+                itemDetail = ItemConfig.Plants and ItemConfig.Plants[realId]
             elseif itemType == "Tool" then 
-                qty = "∞"; itemDetail = BaseItemConfig.Tools and BaseItemConfig.Tools[realId] 
+                qty = "∞";
+                itemDetail = BaseItemConfig.Tools and BaseItemConfig.Tools[realId] 
             end
 
             if (type(qty) == "string" or qty > 0) and itemDetail then
+                local targetLayoutOrder, keyHint
+                if displayIndex == 1 then 
+                    targetLayoutOrder = 1;
+                    keyHint = "1" 
+                else 
+                    targetLayoutOrder = displayIndex + 1 
+                    local hintNum = displayIndex + 1
+                    keyHint = (hintNum == 10) and "0" or tostring(hintNum) 
+                end
+
+                if displayIndex >= 10 then break end 
+                
                 currentItems[compositeId] = true
                 local targetSlot = hotbarFrame:FindFirstChild(compositeId)
                 
                 local lastClickTick = 0
                 local function onSlotClicked() 
-                    if os.clock() - lastClickTick < 0.1 then return end; lastClickTick = os.clock(); toggleEquip(targetSlot) 
+                    if os.clock() - lastClickTick < 0.1 then return end;
+                    lastClickTick = os.clock(); toggleEquip(targetSlot) 
                 end
 
                 if not targetSlot then
-                    targetSlot = slotTemplate:Clone(); targetSlot.Name = compositeId; targetSlot.Visible = true; targetSlot.Parent = hotbarFrame
+                    targetSlot = slotTemplate:Clone();
+                    targetSlot.Name = compositeId; targetSlot.Visible = true; targetSlot.Parent = hotbarFrame
 
-                    local isHoveringSlot = false; local isHoveringBtn = false
+                    local isHoveringSlot = false;
+                    local isHoveringBtn = false
 
                     if itemType == "Seed" or itemType == "Plant" then
                         local cBtn = closeBtnTemplate:Clone()
                         cBtn.Name = "CloseBtn"
                         cBtn.AnchorPoint = Vector2.new(0.5, 1) 
                         cBtn.Position = UDim2.new(0.5, 0, 0, 0) 
-                        cBtn.ZIndex = 0; cBtn.Visible = false; cBtn.Parent = targetSlot
+                        cBtn.ZIndex = 0;
+                        cBtn.Visible = false; cBtn.Parent = targetSlot
                         
                         local function updateVisibility()
                             task.delay(0.05, function() if cBtn and cBtn.Parent then cBtn.Visible = (isHoveringSlot or isHoveringBtn) end end)
@@ -130,7 +147,8 @@ function HotbarController.Init()
                     
                     targetSlot.InputBegan:Connect(function(input) 
                         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
-                            if isHoveringBtn then return end; onSlotClicked() 
+                            if isHoveringBtn then return end;
+                            onSlotClicked() 
                         end 
                     end)
                 end
@@ -145,12 +163,20 @@ function HotbarController.Init()
                     if icomNode then icomNode.Visible = false end
                     if not customIcon then
                         customIcon = Instance.new("ImageLabel")
-                        customIcon.Name = "CustomIcon"; customIcon.Size = UDim2.new(1, -10, 1, -10)
-                        customIcon.Position = UDim2.new(0.5, 0, 0.5, 0); customIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-                        customIcon.BackgroundTransparency = 1; customIcon.ScaleType = Enum.ScaleType.Fit
-                        customIcon.ZIndex = 2; customIcon.Active = false; customIcon.Parent = targetSlot
+                        customIcon.Name = "CustomIcon";
+                        customIcon.Size = UDim2.new(1, -10, 1, -10)
+                        customIcon.Position = UDim2.new(0.5, 0, 0.5, 0);
+                        customIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+                        customIcon.BackgroundTransparency = 1;
+                        customIcon.ScaleType = Enum.ScaleType.Fit
+                        customIcon.ZIndex = 2;
+                        customIcon.Active = false; customIcon.Parent = targetSlot
                     end
-                    customIcon.Image = "rbxthumb://type=Asset&id=129146573433376&w=150&h=150"
+                    if itemDetail and itemDetail.IconId then
+                        customIcon.Image = itemDetail.IconId
+                    else
+                        customIcon.Image = "rbxthumb://type=Asset&id=129146573433376&w=150&h=150"
+                    end
                     customIcon.Visible = true
                 else
                     if customIcon then customIcon.Visible = false end
@@ -158,7 +184,7 @@ function HotbarController.Init()
                     if icomNode then
                         icomNode.Visible = true
                         if icomNode:IsA("ViewportFrame") then 
-                            UIEffectUtil.RenderToViewport(icomNode, realId, itemType, mutLvl) -- [🌟 模块化调用]
+                            UIEffectUtil.RenderToViewport(icomNode, realId, itemType, mutLvl)
                         elseif icomNode:IsA("ImageLabel") or icomNode:IsA("ImageButton") then 
                             icomNode.Image = itemDetail.IconId or "" 
                         end
@@ -172,9 +198,14 @@ function HotbarController.Init()
                 local nameLabel = targetSlot:FindFirstChild("ItemName", true)
                 if nameLabel then 
                     local mutPrefix = ""
-                    if itemType == "Plant" and mutLvl > 1 then mutPrefix = "[" .. (ItemConfig.MutationName and ItemConfig.MutationName[mutLvl] or "变异") .. "] " end
+                    if itemType == "Plant" and mutLvl > 1 then 
+                        mutPrefix = "[" .. (ItemConfig.MutationName and ItemConfig.MutationName[mutLvl] or "Variant") .. "] " 
+                    end
                     nameLabel.Text = mutPrefix .. (itemDetail.Name or "")
-                    nameLabel.ZIndex = 3; nameLabel.Visible = true
+                    nameLabel.TextWrapped = true
+                    nameLabel.TextScaled = true
+                    nameLabel.ZIndex = 3
+                    nameLabel.Visible = true
                 end
                 
                 local indexLabel = targetSlot:FindFirstChild("Index")
@@ -184,6 +215,8 @@ function HotbarController.Init()
                     if itemType == "Tool" then targetSlot.Quantity.Visible = false
                     else targetSlot.Quantity.Text = (type(qty) == "number" and "x" or "") .. tostring(qty); targetSlot.Quantity.ZIndex = 3; targetSlot.Quantity.Visible = true end
                 end
+
+                displayIndex += 1 
             end
         end
         
@@ -194,15 +227,18 @@ function HotbarController.Init()
         local backpackSlot = hotbarFrame:FindFirstChild(backpackId)
         local lastBpClickTick = 0
         local function onBackpackClicked()
-            if os.clock() - lastBpClickTick < 0.1 then return end; lastBpClickTick = os.clock()
+            if os.clock() - lastBpClickTick < 0.1 then return end;
+            lastBpClickTick = os.clock()
             local scaleObj = backpackSlot and backpackSlot:FindFirstChild("UIScale")
-            if scaleObj then TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play(); task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) end
+            if scaleObj then TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play();
+            task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) end
             local invGui = basicGui:FindFirstChild("InventoryGui")
             if invGui then invGui.Enabled = not invGui.Enabled end
         end
 
         if not backpackSlot then
-            backpackSlot = slotTemplate:Clone(); backpackSlot.Name = backpackId; backpackSlot.Visible = true; backpackSlot.Parent = hotbarFrame
+            backpackSlot = slotTemplate:Clone();
+            backpackSlot.Name = backpackId; backpackSlot.Visible = true; backpackSlot.Parent = hotbarFrame
             backpackSlot.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then onBackpackClicked() end end)
         end
         
@@ -213,21 +249,29 @@ function HotbarController.Init()
         local bpCustomIcon = backpackSlot:FindFirstChild("CustomIcon", true)
         if not bpCustomIcon then
             bpCustomIcon = Instance.new("ImageLabel")
-            bpCustomIcon.Name = "CustomIcon"; bpCustomIcon.Size = UDim2.new(1, -10, 1, -10)
-            bpCustomIcon.Position = UDim2.new(0.5, 0, 0.5, 0); bpCustomIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-            bpCustomIcon.BackgroundTransparency = 1; bpCustomIcon.ScaleType = Enum.ScaleType.Fit
-            bpCustomIcon.ZIndex = 2; bpCustomIcon.Active = false; bpCustomIcon.Parent = backpackSlot
+            bpCustomIcon.Name = "CustomIcon";
+            bpCustomIcon.Size = UDim2.new(1, -10, 1, -10)
+            bpCustomIcon.Position = UDim2.new(0.5, 0, 0.5, 0);
+            bpCustomIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+            bpCustomIcon.BackgroundTransparency = 1;
+            bpCustomIcon.ScaleType = Enum.ScaleType.Fit
+            bpCustomIcon.ZIndex = 2; bpCustomIcon.Active = false;
+            bpCustomIcon.Parent = backpackSlot
         end
         bpCustomIcon.Image = "rbxthumb://type=Asset&id=108540025723786&w=150&h=150"
-        bpCustomIcon.Visible = true; backpackSlot.LayoutOrder = 2
+        bpCustomIcon.Visible = true;
+        backpackSlot.LayoutOrder = 2
         local bpIndexLabel = backpackSlot:FindFirstChild("Index")
         if bpIndexLabel then bpIndexLabel.Text = "2"; bpIndexLabel.ZIndex = 3; bpIndexLabel.Visible = true end
         if backpackSlot:FindFirstChild("Quantity") then backpackSlot.Quantity.Visible = false end
         local bpNameLabel = backpackSlot:FindFirstChild("ItemName", true)
         if bpNameLabel then 
-            bpNameLabel.Text = (backpackDetail and backpackDetail.Name) or "背包"
+            bpNameLabel.Text = (backpackDetail and backpackDetail.Name) or "Backpack"
+            bpNameLabel.TextWrapped = true 
+            bpNameLabel.TextScaled = true  
             bpNameLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
-            bpNameLabel.ZIndex = 3; bpNameLabel.Visible = true 
+            bpNameLabel.ZIndex = 3
+            bpNameLabel.Visible = true
         end
         
         for _, slot in pairs(hotbarFrame:GetChildren()) do
@@ -236,55 +280,102 @@ function HotbarController.Init()
                 slot:Destroy()
             end
          end
+
+         -- 👇 [🌟 核心修复 1：保证刷新 UI 后（如拾取空投获得了新物品），当前手持的物品依然能保持放大状态]
+         for _, slot in pairs(hotbarFrame:GetChildren()) do
+             if slot:IsA("Frame") then
+                 local scaleObj = slot:FindFirstChild("UIScale")
+                 if scaleObj then
+                     scaleObj.Scale = (slot.Name == currentEquippedId) and 1.15 or 1.0
+                 end
+             end
+         end
     end
 
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end 
-        if input.KeyCode == Enum.KeyCode.One then
-            for _, child in pairs(hotbarFrame:GetChildren()) do if child:IsA("Frame") and string.split(child.Name, "_")[1] == "Tool" then toggleEquip(child); break end end
-            return
-        end
-        if input.KeyCode == Enum.KeyCode.Two then
-            local backpackSlot = hotbarFrame:FindFirstChild("System_Backpack")
-            local scaleObj = backpackSlot and backpackSlot:FindFirstChild("UIScale")
-            if scaleObj then TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play(); task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) end
-            local invGui = basicGui:FindFirstChild("InventoryGui")
-            if invGui then invGui.Enabled = not invGui.Enabled end
-            return
-        end
         
-        local activeSlots = {}
-        for _, child in pairs(hotbarFrame:GetChildren()) do
-            if child:IsA("Frame") then 
-                local prefix = string.split(child.Name, "_")[1]; if prefix == "Seed" or prefix == "Plant" then table.insert(activeSlots, child) end 
+        local keyMap = {
+            [Enum.KeyCode.One] = "1", [Enum.KeyCode.Two] = "2", [Enum.KeyCode.Three] = "3",
+            [Enum.KeyCode.Four] = "4", [Enum.KeyCode.Five] = "5", [Enum.KeyCode.Six] = "6",
+            [Enum.KeyCode.Seven] = "7", [Enum.KeyCode.Eight] = "8", [Enum.KeyCode.Nine] = "9",
+            [Enum.KeyCode.Zero] = "0"
+        }
+        
+        local pressedNum = keyMap[input.KeyCode]
+        if not pressedNum then return end
+
+        for _, slot in pairs(hotbarFrame:GetChildren()) do
+            if slot:IsA("Frame") then
+                local indexLabel = slot:FindFirstChild("Index")
+                
+                if indexLabel and indexLabel.Text == pressedNum and slot.Visible then
+                    if slot.Name == "System_Backpack" then
+                        local scaleObj = slot:FindFirstChild("UIScale")
+                        if scaleObj then 
+                            TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play()
+                            task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) 
+                        end
+                        local invGui = basicGui:FindFirstChild("InventoryGui")
+                        if invGui then invGui.Enabled = not invGui.Enabled end
+                    else
+                        toggleEquip(slot)
+                    end
+                    break 
+                end
             end
         end
-        table.sort(activeSlots, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
-        local keyMap = { [Enum.KeyCode.Three] = 1, [Enum.KeyCode.Four] = 2, [Enum.KeyCode.Five] = 3, [Enum.KeyCode.Six] = 4, [Enum.KeyCode.Seven] = 5, [Enum.KeyCode.Eight] = 6, [Enum.KeyCode.Nine] = 7 }
-        local idx = keyMap[input.KeyCode]
-        if idx and idx <= #activeSlots then toggleEquip(activeSlots[idx]) end
     end)
 
     local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF")
     RefreshHotbar(getPlayerDataRF:InvokeServer())
     ReplicatedStorage:WaitForChild("UpdateInventoryRE").OnClientEvent:Connect(RefreshHotbar)
 
-    -- [🌟 新增]：监听服务端的强制选中指令（在背包中点击物品时自动举起）
     local forceSelectRE = ReplicatedStorage:WaitForChild("ForceSelectRE", 5)
     if forceSelectRE then
         forceSelectRE.OnClientEvent:Connect(function(compositeId)
-            -- 寻找快捷栏中对应的槽位
             local targetSlot = hotbarFrame:FindFirstChild(compositeId)
             if targetSlot then
-                -- 如果当前手里拿的不是这个物品，就自动触发装备逻辑
                 if currentEquippedId ~= compositeId then
                     toggleEquip(targetSlot)
                 end
             end
         end)
     end
+
+    -- ==========================================
+    -- 👇 [🌟 核心修复 2：监听服务端的物理装备状态，保持 UI 绝对同步！]
+    -- ==========================================
+    local function onEquipChanged()
+        local char = player.Character
+        if not char then return end
+        
+        -- 读取服务端最新赋予给角色的真实装备 ID
+        local realEquipped = char:GetAttribute("EquippedSeed")
+        currentEquippedId = realEquipped
+        
+        -- 全局扫描所有格子，强制对应物品变大，其它物品缩回
+        for _, slot in pairs(hotbarFrame:GetChildren()) do
+            if slot:IsA("Frame") then
+                local isSelected = (slot.Name == currentEquippedId)
+                local scaleObj = slot:FindFirstChild("UIScale")
+                if scaleObj then
+                    TweenService:Create(scaleObj, tweenInfo, {Scale = isSelected and 1.15 or 1.0}):Play()
+                end
+            end
+        end
+    end
+
+    local function bindCharacter(char)
+        -- 监听玩家角色上的 EquippedSeed 属性是否发生改变
+        char:GetAttributeChangedSignal("EquippedSeed"):Connect(onEquipChanged)
+        onEquipChanged()
+    end
+
+    if player.Character then bindCharacter(player.Character) end
+    player.CharacterAdded:Connect(bindCharacter)
+
     print("客户端：HotbarController 精简版加载完毕！")
 end
-
 
 return HotbarController

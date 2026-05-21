@@ -10,16 +10,16 @@ local ItemConfig = {
 		"FumeShroom",
 		"Cactus",
 		"Sunflower",
-		"MegaPeashooter"
+		"Melonpult"
 	},
 	
 	Seeds = {
 		-- ==========================================
-		-- [第 1 阶段：新手期]
+		-- [Stage 1: Beginner Phase]
 		-- ==========================================
 		["Peashooter"] = {
 			Id = 1,
-			Name = "豌豆射手种子",
+			Name = "Peashooter Seed",
 			Quality = 1,
 			GrowthTime = 5,
 			YieldPlant = "Peashooter",
@@ -28,100 +28,130 @@ local ItemConfig = {
 		},
 		["Wall"] = {
 			Id = 2,
-			Name = "坚果墙种子",
+			Name = "Wall-nut Seed",
 			Quality = 1,
-			GrowthTime = 10,
+			GrowthTime = 20,
 			YieldPlant = "Wall",
-			BuyPrice = 500,       
+			BuyPrice = 300,       
 			UnlockLevel = 0, 
 		},
 		["PotatoMine"] = {
 			Id = 3,
-			Name = "土豆地雷种子",
+			Name = "Potato Mine Seed",
 			Quality = 2,
-			GrowthTime = 60,
+			GrowthTime = 45,
 			YieldPlant = "PotatoMine",
-			BuyPrice = 1500,    
+			BuyPrice = 800,    
 			UnlockLevel = 0, 
 		},
 
 		-- ==========================================
-		-- [第 2 阶段：成长期]
+		-- [Stage 2: Growth Phase]
 		-- ==========================================
 		["KernelPult"] = {
 			Id = 4,
-			Name = "玉米投手种子",
+			Name = "Kernel-pult Seed",
 			Quality = 2,
-			GrowthTime = 300,
+			GrowthTime = 180,
 			YieldPlant = "KernelPult",
-			BuyPrice = 4500,      
+			BuyPrice = 2500,      
 			UnlockLevel = 3, 
 		},
 		["Jalapeno"] = {
 			Id = 5,
-			Name = "火爆辣椒种子",
+			Name = "Jalapeno Seed",
 			Quality = 3,
 			GrowthTime = 600,
 			YieldPlant = "Jalapeno",
-			BuyPrice = 12000,     
+			BuyPrice = 9000,     
 			UnlockLevel = 7, 
 		},
 		["CoconutTree"] = {
 			Id = 6,
-			Name = "椰子树种子",
+			Name = "Coconut Tree Seed",
 			Quality = 3,
 			GrowthTime = 600,
 			YieldPlant = "CoconutTree",
-			BuyPrice = 35000,     
+			BuyPrice = 28000,     
 			UnlockLevel = 12, 
 		},
 
 		-- ==========================================
-		-- [第 3 阶段：爆发期]
+		-- [Stage 3: Burst Phase]
 		-- ==========================================
 		["FumeShroom"] = {
 			Id = 7,
-			Name = "大喷菇种子",
+			Name = "Fume-shroom Seed",
 			Quality = 3,
-			GrowthTime = 600,
+			GrowthTime = 900,
 			YieldPlant = "FumeShroom",
-			BuyPrice = 100000,    
+			BuyPrice = 35000,    
 			UnlockLevel = 25, 
 		},
 		["Cactus"] = {
 			Id = 8,
-			Name = "仙人掌种子",
+			Name = "Cactus Seed",
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Cactus",
-			BuyPrice = 350000,    
+			BuyPrice = 85000,    
 			UnlockLevel = 40, 
 		},
 		["Sunflower"] = {
 			Id = 9,
-			Name = "向日葵种子",
+			Name = "Sunflower Seed",
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Sunflower",
-			BuyPrice = 1000000,    
+			BuyPrice = 260000,    
 			UnlockLevel = 48, 
 		},
 		["Melonpult"] = {
 			Id = 10,
-			Name = "西瓜投手",
+			Name = "Melon-pult Seed",
 			Quality = 5,           
 			GrowthTime = 3600,     
 			YieldPlant = "Melonpult",
-			BuyPrice = 5000000,    
+			BuyPrice = 550000,    
 			UnlockLevel = 50, 
 		},
+		["SnowPea"] = {
+			Id = 11,
+			Name = "SnowPea Seed",
+			Quality = 3,           
+			GrowthTime = 800,     
+			YieldPlant = "SnowPea",
+			IsSellable = false,
+			BuyPrice = 60000,
+
+		},
+		["IceMelonpult"] = {
+			Id = 12,
+			Name = "Ice Melon-pult Seed",
+			Quality = 5,           
+			GrowthTime = 4000,     
+			YieldPlant = "IceMelonpult",
+			IsSellable = false,
+			BuyPrice = 550000,
+		},
+		["TwinSunflower"] = {
+			Id = 13,
+			Name = "Twin Sunflower Seed",
+			Quality = 4,           
+			GrowthTime = 1800,     
+			YieldPlant = "TwinSunflower",
+			IsSellable = false,
+			BuyPrice = 260000,
+		},
+
+
 	},
 	
 	Plants = {
 		["Peashooter"] = {
 			Id = "Peashooter",
-			Name = "豌豆射手",
-			HP = 100,
+			Name = "Peashooter",
+			HP = 300,
 			Quality = 1,
 			IdleAnimId = "rbxassetid://78336317659894",
 			CanAttack = true,
@@ -130,20 +160,20 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 127),
 			ProjectileName = "Pea", 
-			Description = "详情：发射豌豆造成基础伤害。",
+			Description = "Description: Shoots peas to deal basic damage.",
 		},
 		["Wall"] = {
 			Id = "Wall",
-			Name = "坚果墙",
+			Name = "Wall-nut",
 			HP = 5000,
 			Quality = 1,
 			IdleAnimId = "rbxassetid://130556607788926",
 			CanAttack = false,
-			Description = "详情：拥有极高的生命值，阻挡僵尸前进。",
+			Description = "Description: High HP. Blocks zombies.",
 		},
 		["PotatoMine"] = {
 			Id = "PotatoMine",
-			Name = "土豆地雷",
+			Name = "Potato Mine",
 			HP = 2000,
 			Attack = 5000,
 			Quality = 2,
@@ -151,11 +181,11 @@ local ItemConfig = {
 			CanAttack = false,
 			ExplosionType = "Single",
 			ExplosionDamage = 1000,
-			Description = "详情：被吃掉时引发爆炸，造成巨额单体伤害。",
+			Description = "Description: Explodes on contact, dealing massive single-target damage.",
 		},
 		["KernelPult"] = {
 			Id = "KernelPult",
-			Name = "玉米投手",
+			Name = "Kernel-pult",
 			HP = 300,
 			Quality = 2,
 			IdleAnimId = "rbxassetid://135320524253878",
@@ -167,22 +197,22 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Kernel", 
-			Description = "详情：投掷玉米粒，造成基础伤害。",
+			Description = "Description: Lobs kernels to deal basic damage.",
 		},
 		["Jalapeno"] = {
 			Id = "Jalapeno",
-			Name = "火爆辣椒",
+			Name = "Jalapeno",
 			HP = 3000,
 			Attack = 5000,
 			Quality = 2,
 			CanAttack = false,
 			ExplosionType = "Row",
 			ExplosionDamage = 5000,
-			Description = "详情：极速引爆，对整条路线上的僵尸造成毁灭打击。",
+			Description = "Description: Explodes instantly, destroying all zombies in a lane.",
 		},
         ["CoconutTree"] = {
 			Id = "CoconutTree",
-			Name = "椰子树",
+			Name = "Coconut Tree",
 			HP = 300,
 			Quality = 3,
 			CanAttack = true,
@@ -193,11 +223,11 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 170, 0),
 			ProjectileName = "Coconut", 
-			Description = "详情：发射重型椰子炮弹，对僵尸造成高额单次伤害。",
+			Description = "Description: Fires a heavy coconut, dealing high single-target damage.",
 		},
         ["FumeShroom"] = {
 			Id = "FumeShroom",
-			Name = "大喷菇",
+			Name = "Fume-shroom",
 			HP = 500,
 			Quality = 3,
 			CanAttack = true,
@@ -208,11 +238,11 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(170, 85, 255), 
 			ProjectileName = "Spore", 
-			Description = "详情：喷射高伤害孢子，火力压制前方僵尸。",
+			Description = "Description: Sprays high-damage spores to suppress zombies ahead.",
 		},
         ["Cactus"] = {
 			Id = "Cactus",
-			Name = "仙人掌",
+			Name = "Cactus",
 			HP = 600,
 			Quality = 4,
 			CanAttack = true,
@@ -223,11 +253,11 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
 			ProjectileName = "Spike", 
-			Description = "详情：发射锐利的尖刺，拥有极强的穿透打击感。",
+			Description = "Description: Fires sharp spikes with strong piercing power.",
 		},
         ["Sunflower"] = {
 			Id = "Sunflower",
-			Name = "向日葵",
+			Name = "Sunflower",
 			HP = 800,
 			Quality = 4,
 			CanAttack = true,
@@ -238,11 +268,11 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
 			ProjectileName = "Sunflower",  
-			Description = "详情：全能的百万提款机兼高级打手。",
+			Description = "Description: Generates value and assists in combat.",
 		},
         ["Melonpult"] = {
 			Id = "Melonpult",
-			Name = "西瓜投手",
+			Name = "Melon-pult",
 			HP = 	500,
 			Quality = 5,
 			CanAttack = true,
@@ -254,17 +284,64 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
 			ProjectileName = "Melon", 
-			Description = "详情：以极其恐怖的射速倾泻火力，传说级的战场收割机！",
+			Description = "Details: Lobs watermelons to deal massive damage！",
 		},
+		["SnowPea"] = {
+			Id = "SnowPea",
+			Name = "Snow Pea",
+			HP = 300,
+			Quality = 3,
+			CanAttack = true,
+			Attack = 500,
+			AttackInterval = 2, 
+			IdleAnimId = "rbxassetid://78336317659894",
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(0, 255, 255),
+			ProjectileName = "IcePea", 
+			Description = "Details: Fires frost peas, inflicts damage and applies slow！",
+		},
+		["IceMelonpult"] = {
+			Id = "IceMelonpult",
+			Name = "Ice Melon-pult",
+			HP = 500,
+			Quality = 5,
+			CanAttack = true,
+			Attack = 4000,
+			AttackInterval = 2, 
+			IdleAnimId = "rbxassetid://117331055474996",
+			AttackAnimation = "rbxassetid://125434851620830",
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(0, 255, 255),
+			ProjectileName = "IceMelon", 
+			Description = "Details: Hurls ice melon to deal damage and slow targets！",
+
+		},
+
+		["TwinSunflower"] = {
+			Id = "TwinSunflower",
+			Name = "Twin Sunflower",
+			HP = 5000,
+			Quality = 5,
+			CanAttack = true,
+			Attack = 2000,
+			AttackInterval = 2, 
+			IdleAnimId = "rbxassetid://93822718710198",
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(217, 255, 0),
+			ProjectileName = "Sunbeam", 
+			Description = "Details: Fires laser to deal damage！",
+		},
+
 	},
 	
 	MutationProb = { [1] = 90, [2] = 7, [3] = 3, [4] = 1 },
 	MutationName = { 
-		[1] = "普通", 
-		[2] = "闪耀", 
-		[3] = "雷电", 
-		[4] = "圣光" 
+		[1] = "Basic", 
+		[2] = "Shiny", 
+		[3] = "Thunder", 
+		[4] = "Divine" 
 	},
+	
 	QualityColor = {
 		[1] = Color3.fromRGB(255, 255, 255), 
 		[2] = Color3.fromRGB(85, 255, 127),  
@@ -276,5 +353,10 @@ local ItemConfig = {
 		[8] = Color3.fromRGB(0, 255, 255),   
 	},
 }
-
+ItemConfig.MutationStats = {
+    [1] = { DamageMul = 1.0, HealthMul = 1.0 },   -- Normal
+    [2] = { DamageMul = 1.5, HealthMul = 1.5 },   -- Shiny (+50% 攻击, +50% 血量)
+    [3] = { DamageMul = 2, HealthMul = 3 },   -- Thunder (+30% 攻击, +60% 血量)
+    [4] = { DamageMul = 2.5, HealthMul = 4 },   -- Divine (+50% 攻击, +100% 血量)
+}
 return ItemConfig

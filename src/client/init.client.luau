@@ -11,16 +11,25 @@ local PlantHoverController = require(script.UI.PlantHoverController)
 local ToolController = require(script.Services.ToolController)
 local EncyclopediaController = require(script.UI.EncyclopediaController)
 local UnlockAnimController = require(script.UI.UnlockAnimController)
+local TutorialController = require(script.UI.TutorialController)
+local EventUIManager = require(script.UI.EventUI.EventUIManager)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage") 
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local AnalyticsRE = ReplicatedStorage:WaitForChild("AnalyticsRE")
 
 task.spawn(function()
     local player = game:GetService("Players").LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
     local basicGui = playerGui:WaitForChild("BasicGui")
+    for _, gui in pairs(basicGui:GetChildren()) do
+        if gui:IsA("ScreenGui") then
+            gui.ResetOnSpawn = false
+            print("已为 UI 锁定防重置保护: " .. gui.Name)
+        end
+    end
 
     basicGui:WaitForChild("InventoryGui")
     basicGui:WaitForChild("ShopGui")
@@ -69,6 +78,7 @@ task.spawn(function()
 
     local overlayGui = Instance.new("ScreenGui")
     overlayGui.Name = "GlobalOverlayGui"
+    overlayGui.ResetOnSpawn = false
     overlayGui.DisplayOrder = 90
     overlayGui.IgnoreGuiInset = true 
     overlayGui.Parent = playerGui
@@ -137,6 +147,13 @@ task.spawn(function()
     for _, p in ipairs(panels) do
         p.gui:GetPropertyChangedSignal("Enabled"):Connect(function()
             if p.gui.Enabled then
+                if p.gui == shopGui then
+                    -- 生成一个简单的随机 SessionId 区分每一次打开商店的行为
+                    local shopSessionId = "ShopSession_" .. tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
+                    player:SetAttribute("CurrentShopSessionId", shopSessionId)
+                    -- 👇 【新增埋点】：商店漏斗第一步
+                    AnalyticsRE:FireServer("Funnel", "Shop_Purchase_Flow", {StepIndex = 1, StepName = "Step_1_Open_Shop", SessionId = shopSessionId})
+                end
                 for _, other in ipairs(panels) do
                     if other.gui ~= p.gui and other.gui.Enabled then other.gui.Enabled = false end
                 end
@@ -148,7 +165,13 @@ task.spawn(function()
                 if p.frame then
                     p.frame.AnchorPoint = Vector2.new(0.5, 0.5)
                     p.frame.Position = POS_BOTTOM
-                    TweenService:Create(p.frame, TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = POS_CENTER}):Play()
+                    if p.gui.Name == "Codex" then
+                        TweenService:Create(p.frame, TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, 0, 0.4, 0)}):Play()
+                    else
+                        TweenService:Create(p.frame, TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = POS_CENTER}):Play()
+                    end
+
+                   
                 end
 
                 local closeBtn = p.frame and (
@@ -186,6 +209,36 @@ task.spawn(function()
     local btnSpeed1_5 = inBattleFrame and inBattleFrame:WaitForChild("SpeedButton*1.5", 5)
     local btnSpeed4 = inBattleFrame and inBattleFrame:WaitForChild("SpeedButton*4", 5)
     local btnAutoBattle = inBattleFrame and inBattleFrame:WaitForChild("AutoBattle", 5)
+    local homeBtn = playProperty:WaitForChild("Home", 5)
+    if homeBtn then
+        homeBtn.MouseButton1Click:Connect(function()
+            local character = player.Character
+            if not character then return end
+            
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            if not rootPart then return end
+
+            local plotsFolder = Workspace:FindFirstChild("Plots")
+            if plotsFolder then
+                -- 遍历寻找属于本地玩家的基地
+                for _, plot in ipairs(plotsFolder:GetChildren()) do
+                    if plot:GetAttribute("OwnerId") == player.UserId then
+                        -- 找到基地后，优先找出生点零件
+                        local spawnPart = plot:FindFirstChild("SpawnPoint") or plot:FindFirstChild("SpawnLocation")
+                        
+                        -- 执行传送逻辑（与服务端的生成逻辑保持一致）
+                        if spawnPart and spawnPart:IsA("BasePart") then
+                            character:PivotTo(spawnPart.CFrame * CFrame.new(0, 4, 0))
+                        else
+                            character:PivotTo(plot:GetPivot() * CFrame.new(0, 5, 20))
+                        end
+                        
+                        break
+                    end
+                end
+            end
+        end)
+    end
 
     if startBattleBtn and inBattleFrame then
         startBattleBtn.Visible = true
@@ -206,14 +259,14 @@ task.spawn(function()
 
         if endBattleBtn then
             endBattleBtn.MouseButton1Click:Connect(function()
-                -- 【修复1】：玩家手动点击停止战斗时，强制关闭自动战斗状态
+                -- 【修复1】：玩家手动点击停止战斗时，强制OffAuto Battle状态
                 if player:GetAttribute("AutoBattle") then
                     player:SetAttribute("AutoBattle", false)
                     
                     local autoLabel = btnAutoBattle:FindFirstChild("TextLabel")
                     local autoGrad = btnAutoBattle:FindFirstChild("UIGradient")
                     
-                    if autoLabel then autoLabel.Text = "自动战斗(关闭)" end
+                    if autoLabel then autoLabel.Text = "Auto Battle(Off)" end
                     if autoGrad then autoGrad.Color = ColorSequence.new(Color3.fromRGB(249, 0, 0), Color3.fromRGB(180, 0, 0)) end
                 end
 
@@ -223,8 +276,12 @@ task.spawn(function()
 
         btnAutoBattle.MouseButton1Click:Connect(function()
             local isAuto = not player:GetAttribute("AutoBattle")
+            -- 👇 【新增埋点】
+            if isAuto then
+                AnalyticsRE:FireServer("Custom", "UI_Click_AutoBattle_On")
+            end
             player:SetAttribute("AutoBattle", isAuto)
-            if autoLabel then autoLabel.Text = isAuto and "自动战斗(开启)" or "自动战斗(关闭)" end
+            if autoLabel then autoLabel.Text = isAuto and "Auto Battle(On)" or "Auto Battle(Off)" end
             if autoGrad then autoGrad.Color = isAuto and autoGreen or autoRed end
             if isAuto and startBattleBtn.Visible then ReplicatedStorage.StartBattleRE:FireServer() end
         end)
@@ -239,20 +296,20 @@ task.spawn(function()
         local function updateSpeedUI(activeSpeed)
             currentSpeed = activeSpeed
             
-            -- [🌟 仅修改 1.5 倍速文字]
-            local is1_5 = (activeSpeed == 1.5)
+            -- [🌟 仅修改 2 Speed文字]
+            local is1_5 = (activeSpeed == 2)
             if label1_5 then 
-                label1_5.Text = is1_5 and "返回1倍速" or "X1.5倍速" 
+                label1_5.Text = is1_5 and "Back 1 Speed" or "X2 Speed" 
             elseif btnSpeed1_5:IsA("TextLabel") or btnSpeed1_5:IsA("TextButton") then
-                btnSpeed1_5.Text = is1_5 and "返回1倍速" or "X1.5倍速" 
+                btnSpeed1_5.Text = is1_5 and "Back 1 Speed" or "X2 Speed" 
             end
 
-            -- [🌟 仅修改 4 倍速文字]
+            -- [🌟 仅修改 4 Speed文字]
             local is4 = (activeSpeed == 4)
             if label4 then 
-                label4.Text = is4 and "返回1倍速" or "X4倍速" 
+                label4.Text = is4 and "Back 1 Speed" or "X4 Speed" 
             elseif btnSpeed4:IsA("TextLabel") or btnSpeed4:IsA("TextButton") then
-                btnSpeed4.Text = is4 and "返回1倍速" or "X4倍速" 
+                btnSpeed4.Text = is4 and "Back 1 Speed" or "X4 Speed" 
             end
             local grad4 = btnSpeed4:FindFirstChild("UIGradient")
             if grad4RotationConn then grad4RotationConn:Disconnect(); grad4RotationConn = nil end
@@ -268,35 +325,84 @@ task.spawn(function()
 
             end
         end
+        -- [🌟 新增：内购服务与你的通行证ID]
+        local MarketplaceService = game:GetService("MarketplaceService")
+        local SPEED_PASS_ID = 1811835638 -- ⚠️⚠️⚠️ 请把这串数字替换成你刚才复制的 Game Pass ID！
 
-        btnSpeed1_5.MouseButton1Click:Connect(function() setSpeedRE:FireServer(currentSpeed == 1.5 and 1 or 1.5) end)
-        btnSpeed4.MouseButton1Click:Connect(function() setSpeedRE:FireServer(currentSpeed == 4 and 1 or 4) end)
+        btnSpeed1_5.MouseButton1Click:Connect(function() 
+            AnalyticsRE:FireServer("Custom", "UI_Click_Speed_1_5")
+            setSpeedRE:FireServer(currentSpeed == 2 and 1 or 2) 
+        end)
+        btnSpeed4.MouseButton1Click:Connect(function()
+            AnalyticsRE:FireServer("Custom", "UI_Click_Speed_4")
+            
+            -- 检查玩家是否已经拥有该通行证
+            local hasPass = false
+            pcall(function()
+                hasPass = MarketplaceService:UserOwnsGamePassAsync(player.UserId, SPEED_PASS_ID)
+            end)
+
+            if hasPass then
+                -- 如果已经购买，正常切换倍速
+                setSpeedRE:FireServer(currentSpeed == 4 and 1 or 4) 
+            else
+                -- 如果没有购买，在屏幕中央弹出 299 Robux 的购买确认框！
+                MarketplaceService:PromptGamePassPurchase(player, SPEED_PASS_ID)
+            end
+        end)
+
+        -- [🌟 新增：监听玩家付钱成功]
+        MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(purchasingPlayer, passId, wasPurchased)
+            if purchasingPlayer == player and passId == SPEED_PASS_ID and wasPurchased then
+                -- 购买成功后，直接帮玩家自动开启 4 倍速
+                setSpeedRE:FireServer(4)
+                
+                -- 屏幕右下角弹一个原生的成功提示框
+                pcall(function()
+                    game:GetService("StarterGui"):SetCore("SendNotification", {
+                        Title = "🎉 Success!",
+                        Text = "4X Speed is now Unlocked!",
+                        Duration = 4,
+                    })
+                end)
+            end
+        end)
+
         setSpeedRE.OnClientEvent:Connect(updateSpeedUI)
 
         ReplicatedStorage:WaitForChild("SyncBattleUI_RE").OnClientEvent:Connect(function(isActive, currentLevelId)
             if isActive then
                 startBattleBtn.Visible = false
                 inBattleFrame.Visible = true
-                levelText.Text = "第 " .. currentLevelId .. " 关"
+                levelText.Text = "Level " .. currentLevelId 
             else
                 if player:GetAttribute("AutoBattle") then
-                    levelText.Text = "正在重新开始..."
+                    levelText.Text = "Restarting..."
                     
                     -- 【修复2】：延迟 1 秒后真正触发下一场战斗，防止卡死
                     task.delay(1, function()
-                        -- 再次检查确认玩家没有在此期间取消自动战斗
+                        -- 再次检查确认玩家没有在此期间取消Auto Battle
                         if player:GetAttribute("AutoBattle") then
                             ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer()
                         end
                     end)
                 else
-                    -- 如果没有开启自动战斗（或者已被手动停止关闭），则正常返回非战斗 UI
+                    -- 如果没有OnAuto Battle（或者已被手动停止Off），则正常返回非战斗 UI
                     startBattleBtn.Visible = true
                     inBattleFrame.Visible = false
                 end
             end
         end)
     end
+end)
+
+local UIEffectUtil = require(script.Utils.UIEffectUtil) -- 请确保路径匹配你的实际结构
+
+local showTipRE = ReplicatedStorage:WaitForChild("ShowTipRE")
+
+-- 监听服务端的提示请求，并调用封装好的 ShowTip
+showTipRE.OnClientEvent:Connect(function(message)
+    UIEffectUtil.ShowTip(message)
 end)
 
 InventoryController.Init()
@@ -308,5 +414,16 @@ HighlightController.Init()
 PlantHoverController.Init()
 ToolController.Init()
 EncyclopediaController.Init()
--- [🌟 彻底删除了 BattleResultController.Init()]
+EventUIManager.Init()
 UnlockAnimController.Init()
+TutorialController.Init()
+local AirdropUIController = require(script.Services.AirdropUIController)
+AirdropUIController.Init()
+local StealWarningUIController = require(script.Services.StealWarningUIController)
+StealWarningUIController.Init()
+local ZombieBoxController = require(script.Services.ZombieBoxController)
+ZombieBoxController.Init()
+local RollController = require(script.UI.RollController)
+RollController.Init()
+
+require(script.UI.EventUI.NewbieGiftController).Init()

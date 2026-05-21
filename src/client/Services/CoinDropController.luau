@@ -18,7 +18,49 @@ function CoinDropController.Init()
 
     local harvestRE = ReplicatedStorage:FindFirstChild("HarvestSunRE")
     if harvestRE then
-        harvestRE.OnClientEvent:Connect(function(amount)
+        harvestRE.OnClientEvent:Connect(function(amount, startPos)
+            -- 如果服务端传来了起点坐标，就播放 3D 飞行特效
+            if startPos then
+                local char = Players.LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                
+                if root then
+                    -- 1. 创建一个用于飞行的视觉阳光
+                    local sunPart = Instance.new("Part")
+                    sunPart.Anchored = true
+                    sunPart.CanCollide = false
+                    sunPart.Transparency = 1
+                    -- 让阳光从底座稍微偏上的位置冒出来
+                    sunPart.Position = startPos + Vector3.new(0, 4, 0) 
+                    
+                    local gui = Instance.new("BillboardGui")
+                    gui.Size = UDim2.new(3, 0, 3, 0)
+                    gui.AlwaysOnTop = true
+                    gui.Parent = sunPart
+                    
+                    local img = Instance.new("ImageLabel")
+                    img.Size = UDim2.new(1, 0, 1, 0)
+                    img.BackgroundTransparency = 1
+                    img.Image = COIN_IMAGE_ID -- 使用模块顶部的统一阳光/金币图标
+                    img.Parent = gui
+                    
+                    sunPart.Parent = workspace
+                    
+                    -- 2. 让阳光飞向玩家的身体
+                    local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+                    local tween = TweenService:Create(sunPart, tweenInfo, {Position = root.Position})
+                    tween:Play()
+                    
+                    -- 3. 飞行结束（击中玩家）后销毁实体，再呼出 UI 动画
+                    tween.Completed:Connect(function()
+                        sunPart:Destroy()
+                        UIEffectUtil.Play2DCollectEffect(amount) 
+                    end)
+                    return
+                end
+            end
+            
+            -- 如果没有获取到位置，作为兜底直接播放 UI 动画
             UIEffectUtil.Play2DCollectEffect(amount) 
         end)
     end
@@ -70,10 +112,11 @@ function CoinDropController.Init()
             local canPickup = false; local isCollected = false 
             task.delay(0.8, function() canPickup = true end) 
 
-            local connection
+           local connection
             connection = sensor.Touched:Connect(function(hit)
                 if not canPickup or isCollected then return end
                 local localPlayer = Players.LocalPlayer
+         
                 local character = localPlayer.Character
                 if hit:IsDescendantOf(character) then
                     local humanoid = character:FindFirstChild("Humanoid")
@@ -81,12 +124,33 @@ function CoinDropController.Init()
                     if humanoid and humanoid.Health > 0 and rootPart then
                         isCollected = true; canPickup = false; connection:Disconnect() 
                         
-                        coin.Anchored = true; coin.Transparency = 1
-                        if gui then gui.Enabled = false end; if trail then trail.Enabled = false end
+                        -- [🌟 新增：让阳光/金币飞向玩家身体]
+                        coin.Anchored = true 
+                        if trail then trail.Enabled = true end -- 开启拖尾让飞行更好看
                         
-                        UIEffectUtil.Play2DCollectEffect(valuePerCoin, function() 
-                            pickupRE:FireServer(valuePerCoin, false)
-                            coin:Destroy()
+                        -- 目标位置设定在玩家胸口处 (RootPart 稍微偏上一点)
+                        local targetPos = rootPart.Position + Vector3.new(0, 1, 0)
+                        
+                        -- 创建一个 0.3 秒的快速飞行 Tween (吸入身体的感觉)
+                        local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+                        local tween = TweenService:Create(coin, tweenInfo, {Position = targetPos})
+                        
+                        -- 让图片在飞行的同时逐渐变透明
+                        if img then TweenService:Create(img, TweenInfo.new(0.3), {ImageTransparency = 1}):Play() end
+                        
+                        tween:Play()
+                        
+                        -- [🌟 重点：等待飞行结束接触到玩家身体后，再弹出 UI 动画]
+                        tween.Completed:Connect(function()
+                            coin.Transparency = 1
+                            if gui then gui.Enabled = false end
+                            if trail then trail.Enabled = false end
+                            
+                            -- 呼出屏幕上的 UI 增加动画，并通知服务端真正加钱
+                            UIEffectUtil.Play2DCollectEffect(valuePerCoin, function() 
+                                pickupRE:FireServer(valuePerCoin, false)
+                                coin:Destroy()
+                            end)
                         end)
                     end
                 end

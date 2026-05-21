@@ -75,6 +75,7 @@ local function RenderToViewport(viewport, modelName, itemType, isSilhouette)
 end
 
 function EncyclopediaController.Init()
+    local currentCodexLoadTicket = 0
     local player = Players.LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
     local basicGui = playerGui:WaitForChild("BasicGui")
@@ -116,21 +117,65 @@ function EncyclopediaController.Init()
         local currentScroll = scrollingFrames[tabIndex]
         if not currentScroll then return end
 
+        -- 🌟 [修复 1]：每次调用生成一个新的专属令牌
+        currentCodexLoadTicket = currentCodexLoadTicket + 1
+        local myTicket = currentCodexLoadTicket
+
+        -- (注意：这里不要过早清理UI，等数据回来了再清理，防闪烁)
+
+        local mutationLabel = ItemConfig.MutationName and ItemConfig.MutationName[tabIndex] 
+        local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF", 5)
+        
+        -- 👉 这里线程会挂起，等待服务器响应
+        local playerData = getPlayerDataRF and getPlayerDataRF:InvokeServer() or {}
+        local unlockedMutations = playerData.UnlockedMutations or {}
+
+        -- 🌟 [修复 2]：数据返回后，检查当前令牌是否过期。
+        -- 如果在等待网络请求期间，玩家又切了别的Tab或触发了新刷新，直接废弃这次的渲染！
+        if myTicket ~= currentCodexLoadTicket then return end
+
+        -- 🌟 [修复 3]：确认是最新请求后，再安全地清空旧 UI 节点
         for _, child in pairs(currentScroll:GetChildren()) do
             if child:IsA("Frame") then child:Destroy() end
         end
 
-        local mutationLabel = ItemConfig.MutationName and ItemConfig.MutationName[tabIndex] or "未知"
-        local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF", 5)
-        local playerData = getPlayerDataRF and getPlayerDataRF:InvokeServer() or {}
-        local unlockedMutations = playerData.UnlockedMutations or {}
-
+        local sortedPlants = {}
         for plantId, plantDetail in pairs(ItemConfig.Plants) do
+            -- 从 Seeds 配置中获取数字 ID 用于排序。如果找不到则默认给 9999 放到最后
+            local numericId = (ItemConfig.Seeds[plantId] and ItemConfig.Seeds[plantId].Id) or 9999
+            
+            table.insert(sortedPlants, {
+                plantId = plantId,
+                plantDetail = plantDetail,
+                quality = plantDetail.Quality or 1,
+                numericId = numericId
+            })
+        end
+
+        -- 排序逻辑：优先比较品质（从小到大），品质相同则比较 ID（从小到大）
+        table.sort(sortedPlants, function(a, b)
+            if a.quality == b.quality then
+                return a.numericId < b.numericId
+            end
+            return a.quality < b.quality
+        end)
+
+        -- ==========================================
+        -- [🌟 修改：使用排序后的数组遍历生成槽位]
+        -- ==========================================
+        for index, data in ipairs(sortedPlants) do
+            local plantId = data.plantId
+            local plantDetail = data.plantDetail
+
             local slot = itemTemplate:Clone()
             slot.Name = plantId
             slot.Visible = true
             
-            -- [🌟 新增：获取品质颜色并设置槽位中 BGImag 的描边]
+            -- 🌟 关键点：利用 LayoutOrder 决定在 UI 网格/列表中的实际显示顺序
+            slot.LayoutOrder = index 
+            
+            -- [下方保持你原有的渲染逻辑不变]
+            -- 获取品质颜色并设置槽位中 BGImag 的描边
             local qualityId = plantDetail.Quality or 1
             local qColor = (ItemConfig.QualityColor and ItemConfig.QualityColor[qualityId]) or Color3.fromRGB(255, 255, 255)
             local bgImag = slot:FindFirstChild("BGImag")
@@ -180,12 +225,39 @@ function EncyclopediaController.Init()
                         end
                         
                         descNameText.Text = plantDetail.Name or plantId
-                        descQualityText.Text = (qualityConfig and qualityConfig.Name or "未知")
-                        descSourceText.Text = "来源：" .. (plantDetail.Source or "未知")
-                        descHpText.Text = "生命值：" .. tostring(plantDetail.HP or 0)
-                        descAtkText.Text = "攻击力：" .. (plantDetail.Attack and tostring(plantDetail.Attack) or "--")
-                        descDetails.Text = plantDetail.Description or "暂无说明信息。"
+                        descQualityText.Text = (qualityConfig and qualityConfig.Name or "Unknown")
+                        descSourceText.Text = "Source: " .. (plantDetail.Source or "Shop / Seeds")
                         
+                        -- 🌟 修复：获取当前变异等级的属性乘区 (tabIndex 对应 1:Normal, 2:Shiny, 3:Thunder, 4:Divine)
+                        local mutationStat = ItemConfig.MutationStats[tabIndex] or {DamageMul = 1.0, HealthMul = 1.0}
+                        
+                        -- 🌟 修复：计算变异后的血量并取整
+                        local finalHp = math.floor((plantDetail.HP or 0) * mutationStat.HealthMul)
+                        descHpText.Text = "HP:" .. tostring(finalHp)
+                        
+                        local baseAttack = plantDetail.Attack
+                        local intervalValue = plantDetail.AttackInterval
+    
+                        if baseAttack then
+                            -- 🌟 修复：计算变异后的攻击力并取整
+                            local finalAttack = math.floor(baseAttack * mutationStat.DamageMul)
+                            
+                            if intervalValue then
+                                -- 如果两者都有，显示为攻击力/间隔（即 DPS 模式）
+                                descAtkText.Text = "DPS: " .. tostring(finalAttack) .. "/" .. tostring(intervalValue)
+                            else
+                                -- 如果只有攻击力没有间隔（如土豆雷、辣椒等瞬发植物），仅显示攻击力
+                                descAtkText.Text = "ATK: " .. tostring(finalAttack)
+                            end
+                        else
+                            -- 如果完全没有攻击力配置（如坚果墙），显示默认占位符
+                            descAtkText.Text = "ATK: --"
+                        end
+                        
+                        descDetails.Text = plantDetail.Description or "No description available."
+                        descDetails.TextWrapped = true -- [建议新增] 确保长篇描述可以正确换行
+                        descDetails.TextXAlignment = Enum.TextXAlignment.Left -- [建议] 左对齐更美观
+                        descDetails.TextYAlignment = Enum.TextYAlignment.Top  -- [建议] 顶部对齐
                         descriptionFrame.Visible = true
                     end
                 end)

@@ -5,11 +5,16 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 
 -- ==========================================
 -- [🌟 新增：受击变红反馈逻辑]
 -- ==========================================
 local function FlashZombieRed(zombieModel)
+    -- 如果僵尸已经处于变红状态，直接返回，不再记录颜色（防止记录到红色导致无法恢复）
+    if zombieModel:GetAttribute("IsFlashing") then return end
+    zombieModel:SetAttribute("IsFlashing", true)
+    
     local originalColors = {}
     
     -- 记录并变红
@@ -22,11 +27,17 @@ local function FlashZombieRed(zombieModel)
     
     -- 0.15秒后恢复原色
     task.delay(0.15, function()
+        -- 核心防御：如果僵尸已被销毁，不再执行恢复逻辑
+        if not zombieModel or not zombieModel.Parent then return end
+        
         for p, color in pairs(originalColors) do
             if p and p.Parent then
                 p.Color = color
             end
         end
+        
+        -- 解除状态锁
+        zombieModel:SetAttribute("IsFlashing", false)
     end)
 end
 
@@ -235,7 +246,8 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
     task.spawn(function()
         local attackInterval = itemDetail.AttackInterval or 1.5
         local baseAttackDamage = itemDetail.Attack or 20
-        local attackDamage = (mutationLevel > 1) and math.floor(baseAttackDamage * 1.5) or baseAttackDamage
+        local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
+        local attackDamage = math.floor(baseAttackDamage * stats.DamageMul)
         
         local animController = plant:FindFirstChildOfClass("AnimationController") or plant:FindFirstChildOfClass("Humanoid")
         local animator = animController and animController:FindFirstChildOfClass("Animator")
@@ -281,9 +293,20 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                 if part.CollisionGroup == "Zombies" then
                     local zModel = part:FindFirstAncestorOfClass("Model")
                     if zModel then
+                       -- ==========================================
+                        -- 👇 [🌟 核心修复 1]：对比僵尸和地块的主人 ID
+                        local zombieOwnerId = zModel:GetAttribute("OwnerId")
+                        local plotOwnerId = plot and plot:GetAttribute("OwnerId")
+                        
+                        -- 如果僵尸有主人，地块也有主人，且两者不是同一个人，说明是别人家的僵尸！忽略！
+                        if zombieOwnerId and plotOwnerId and zombieOwnerId ~= plotOwnerId then
+                            continue 
+                        end
+                        -- ==========================================
+
                         local zHum = zModel:FindFirstChildOfClass("Humanoid")
                         local zRoot = zModel:FindFirstChild("HumanoidRootPart") or zModel.PrimaryPart
-                        
+                       
                         if zHum and zHum.Health > 0 and zRoot then
                             local dist = (zRoot.Position - rootPart.Position).Magnitude
                             if dist < minDistance then
@@ -333,94 +356,99 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
 end
 
 -- ==========================================
--- [4. 爆炸类植物 AI]
+-- [4. 爆炸类植物 AI (🌟 已重构：纯起爆逻辑)]
 -- ==========================================
-function PlantCombatAI.StartExplosiveAI(plant, itemDetail, mutationLevel)
-    plant:GetAttributeChangedSignal("Health"):Connect(function()
-        local hp = plant:GetAttribute("Health")
-        if hp <= 0 and not plant:GetAttribute("Exploded") then
-            plant:SetAttribute("Exploded", true)
-            
-            local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
-            if not rootPart then return end
+function PlantCombatAI.TriggerExplosion(plant, itemDetail, mutationLevel)
+    -- 防多次起爆锁
+    if plant:GetAttribute("Exploded") then return end
+    plant:SetAttribute("Exploded", true)
+    
+    local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+    if not rootPart then return end
 
-            local checkCFrame = rootPart.CFrame
-            local checkSize = Vector3.new(14, 10, 14)
-            if itemDetail.ExplosionType == "Row" then checkSize = Vector3.new(4, 15, 100) end
+    local checkCFrame = rootPart.CFrame
+    local checkSize = Vector3.new(14, 10, 14)
+    if itemDetail.ExplosionType == "Row" then checkSize = Vector3.new(4, 15, 100) end
 
-            local overlapParams = OverlapParams.new()
-            local hitParts = Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)
-            local damagedZombies = {} 
+    local overlapParams = OverlapParams.new()
+    local hitParts = Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)
+    local damagedZombies = {} 
 
-            for _, part in ipairs(hitParts) do
-                if part.CollisionGroup == "Zombies" then
-                    local zModel = part:FindFirstAncestorOfClass("Model")
-                    if zModel and not damagedZombies[zModel] then
-                        damagedZombies[zModel] = true
-                        local zHum = zModel:FindFirstChildOfClass("Humanoid")
-                        
-                        if zHum and zHum.Health > 0 then
-                            local baseExplosionDamage = itemDetail.ExplosionDamage or 1800
-                            local explosionDamage = (mutationLevel > 1) and math.floor(baseExplosionDamage * 1.5) or baseExplosionDamage
-                            
-                            zHum.Health = zHum.Health - explosionDamage
-                            
-                            -- [🌟 修复：爆炸也会让僵尸瞬间变红]
-                            FlashZombieRed(zModel)
-                            PlantCombatAI.ShowDamageText(zModel, explosionDamage)
-                            
-                            for _, p in pairs(zModel:GetDescendants()) do
-                                if p:IsA("BasePart") then p.Color = Color3.fromRGB(20, 20, 20) end
-                            end
-                        end
+    for _, part in ipairs(hitParts) do
+        if part.CollisionGroup == "Zombies" then
+            local zModel = part:FindFirstAncestorOfClass("Model")
+            if zModel and not damagedZombies[zModel] then
+                -- 不炸别人家的僵尸
+                local myPlot = plant.Parent and plant.Parent.Parent and plant.Parent.Parent.Parent
+                local plotOwnerId = myPlot and myPlot:GetAttribute("OwnerId")
+                local zombieOwnerId = zModel:GetAttribute("OwnerId")
+
+                if zombieOwnerId and plotOwnerId and zombieOwnerId ~= plotOwnerId then
+                    continue 
+                end
+
+                damagedZombies[zModel] = true
+                local zHum = zModel:FindFirstChildOfClass("Humanoid")
+                
+                if zHum and zHum.Health > 0 then
+                    local baseExplosionDamage = itemDetail.ExplosionDamage or 1800
+                    local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
+                    local explosionDamage = math.floor(baseExplosionDamage * stats.DamageMul)
+                    
+                    zHum.Health = zHum.Health - explosionDamage
+                    
+                    FlashZombieRed(zModel)
+                    PlantCombatAI.ShowDamageText(zModel, explosionDamage)
+                    
+                    for _, p in pairs(zModel:GetDescendants()) do
+                        if p:IsA("BasePart") then p.Color = Color3.fromRGB(20, 20, 20) end
                     end
                 end
             end
-
-            local effectPart = Instance.new("Part")
-            effectPart.Anchored = true; effectPart.CanCollide = false; effectPart.Transparency = 1
-            effectPart.Parent = Workspace
-
-            if itemDetail.ExplosionType == "Row" then
-                effectPart.Size = Vector3.new(6, 1, 100) 
-                effectPart.Position = rootPart.Position - Vector3.new(0, 1.5, 0)
-                local particles = Instance.new("ParticleEmitter", effectPart)
-                particles.Texture = "rbxassetid://248625108" 
-                particles.Color = ColorSequence.new(Color3.fromRGB(255, 85, 0))
-                particles.Lifetime = NumberRange.new(0.05, 0.12)
-                particles.LightEmission = 1
-                particles.EmissionDirection = Enum.NormalId.Top 
-                particles.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 4), NumberSequenceKeypoint.new(1, 10)})
-                particles.Rate = 2000
-                particles.Speed = NumberRange.new(15, 30)
-                task.delay(0.5, function() particles.Enabled = false end)
-            else
-                effectPart.Position = rootPart.Position
-                local attachment = Instance.new("Attachment", effectPart)
-                local particles = Instance.new("ParticleEmitter", attachment)
-                particles.Texture = "rbxassetid://243098098"
-                particles.Color = ColorSequence.new(Color3.fromRGB(255, 100, 0))
-                particles.Size = NumberSequence.new(1, 15)
-                particles.Rate = 500
-                particles.Speed = NumberRange.new(10, 20)
-                particles.Lifetime = NumberRange.new(0.2, 0.4)
-                particles.SpreadAngle = Vector2.new(180, 180)
-                task.delay(0.2, function() particles.Enabled = false end)
-            end
-
-            Debris:AddItem(effectPart, 2)
-            
-            for _, p in pairs(plant:GetDescendants()) do
-                if p:IsA("BasePart") then 
-                    p.Transparency = 1 
-                -- 【🌟修复】：自爆后立即关闭植物身上的变异光效和粒子
-                elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
-                    p.Enabled = false
-                end
-            end
-            task.delay(1, function() if plant then plant:Destroy() end end)
         end
-    end)
+    end
+
+    local effectPart = Instance.new("Part")
+    effectPart.Anchored = true; effectPart.CanCollide = false; effectPart.Transparency = 1
+    effectPart.Parent = Workspace
+
+    if itemDetail.ExplosionType == "Row" then
+        effectPart.Size = Vector3.new(6, 1, 100) 
+        effectPart.Position = rootPart.Position - Vector3.new(0, 1.5, 0)
+        local particles = Instance.new("ParticleEmitter", effectPart)
+        particles.Texture = "rbxassetid://248625108" 
+        particles.Color = ColorSequence.new(Color3.fromRGB(255, 85, 0))
+        particles.Lifetime = NumberRange.new(0.05, 0.12)
+        particles.LightEmission = 1
+        particles.EmissionDirection = Enum.NormalId.Top 
+        particles.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 4), NumberSequenceKeypoint.new(1, 10)})
+        particles.Rate = 2000
+        particles.Speed = NumberRange.new(15, 30)
+        task.delay(0.5, function() particles.Enabled = false end)
+    else
+        effectPart.Position = rootPart.Position
+        local attachment = Instance.new("Attachment", effectPart)
+        local particles = Instance.new("ParticleEmitter", attachment)
+        particles.Texture = "rbxassetid://243098098"
+        particles.Color = ColorSequence.new(Color3.fromRGB(255, 100, 0))
+        particles.Size = NumberSequence.new(1, 15)
+        particles.Rate = 500
+        particles.Speed = NumberRange.new(10, 20)
+        particles.Lifetime = NumberRange.new(0.2, 0.4)
+        particles.SpreadAngle = Vector2.new(180, 180)
+        task.delay(0.2, function() particles.Enabled = false end)
+    end
+
+    Debris:AddItem(effectPart, 2)
+    
+    for _, p in pairs(plant:GetDescendants()) do
+        if p:IsA("BasePart") then 
+            p.Transparency = 1 
+        elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
+            p.Enabled = false
+        end
+    end
+    task.delay(1, function() if plant then plant:Destroy() end end)
 end
 
 return PlantCombatAI

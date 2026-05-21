@@ -102,6 +102,20 @@ function PlantHoverController.Init()
     Instance.new("UICorner", barFill).CornerRadius = UDim.new(0, 6)
     barFill.Parent = barBg
 
+    -- 👇 [🌟 新增：生命值数值文本]
+    local hpText = Instance.new("TextLabel")
+    hpText.Name = "HPText"
+    hpText.Size = UDim2.new(1, 0, 0.9, 0) -- 稍微留一点边距
+    hpText.Position = UDim2.new(0, 0, 0.05, 0)
+    hpText.BackgroundTransparency = 1
+    hpText.TextColor3 = Color3.fromRGB(255, 255, 255) -- 白色文字
+    hpText.TextStrokeTransparency = 0.2 -- 添加微微的黑边，防止文字和绿色进度条融为一体
+    hpText.TextScaled = true
+    hpText.Font = Enum.Font.SourceSansBold
+    hpText.ZIndex = 2 -- 确保显示在血条的最上层
+    hpText.Parent = barBg
+    -- 👆 新增结束
+
     billboard.Parent = playerGui
 
     -- ==========================================
@@ -128,6 +142,10 @@ function PlantHoverController.Init()
         local ratio = math.clamp(currentHP / maxHP, 0, 1)
 
         TweenService:Create(barFill, TweenInfo.new(0.2), { Size = UDim2.new(ratio, 0, 1, 0) }):Play()
+        
+        -- 👇 [🌟 新增：更新生命值文本显示 (向下取整以防出现小数)]
+        hpText.Text = math.floor(currentHP) .. " / " .. math.floor(maxHP)
+        -- 👆 新增结束
 
         local plantId = currentTarget.Name
         local plantConfig = ItemConfig.Plants[plantId]
@@ -146,14 +164,36 @@ function PlantHoverController.Init()
             mutIcon.Visible = false
         end
 
-        -- 更新 DPS 显示
-        if plantConfig and plantConfig.CanAttack and plantConfig.Attack and plantConfig.AttackInterval then
-            local dpsValue = plantConfig.Attack / plantConfig.AttackInterval
-            if mutationLevel > 1 then dpsValue = dpsValue * 1.5 end 
+        -- [🌟 布局自适应判定]
+        local canAttack = plantConfig and plantConfig.CanAttack and plantConfig.Attack and plantConfig.AttackInterval
+        
+       if canAttack then
+            -- 🟢 有攻击力：显示 DPS，维持面板原高度 (83)
+            
+            -- [🌟 修复：严格读取 ItemConfig 中的变异攻击乘区]
+            local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
+            local finalAttack = math.floor(plantConfig.Attack * stats.DamageMul)
+            local dpsValue = finalAttack / plantConfig.AttackInterval
+            
             dpsLabel.Text = string.format("DPS: %.1f", dpsValue)
             dpsLabel.Visible = true
+            
+            -- 恢复默认高度与布局
+            bgFrame.Size = UDim2.new(1, 0, 0, 83)
+            bgFrame.Position = UDim2.new(0, 0, 1, -83)
+            nameLabel.Position = UDim2.new(0, 0, 0.35, 0)
+            barBg.Position = UDim2.new(0.075, 0, 0.75, 0)
         else
+            -- 🔴 无攻击力（如向日葵）：隐藏 DPS，缩减面板高度 (58)
             dpsLabel.Visible = false
+            
+            -- 动态调整面板大小与位置，消除空白
+            bgFrame.Size = UDim2.new(1, 0, 0, 58) 
+            bgFrame.Position = UDim2.new(0, 0, 1, -58) -- 面板整体上移
+            
+            -- 内部组件向上微调，保持紧凑
+            nameLabel.Position = UDim2.new(0, 0, 0.15, 0) 
+            barBg.Position = UDim2.new(0.075, 0, 0.62, 0) 
         end
     end
 
