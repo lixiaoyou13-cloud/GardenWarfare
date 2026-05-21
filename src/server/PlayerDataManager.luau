@@ -227,6 +227,26 @@ end
 
 function PlayerDataManager.GetPlayerData(player) return sessionData[player.UserId] end
 
+function PlayerDataManager.WaitForPlayerData(player, timeout)
+    timeout = timeout or 10
+    local startTime = os.clock()
+
+    while player and player.Parent do
+        local data = sessionData[player.UserId]
+        if data then
+            return data
+        end
+
+        if os.clock() - startTime >= timeout then
+            break
+        end
+
+        task.wait(0.1)
+    end
+
+    return sessionData[player.UserId]
+end
+
 function PlayerDataManager.ClearTransientPlotData(player)
     local data = sessionData[player.UserId]
     if not data then return end

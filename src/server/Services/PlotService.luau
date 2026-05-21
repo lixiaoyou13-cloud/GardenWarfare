@@ -70,6 +70,8 @@ end
 function PlotService.AssignPlot(player)
     if playerPlots[player.UserId] then return playerPlots[player.UserId] end
 
+    PlayerDataManager.WaitForPlayerData(player)
+
     local plotsFolder = Workspace:WaitForChild("Plots")
     local chosenPlot = nil
 
@@ -299,9 +301,7 @@ end
 
 function PlotService.Init()
     Players.PlayerAdded:Connect(function(player)
-        task.wait(1) 
         PlotService.AssignPlot(player)
-        
     end)
     Players.PlayerRemoving:Connect(function(player)
         PlotService.ReleasePlot(player)
@@ -309,7 +309,6 @@ function PlotService.Init()
     
     for _, player in ipairs(Players:GetPlayers()) do
         task.spawn(function()
-            task.wait(1)
             PlotService.AssignPlot(player)
         end)
     end
