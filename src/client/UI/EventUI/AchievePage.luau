@@ -5,7 +5,7 @@ local Players = game:GetService("Players")
 local UIEffectUtil = require(script.Parent.Parent.Parent:WaitForChild("Utils"):WaitForChild("UIEffectUtil"))
 -- 引入奖励配置表
 local LevelRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LevelRewardConfig"))
-
+print("66666666666666")
 function AchievePage.Init(achieveFrame)
     if not achieveFrame then return end
     
