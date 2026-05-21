@@ -1,11 +1,9 @@
 -- src/client/Services/ToolController.luau
-local ToolController = {
-    _okConn = nil,      -- 提前声明，消除 Luau 类型检查警告
-    _cancelConn = nil   -- 提前声明，消除 Luau 类型检查警告
-}
+local ToolController = {}
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
+local PopupUtil = require(script.Parent.Parent.Utils.PopupUtil)
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local weaponAttackRE = ReplicatedStorage:WaitForChild("WeaponAttackRE", 5)
@@ -76,55 +74,25 @@ function ToolController.Init()
                         local plot = lawnPart and lawnPart.Parent and lawnPart.Parent.Parent
                         if plot and plot:GetAttribute("IsLevelActive") then
                             
-                            -- 👇 [🌟 修复后：正确的战斗状态拦截与弹窗逻辑]
+                            -- 👇 [🌟 战斗中的置换/回收确认弹窗交给独立模块处理]
                             if actionName == "Swap Plant" or actionName == "Recycle to Backpack" then
-                                local playerGui = player:WaitForChild("PlayerGui")
-                                local basicGui = playerGui:FindFirstChild("BasicGui")
-                                local popup = basicGui and basicGui:FindFirstChild("Popup")
-                                
-                                if popup then
-                                    local popupFrame = popup:FindFirstChild("PopupFrame")
-                                    if popupFrame then
-                                        local detail = popupFrame:FindFirstChild("Detail")
-                                        local btnOk = popupFrame:FindFirstChild("OK")
-                                        local btnCancel = popupFrame:FindFirstChild("Cancel")
-                                        
-                                        if detail and btnOk and btnCancel then
-                                            -- 动态设置英文确认文本
-                                            if actionName == "Swap Plant" then
-                                                detail.Text = "Swapping plants during combat costs 1K Sun."
-                                            else
-                                                detail.Text = "Removing plants during combat costs 1K Sun."
-                                            end
-                                            popup.Enabled = true
-                                            
-                                            -- 清理之前的绑定，防止多重触发
-                                            if ToolController._okConn then ToolController._okConn:Disconnect() end
-                                            if ToolController._cancelConn then ToolController._cancelConn:Disconnect() end
-                                            
-                                            -- 确认扣费并发送请求
-                                            ToolController._okConn = btnOk.MouseButton1Click:Connect(function()
-                                                popup.Enabled = false
-                                                ToolController._okConn:Disconnect()
-                                                ToolController._cancelConn:Disconnect()
-                                                
-                                                -- 传入 true 代表这是战斗中的操作
-                                                if actionName == "Swap Plant" then
-                                                    swapRE:FireServer(plant, equippedItem, true)
-                                                else
-                                                    shovelRE:FireServer(plant, true)
-                                                end
-                                            end)
-                                            
-                                            -- 取消操作
-                                            ToolController._cancelConn = btnCancel.MouseButton1Click:Connect(function()
-                                                popup.Enabled = false
-                                                ToolController._okConn:Disconnect()
-                                                ToolController._cancelConn:Disconnect()
-                                            end)
-                                        end
+                                local detailText = if actionName == "Swap Plant"
+                                    then "Swapping plants during combat costs 1K Sun."
+                                    else "Removing plants during combat costs 1K Sun."
+
+                                local shown = PopupUtil.ShowConfirm(detailText, function()
+                                    -- 传入 true 代表这是战斗中的操作
+                                    if actionName == "Swap Plant" then
+                                        swapRE:FireServer(plant, equippedItem, true)
+                                    else
+                                        shovelRE:FireServer(plant, true)
                                     end
+                                end)
+
+                                if not shown then
+                                    UIEffectUtil.ShowTip("Popup is unavailable right now")
                                 end
+
                                 return -- 拦截到底，不往下执行默认操作
                             else
                                 UIEffectUtil.ShowTip("Cannot interact with plants during battle")
