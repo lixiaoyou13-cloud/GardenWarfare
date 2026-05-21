@@ -2,6 +2,7 @@
 local ToolController = {}
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
 local PopupUtil = require(script.Parent.Parent.Utils.PopupUtil)
 local Workspace = game:GetService("Workspace")
@@ -10,10 +11,14 @@ local weaponAttackRE = ReplicatedStorage:WaitForChild("WeaponAttackRE", 5)
 
 
 local activePrompts = {} -- 保存对 Prompt 的引用，方便随时清理
+local activeGiftPopup = nil
+local activeGiftRequestId = nil
 
 function ToolController.Init()
     local player = Players.LocalPlayer
+    local mouse = player:GetMouse()
     local shovelRE = ReplicatedStorage:WaitForChild("ShovelActionRE")
+    local giftItemRE = ReplicatedStorage:WaitForChild("GiftItemRE")
     
     -- 🌟 注册交换植物的远程事件
     local swapRE = ReplicatedStorage:WaitForChild("SwapCombatPlantRE", 5) 
@@ -144,6 +149,124 @@ function ToolController.Init()
         end
     end
 
+    local function getGiftItemDisplayName(compositeId)
+        local parts = string.split(compositeId, "_")
+        local itemType = parts[1]
+        local realId = parts[2]
+
+        if itemType == "Seed" then
+            local seedConfig = ItemConfig.Seeds[realId]
+            return (seedConfig and seedConfig.Name) or realId
+        elseif itemType == "Plant" then
+            local plantConfig = ItemConfig.Plants[realId]
+            return (plantConfig and plantConfig.Name) or realId
+        end
+
+        return nil
+    end
+
+    local function tryGiftEquippedItem(targetPlayer)
+        if not targetPlayer or targetPlayer == player then return false end
+
+        local char = player.Character
+        if not char then return false end
+
+        local equippedItem = char:GetAttribute("EquippedSeed")
+        if type(equippedItem) ~= "string" then return false end
+        if not string.match(equippedItem, "^Seed_") and not string.match(equippedItem, "^Plant_") then
+            return false
+        end
+
+        local itemName = getGiftItemDisplayName(equippedItem)
+        if not itemName then return false end
+
+        local confirmText = string.format("Do you want to gift %s to %s?", itemName, targetPlayer.Name)
+        local popupHandle = PopupUtil.ShowManaged(confirmText, {
+            closeOnConfirm = false,
+            closeOnCancel = true,
+            onConfirm = function(handle)
+                handle.SetWaiting("Waiting for the other player to confirm ...")
+                activeGiftPopup = handle
+                activeGiftRequestId = "PENDING"
+                UIEffectUtil.ShowTip("Waiting...")
+                giftItemRE:FireServer("CreateRequest", targetPlayer, equippedItem)
+            end,
+            onCancel = function()
+                activeGiftPopup = nil
+                activeGiftRequestId = nil
+            end,
+        })
+
+        if not popupHandle then
+            UIEffectUtil.ShowTip("Popup is unavailable right now")
+            return true
+        end
+
+        return true
+    end
+
+    giftItemRE.OnClientEvent:Connect(function(action, ...)
+        local args = { ... }
+
+        if action == "RequesterWaiting" then
+            local requestId = args[1]
+            activeGiftRequestId = requestId
+
+            if activeGiftPopup then
+                activeGiftPopup.SetWaiting("Waiting for the other player to confirm ...")
+                activeGiftPopup.SetButtons({
+                    onCancel = function()
+                        giftItemRE:FireServer("CancelRequest", requestId)
+                        activeGiftPopup = nil
+                        activeGiftRequestId = nil
+                    end,
+                    closeOnCancel = true,
+                })
+            end
+        elseif action == "ReceiveRequest" then
+            local requestId = args[1]
+            local fromPlayerName = args[2]
+            local itemName = args[3]
+
+            activeGiftRequestId = requestId
+            activeGiftPopup = PopupUtil.ShowManaged(
+                string.format("Player %s gifts %s to you. Do you accept?", fromPlayerName, itemName),
+                {
+                    closeOnConfirm = true,
+                    closeOnCancel = true,
+                    onConfirm = function()
+                        giftItemRE:FireServer("RespondRequest", requestId, true)
+                        activeGiftPopup = nil
+                        activeGiftRequestId = nil
+                    end,
+                    onCancel = function()
+                        giftItemRE:FireServer("RespondRequest", requestId, false)
+                        activeGiftPopup = nil
+                        activeGiftRequestId = nil
+                    end,
+                }
+            )
+
+            if not activeGiftPopup then
+                giftItemRE:FireServer("RespondRequest", requestId, false)
+                UIEffectUtil.ShowTip("Popup is unavailable right now")
+            end
+        elseif action == "ClosePopup" then
+            local requestId = args[1]
+            local tipText = args[2]
+
+            if activeGiftRequestId == requestId or requestId == nil then
+                PopupUtil.Hide()
+                activeGiftPopup = nil
+                activeGiftRequestId = nil
+            end
+
+            if tipText and tipText ~= "" then
+                UIEffectUtil.ShowTip(tipText)
+            end
+        end
+    end)
+
     local function bindCharacter(char)
         char:GetAttributeChangedSignal("EquippedSeed"):Connect(updateToolState)
         updateToolState()
@@ -195,6 +318,15 @@ function ToolController.Init()
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             local char = player.Character
             if not char then return end
+
+            local target = mouse.Target
+            if target then
+                local targetModel = target:FindFirstAncestorOfClass("Model")
+                local targetPlayer = targetModel and Players:GetPlayerFromCharacter(targetModel)
+                if tryGiftEquippedItem(targetPlayer) then
+                    return
+                end
+            end
 
             if char:GetAttribute("EquippedSeed") == "Tool_WeaponBlock" then
                 if isAttacking then return end

@@ -5,6 +5,36 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
+local pendingGiftRequests = {}
+local playerPendingGiftRequest = {}
+local nextGiftRequestId = 0
+
+local function getDisplayItemName(itemType, realId)
+    if itemType == "Seed" then
+        local seedConfig = ItemConfig.Seeds[realId]
+        return seedConfig and (seedConfig.Name or realId)
+    elseif itemType == "Plant" then
+        local plantConfig = ItemConfig.Plants[realId]
+        return plantConfig and (plantConfig.Name or realId)
+    end
+
+    return nil
+end
+
+local function clearGiftRequest(requestId)
+    local requestData = pendingGiftRequests[requestId]
+    if not requestData then return nil end
+
+    if playerPendingGiftRequest[requestData.sender] == requestId then
+        playerPendingGiftRequest[requestData.sender] = nil
+    end
+    if playerPendingGiftRequest[requestData.target] == requestId then
+        playerPendingGiftRequest[requestData.target] = nil
+    end
+
+    pendingGiftRequests[requestId] = nil
+    return requestData
+end
 
 local function CleanUpGhostItems(data)
     if not data or not data.Hotbar then return false end
@@ -51,6 +81,10 @@ function InventoryService.Init()
     local equipItemRE = Instance.new("RemoteEvent")
     equipItemRE.Name = "EquipItemRE"
     equipItemRE.Parent = ReplicatedStorage
+
+    local giftItemRE = ReplicatedStorage:FindFirstChild("GiftItemRE") or Instance.new("RemoteEvent")
+    giftItemRE.Name = "GiftItemRE"
+    giftItemRE.Parent = ReplicatedStorage
 
     local forceSelectRE = Instance.new("RemoteEvent")
     forceSelectRE.Name = "ForceSelectRE"
@@ -185,6 +219,115 @@ function InventoryService.Init()
             end
             if CleanUpGhostItems(data) or found then
                 ReplicatedStorage.UpdateInventoryRE:FireClient(player, data)
+            end
+        end
+    end)
+
+    giftItemRE.OnServerEvent:Connect(function(player, action, arg1, arg2)
+        local showTipRE = ReplicatedStorage:FindFirstChild("ShowTipRE")
+
+        if action == "CreateRequest" then
+            local targetPlayer = arg1
+            local compositeId = arg2
+
+            if typeof(targetPlayer) ~= "Instance" or not targetPlayer:IsA("Player") then return end
+            if targetPlayer == player then return end
+            if type(compositeId) ~= "string" or compositeId == "" then return end
+            if playerPendingGiftRequest[player] or playerPendingGiftRequest[targetPlayer] then
+                if showTipRE then
+                    showTipRE:FireClient(player, "Gift request is busy right now")
+                end
+                giftItemRE:FireClient(player, "ClosePopup", nil, "Gift request is busy right now")
+                return
+            end
+
+            local senderData = PlayerDataManager.GetPlayerData(player)
+            local receiverData = PlayerDataManager.GetPlayerData(targetPlayer)
+            if not senderData or not receiverData then
+                giftItemRE:FireClient(player, "ClosePopup", nil, "Gift failed")
+                return
+            end
+
+            local parts = string.split(compositeId, "_")
+            local itemType = parts[1]
+            local realId = parts[2]
+            local mutLvl = tonumber(parts[3]) or 1
+            local itemName = realId and getDisplayItemName(itemType, realId)
+
+            if not realId or (itemType ~= "Seed" and itemType ~= "Plant") or not itemName then
+                giftItemRE:FireClient(player, "ClosePopup", nil, "Gift failed")
+                return
+            end
+
+            nextGiftRequestId += 1
+            local requestId = tostring(nextGiftRequestId)
+            pendingGiftRequests[requestId] = {
+                sender = player,
+                target = targetPlayer,
+                compositeId = compositeId,
+                itemType = itemType,
+                realId = realId,
+                mutLvl = mutLvl,
+                itemName = itemName,
+            }
+            playerPendingGiftRequest[player] = requestId
+            playerPendingGiftRequest[targetPlayer] = requestId
+
+            giftItemRE:FireClient(player, "RequesterWaiting", requestId, targetPlayer.Name, itemName)
+            giftItemRE:FireClient(targetPlayer, "ReceiveRequest", requestId, player.Name, itemName)
+        elseif action == "CancelRequest" then
+            local requestId = arg1
+            local requestData = pendingGiftRequests[requestId]
+            if not requestData or requestData.sender ~= player then return end
+
+            clearGiftRequest(requestId)
+            giftItemRE:FireClient(player, "ClosePopup", requestId, "Gift cancelled")
+            giftItemRE:FireClient(requestData.target, "ClosePopup", requestId, "Gift cancelled")
+        elseif action == "RespondRequest" then
+            local requestId = arg1
+            local accepted = arg2
+            local requestData = pendingGiftRequests[requestId]
+            if not requestData or requestData.target ~= player then return end
+
+            if not accepted then
+                clearGiftRequest(requestId)
+                giftItemRE:FireClient(requestData.sender, "ClosePopup", requestId, "The other player declined the gift")
+                giftItemRE:FireClient(player, "ClosePopup", requestId, "Gift declined")
+                return
+            end
+
+            local sender = requestData.sender
+            local targetPlayer = requestData.target
+            local senderData = PlayerDataManager.GetPlayerData(sender)
+            local receiverData = PlayerDataManager.GetPlayerData(targetPlayer)
+            if not senderData or not receiverData then
+                clearGiftRequest(requestId)
+                giftItemRE:FireClient(sender, "ClosePopup", requestId, "Gift failed")
+                giftItemRE:FireClient(targetPlayer, "ClosePopup", requestId, "Gift failed")
+                return
+            end
+
+            local success = false
+            if requestData.itemType == "Seed" then
+                success = PlayerDataManager.ConsumeSeed(sender, requestData.realId, 1)
+                if success then
+                    PlayerDataManager.GiveSeed(targetPlayer, requestData.realId, 1, true)
+                end
+            else
+                success = PlayerDataManager.ConsumePlant(sender, requestData.realId, 1, requestData.mutLvl)
+                if success then
+                    PlayerDataManager.GivePlant(targetPlayer, requestData.realId, 1, requestData.mutLvl)
+                end
+            end
+
+            clearGiftRequest(requestId)
+
+            if success then
+                giftItemRE:FireClient(sender, "ClosePopup", requestId, "You gifted 1x " .. requestData.itemName .. " to " .. targetPlayer.Name)
+                giftItemRE:FireClient(targetPlayer, "ClosePopup", requestId, "You received 1x " .. requestData.itemName .. " from " .. sender.Name)
+            else
+                giftItemRE:FireClient(sender, "ClosePopup", requestId, "Gift failed: item not available")
+                giftItemRE:FireClient(targetPlayer, "ClosePopup", requestId, "Gift failed")
             end
         end
     end)
