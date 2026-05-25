@@ -19,13 +19,29 @@ function RollController.Init()
     local openPageBtn = playProperty:WaitForChild("Roll") 
     
     local rollPage = basicGui:WaitForChild("RollPage")
+    rollPage.DisplayOrder = 999
     local bgFrame = rollPage:WaitForChild("BGFrame") 
     local maskFrame = rollPage:WaitForChild("MaskFrame")
     local scrollList = maskFrame:WaitForChild("ScrollList")
     
+    -- 🌟 获取倒计时文本标签
+    local getTimeText = bgFrame:WaitForChild("GetTimeText")
+    
+    -- 🌟 本地倒计时缓存
+    local localRollTimer = 300
     -- 👇 开启背景阻挡层，防止穿透点击
     bgFrame.Active = true 
     
+    -- 🌟【修复穿透2】创建一个全屏透明拦截网！放在最底层，绝对拦截所有穿透点击
+    if not rollPage:FindFirstChild("ClickBlockerWall") then
+        local blocker = Instance.new("TextButton")
+        blocker.Name = "ClickBlockerWall"
+        blocker.Size = UDim2.new(1, 0, 1, 0)
+        blocker.BackgroundTransparency = 1
+        blocker.Text = ""
+        blocker.ZIndex = -999 
+        blocker.Parent = rollPage
+    end
     local tab1Btn = bgFrame:WaitForChild("Tab_1")
     local tab2Btn = bgFrame:WaitForChild("Tab_2")
 
@@ -109,6 +125,11 @@ function RollController.Init()
     local function RefreshUI(data)
         if not data then return end
         currentTickets = data.RollTickets or {0, 0}
+
+        -- 🌟 从服务端同步最新剩余时间
+        if data.OnlineRollTimer then
+            localRollTimer = data.OnlineRollTimer
+        end
         
         -- 更新各个 Tab 上的红点
         CreateOrUpdateRedDot(tab1Btn, currentTickets[1])
@@ -131,12 +152,47 @@ function RollController.Init()
     local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE")
     updateInventoryRE.OnClientEvent:Connect(RefreshUI)
 
-    -- 游戏刚启动时主动拉取一次数据
+    -- ==========================================
+    -- [🌟 新增：独立更新 UI 倒计时循环]
+    -- ==========================================
+    -- ==========================================
+    -- [🌟 优化：即时文本刷新函数 + 倒计时驱动]
+    -- ==========================================
+    local function UpdateGetTimeText()
+        if not getTimeText then return end
+        
+        if currentTab == 1 then
+            -- 页面 1 显示精确的倒计时
+            local m = math.floor(localRollTimer / 60)
+            local s = localRollTimer % 60
+            getTimeText.Text = string.format("(%02d:%02d) Get one chance", m, s)
+        elseif currentTab == 2 then
+            -- 页面 2 立刻切换为更新提示
+            getTimeText.Text = "Stay tuned for updates"
+        end
+    end
     task.spawn(function()
-        local data = ReplicatedStorage:WaitForChild("GetPlayerDataRF"):InvokeServer()
-        RefreshUI(data)
+        while task.wait(1) do
+            -- 本地自己先递减，保证 UI 看起来是连贯的
+            if localRollTimer > 0 then
+                localRollTimer = localRollTimer - 1
+            else
+                localRollTimer = 300 -- 等待服务端同步期间的本地假循环
+            end
+            
+            -- 如果抽奖页面开着，就刷新文字
+            if rollPage.Enabled and getTimeText then
+                if currentTab == 1 then
+                    -- 计算分和秒
+                    local m = math.floor(localRollTimer / 60)
+                    local s = localRollTimer % 60
+                    getTimeText.Text = string.format("(%02d:%02d) Get one chance", m, s)
+                elseif currentTab == 2 then
+                    getTimeText.Text = "Stay tuned for updates"
+                end
+            end
+        end
     end)
-
 
     -- ==========================================
     -- [统一装配格子的核心逻辑]
@@ -259,7 +315,46 @@ function RollController.Init()
             end
         end
     end
+-- ==========================================
+    -- [🌟 新增：展示植物 3D 自转引擎]
+    -- ==========================================
+    local showcaseSpinConnection = nil
+    
+    local function StartShowcaseSpin()
+        if showcaseSpinConnection then showcaseSpinConnection:Disconnect() end
+        
+        -- 使用渲染步进保证 60帧/144帧 极致顺滑
+        showcaseSpinConnection = RunService.RenderStepped:Connect(function(dt)
+            if not bgFrame then return end
+            -- 遍历那三个展示框 (Show_1, Show_2, Show_3)
+            for i = 1, 3 do
+                local showContainer = bgFrame:FindFirstChild("Show_" .. i)
+                if showContainer then
+                    for _, slot in pairs(showContainer:GetChildren()) do
+                        if slot:IsA("GuiObject") then
+                            local vp = slot:FindFirstChild("Icom") or slot:FindFirstChildWhichIsA("ViewportFrame")
+                            if vp then
+                                -- 查找 ViewportFrame 里的真实 3D 模型并进行自转
+                                for _, child in ipairs(vp:GetChildren()) do
+                                    if child:IsA("Model") and child.PrimaryPart then
+                                        -- 速度: 每秒转动 60 度，想快点把 60 改大
+                                        child:PivotTo(child:GetPivot() * CFrame.Angles(0, dt * math.rad(60), 0))
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
 
+    local function StopShowcaseSpin()
+        if showcaseSpinConnection then
+            showcaseSpinConnection:Disconnect()
+            showcaseSpinConnection = nil
+        end
+    end
     -- ==========================================
     -- [状态 1]：开启无限循环滚动
     -- ==========================================
@@ -498,6 +593,9 @@ function RollController.Init()
         currentTab = tabIndex
         print("切换抽奖池至：Tab_" .. currentTab)
         
+        -- 🌟【关键修改】在这里加入主动调用，切换的一瞬间立刻换字，0延迟！
+        UpdateGetTimeText()
+        
         AnimateTab(tab1Btn, currentTab == 1, tab1OriginalPos)
         AnimateTab(tab2Btn, currentTab == 2, tab2OriginalPos)
         
@@ -526,14 +624,17 @@ function RollController.Init()
     -- ==========================================
     openPageBtn.MouseButton1Click:Connect(function()
         rollPage.Enabled = true
+        rollPage.DisplayOrder = 999 
         task.wait() 
         
-        -- 👇 [🌟 核心联动：打开时，优先选中拥有剩余次数的池子，并重置UI文字]
         local targetTab = 1
         if currentTickets[1] <= 0 and currentTickets[2] > 0 then
             targetTab = 2
         end
         currentTab = targetTab
+        
+        -- 🌟【关键修改】页面被玩家点开时，根据判定好的 targetTab 立刻刷一次文本
+        UpdateGetTimeText()
         
         local drawText = drawBtn:FindFirstChildWhichIsA("TextLabel")
         if drawText then
@@ -546,6 +647,7 @@ function RollController.Init()
         AnimateTab(tab2Btn, currentTab == 2, tab2OriginalPos)
         
         SetupLowestProbShowcase()
+        StartShowcaseSpin() -- 🌟【动画接入】打开页面，三个植物立刻开始自转
         
         if not isRolling then
             StartIdleScroll()
@@ -555,6 +657,8 @@ function RollController.Init()
     closeBtn.MouseButton1Click:Connect(function()
         if isRolling then return end 
         rollPage.Enabled = false
+        StopShowcaseSpin() -- 🌟【动画释放】关闭页面，立刻停止旋转，杜绝吃电脑性能
+        
         if idleConnection then 
             idleConnection:Disconnect()
             idleConnection = nil
@@ -564,7 +668,6 @@ function RollController.Init()
     drawBtn.MouseButton1Click:Connect(function()
         StartDraw()
     end)
-    
     print("客户端：RollController (真实扣费红点校验系统) 加载完毕！")
 end
 

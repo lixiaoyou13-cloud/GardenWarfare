@@ -1,5 +1,7 @@
 -- src/shared/EffectUtil.luau
 local EffectUtil = {}
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 -- 定义所有变异特效的标签名称
 local MUTATION_TAGS = { "Glow", "Lightning", "HolyLight" }
@@ -17,6 +19,7 @@ function EffectUtil.ApplyMutationEffects(model, mutationLevel)
     }
     
     local targetName = effectMap[mutationLevel] -- 当前应该显示的特效名
+    
     local primaryPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
 
     -- 只进行一次全量搜索，确保性能和准确性
@@ -64,7 +67,46 @@ function EffectUtil.ApplyMutationEffects(model, mutationLevel)
     end
 end
 
--- 保留这个函数名以兼容可能存在的其他调用，但逻辑直接指向 ApplyMutationEffects(model, 1)
+-- [🌟 新增：樱桃炸弹专属爆炸视觉特效]
+function EffectUtil.PlayExplosion(targetPos, radius)
+    -- 1. 使用 Roblox 原生爆炸对象（提供经典的烟雾火光和爆炸音效）
+    local explosion = Instance.new("Explosion")
+    explosion.Position = targetPos
+    explosion.BlastRadius = radius
+    -- 【关键】：将物理冲击力设为 0，防止把场景里其他零件炸飞，伤害结算我们已经在 CombatService 里手写了
+    explosion.BlastPressure = 0 
+    explosion.DestroyJointRadiusPercent = 0 
+    explosion.Parent = Workspace
+
+    -- 2. 额外叠加一个巨大的能量冲击波光球，视觉冲击力拉满！
+    local shockwave = Instance.new("Part")
+    shockwave.Shape = Enum.PartType.Ball
+    shockwave.Material = Enum.Material.Neon
+    shockwave.Color = Color3.fromRGB(255, 100, 50) -- 炽热的橙红色
+    shockwave.Anchored = true
+    shockwave.CanCollide = false
+    shockwave.CanQuery = false
+    shockwave.Position = targetPos
+    shockwave.Size = Vector3.new(2, 2, 2) -- 初始大小
+    shockwave.Transparency = 0.2
+    shockwave.Parent = Workspace
+
+    -- 使用 TweenService 让光球瞬间膨胀并消失
+    local tweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(shockwave, tweenInfo, {
+        Size = Vector3.new(radius * 2, radius * 2, radius * 2), -- 膨胀到爆炸半径大小
+        Transparency = 1 -- 逐渐变透明
+    })
+    
+    tween:Play()
+    
+    -- 动画结束后清理光球
+    tween.Completed:Connect(function()
+        shockwave:Destroy()
+    end)
+end
+
+-- 保留这个函数名以兼容可能存在的其他调用
 function EffectUtil.HideAllMutations(model)
     EffectUtil.ApplyMutationEffects(model, 1)
 end

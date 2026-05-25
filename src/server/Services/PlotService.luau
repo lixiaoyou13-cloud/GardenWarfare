@@ -252,7 +252,7 @@ function PlotService.AssignPlot(player)
                     prompt.Name = "ShopPrompt"
                     prompt.ActionText = "Open Shop"
                     prompt.ObjectText = "Crazy Dave"
-                    prompt.KeyboardKeyCode = Enum.KeyCode.F -- 绑定按键 F
+                    prompt.KeyboardKeyCode = Enum.KeyCode.E -- 绑定按键 E
                     prompt.RequiresLineOfSight = false
                     prompt.MaxActivationDistance = 10 -- 触发距离
                     prompt.HoldDuration = 0 -- 瞬间触发，不需要长按
@@ -438,13 +438,13 @@ function PlotService.UpdateSoilVisuals(player, plot)
                         prompt = Instance.new("ProximityPrompt")
                         prompt.Name = "UnlockPrompt"
                         prompt.ActionText = "Unlock Plot"
-                        prompt.KeyboardKeyCode = Enum.KeyCode.F
+                        prompt.KeyboardKeyCode = Enum.KeyCode.E
                         prompt.RequiresLineOfSight = false
                         prompt.MaxActivationDistance = 8
                         prompt.HoldDuration = 0.5 -- [🌟 修复2] 必须长按0.5秒，杜绝按键连发穿透多块地！
                         prompt.Parent = soil
 
-                        -- 当玩家长按 F 键时触发购买
+                        -- 当玩家长按 E 键时触发购买
                         prompt.Triggered:Connect(function(triggerPlayer)
                             if triggerPlayer ~= player then return end -- 只有地块主人能买
                             local price = PlotUnlockConfig.UnlockPrices[soilId]

@@ -1,32 +1,61 @@
 -- src/shared/RollConfig.luau
 local RollConfig = {}
 
--- 🌟 升级为多池配置表，分别对应 Tab_1 和 Tab_2
+-- 🌟 精简版 12 植物抽奖池 (总权重 = 1000)
 RollConfig.Pools = {
-    [1] = { -- 【页签 1：普通植物池】
-        { Id = "Peashooter",   Weight = 300, DisplayRate = "30%" },
-        { Id = "Sunflower",    Weight = 200, DisplayRate = "20%" },
-        { Id = "Wall",         Weight = 150, DisplayRate = "15%" },
-        { Id = "PotatoMine",   Weight = 150, DisplayRate = "15%" },
-        { Id = "KernelPult",   Weight = 100, DisplayRate = "10%" },
-        { Id = "FumeShroom",   Weight = 50,  DisplayRate = "5%" },
-        { Id = "Jalapeno",     Weight = 20,  DisplayRate = "2%" },
-        { Id = "Cactus",       Weight = 15,  DisplayRate = "1.5%" },
-        { Id = "CoconutTree",  Weight = 10,  DisplayRate = "1%" },
-        { Id = "Melonpult",    Weight = 5,   DisplayRate = "0.5%" },
+    [1] = { 
+        -- 【页签 1：普通池】 (共 11 种植物 | 只有 2 个五星 | 无玉米加农炮)
+        
+        -- ⭐ 1星 
+        { Id = "Peashooter",   Weight = 300, DisplayRate = "30%" },   -- 商城
+        
+        -- ⭐⭐ 2星 
+        { Id = "KernelPult",   Weight = 150, DisplayRate = "15%" },   -- 商城
+        { Id = "CarrotShooter",Weight = 150, DisplayRate = "15%" },   -- 🎁 非商城
+        
+        -- ⭐⭐⭐ 3星 
+        { Id = "SnowPea",      Weight = 100, DisplayRate = "10%" },   -- 🎁 非商城
+        { Id = "CherryBomb",   Weight = 100, DisplayRate = "10%" },   -- 🎁 非商城
+        { Id = "RadishShooter",Weight = 80,  DisplayRate = "8%" },    -- 🎁 非商城
+        
+        -- ⭐⭐⭐⭐ 4星 
+        { Id = "FumeShroom",   Weight = 40,  DisplayRate = "4%" },    -- 商城
+        { Id = "Magnetshroom", Weight = 40,  DisplayRate = "4%" },    -- 🎁 非商城
+        { Id = "Cactus",       Weight = 30,  DisplayRate = "3%" },    -- 商城
+        
+        -- ⭐⭐⭐⭐⭐ 5星 (仅 2 个，掉率极低，无加农炮)
+        { Id = "TwinSunflower",Weight = 5,   DisplayRate = "0.5%" },  -- 🎁 非商城
+        { Id = "IceMelonpult", Weight = 5,   DisplayRate = "0.5%" },  -- 🎁 非商城
     },
     
-    [2] = { -- 【页签 2：全新高级/稀有池（自定义配置）】
-        -- 这里为你配置了一套全新概率，大奖概率更高或包含不同植物
-        { Id = "Jalapeno",     Weight = 300, DisplayRate = "30%" },
-        { Id = "Cactus",       Weight = 250, DisplayRate = "25%" },
-        { Id = "CoconutTree",  Weight = 200, DisplayRate = "20%" },
-        { Id = "Melonpult",    Weight = 150, DisplayRate = "15%" },
-        { Id = "Peashooter",   Weight = 100, DisplayRate = "10%" }, -- 举例：高级池里普通植物反而变稀有了
+    [2] = { 
+        -- 【页签 2：高级池】 (共 12 种植物 | 包含 3 个五星 | 加农炮为极低概率 2%)
+        
+        -- ⭐ 1星 
+        { Id = "Peashooter",   Weight = 150, DisplayRate = "15%" },   -- 商城
+        
+        -- ⭐⭐ 2星 
+        { Id = "KernelPult",   Weight = 130, DisplayRate = "13%" },   -- 商城
+        { Id = "CarrotShooter",Weight = 130, DisplayRate = "13%" },   -- 🎁 非商城
+        
+        -- ⭐⭐⭐ 3星 
+        { Id = "SnowPea",      Weight = 100, DisplayRate = "10%" },   -- 🎁 非商城
+        { Id = "CherryBomb",   Weight = 100, DisplayRate = "10%" },   -- 🎁 非商城
+        { Id = "RadishShooter",Weight = 100, DisplayRate = "10%" },   -- 🎁 非商城
+        
+        -- ⭐⭐⭐⭐ 4星 
+        { Id = "FumeShroom",   Weight = 70,  DisplayRate = "7%" },    -- 商城
+        { Id = "Magnetshroom", Weight = 70,  DisplayRate = "7%" },    -- 🎁 非商城
+        { Id = "Cactus",       Weight = 70,  DisplayRate = "7%" },    -- 商城
+        
+        -- ⭐⭐⭐⭐⭐ 5星 (共 3 个，加农炮压轴)
+        { Id = "TwinSunflower",Weight = 30,  DisplayRate = "3%" },    -- 🎁 非商城
+        { Id = "IceMelonpult", Weight = 30,  DisplayRate = "3%" },    -- 🎁 非商城
+        { Id = "CobCannon",    Weight = 20,  DisplayRate = "2%" },    -- 🎁 非商城 (💣终极大奖，全场最低 2%)
     }
 }
 
--- [升级算法]：根据传入的页签 ID 随机抽取对应的植物
+-- [抽奖算法]：根据传入的页签 ID 随机抽取对应的植物
 function RollConfig.GetRandomPrize(tabIndex)
     local pool = RollConfig.Pools[tabIndex] or RollConfig.Pools[1]
     local totalWeight = 0
@@ -48,7 +77,7 @@ function RollConfig.GetRandomPrize(tabIndex)
     return pool[1].Id 
 end
 
--- [升级工具函数]：获取某个池子中植物的显示概率
+-- [显示工具函数]：获取某个池子中植物的显示概率
 function RollConfig.GetDisplayRate(tabIndex, itemId)
     local pool = RollConfig.Pools[tabIndex] or RollConfig.Pools[1]
     for _, item in ipairs(pool) do

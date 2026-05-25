@@ -358,6 +358,160 @@ function ToolService.Init()
             end
         end
     end)
+    -- ==========================================
+    -- [🌟 樱桃炸弹：服务端接收投掷请求、生成特效与范围伤害]
+    -- ==========================================
+    -- ==========================================
+    -- [🌟 樱桃炸弹：空中抛物线动画与范围爆炸]
+    -- ==========================================
+    local throwBombRE = ReplicatedStorage:FindFirstChild("ThrowBombRE")
+    if not throwBombRE then
+        throwBombRE = Instance.new("RemoteEvent")
+        throwBombRE.Name = "ThrowBombRE"
+        throwBombRE.Parent = ReplicatedStorage
+    end
+
+   throwBombRE.OnServerEvent:Connect(function(player, equippedItem, targetPosition)
+        local character = player.Character
+        if not character then return end
+        if character:GetAttribute("EquippedSeed") ~= equippedItem then return end
+        
+       -- ==========================================
+        -- 【修复关键点：解析真正的物品 ID 和 变异等级】
+        -- 客户端传来的 equippedItem 格式通常是 "Plant_CherryBomb_1"
+        -- ==========================================
+        local plantId = "CherryBomb"
+        local mutationLevel = 1
+        
+        local parts = string.split(equippedItem, "_")
+        if parts[1] == "Plant" and parts[2] then
+            plantId = parts[2]
+            mutationLevel = tonumber(parts[3]) or 1
+        elseif equippedItem == "CherryBomb" then
+            plantId = "CherryBomb"
+        end
+        
+        local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+        local plantConfig = ItemConfig.Plants[plantId]
+        if not plantConfig then return end
+        
+        -- 使用解析出的 plantId 和 mutationLevel 进行扣除
+        if not PlayerDataManager.ConsumePlant(player, plantId, 1, mutationLevel) then
+            return -- 如果库存不足扣除失败，则不扔炸弹
+        end
+        
+        -- ==========================================
+        -- 扣除成功，继续执行投掷动画和爆炸伤害
+        -- ==========================================
+        
+        -- 如果扣除成功，继续执行投掷动画和爆炸伤害
+        task.spawn(function()
+            local startPos = character.PrimaryPart.Position + Vector3.new(0, 2, 0)
+            local height = 15
+            local duration = 0.5
+            local steps = 20
+            local stepTime = duration / steps
+            
+            -- [后续的抛物线投掷和爆炸逻辑保持不变...]
+            local bombModel = nil
+            pcall(function()
+                local modelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
+                local template = modelsFolder and (modelsFolder:FindFirstChild("CherryBomb_Plant") or modelsFolder:FindFirstChild("CherryBomb"))
+                if template then
+                    bombModel = template:Clone()
+                    for _, p in pairs(bombModel:GetDescendants()) do
+                        if p:IsA("BasePart") then p.Anchored = true p.CanCollide = false end
+                    end
+                    bombModel:PivotTo(CFrame.new(startPos))
+                    bombModel.Parent = Workspace
+                end
+            end)
+            
+            -- 2. 抛物线运动
+            for i = 1, steps do
+                local t = i / steps
+                local currentPos = startPos:Lerp(targetPosition, t) + Vector3.new(0, math.sin(t * math.pi) * height, 0)
+                if bombModel then
+                    bombModel:PivotTo(CFrame.new(currentPos) * CFrame.Angles(math.rad(t * 360), 0, 0))
+                end
+                task.wait(stepTime)
+            end
+            
+            if bombModel then bombModel:Destroy() end
+
+            -- 3. 落地瞬间：召唤爆炸特效
+            local effectName = plantConfig.ExplosionEffect 
+            local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
+            
+            if hitFolder and effectName then
+                local effectTemplate = hitFolder:FindFirstChild(effectName)
+                if effectTemplate then
+                    local newEffect = effectTemplate:Clone()
+                    
+                    -- 1. 判断并设置位置 (🌟稍微抬高一点，防止粒子被埋在地板下面)
+                    if newEffect:IsA("Model") then
+                        newEffect:PivotTo(CFrame.new(targetPosition + Vector3.new(0, 1.5, 0)))
+                    elseif newEffect:IsA("BasePart") then
+                        newEffect.Position = targetPosition + Vector3.new(0, 1.5, 0)
+                    end
+                    
+                    newEffect.Parent = Workspace
+                    
+                    -- 👇 [🌟 核心修复：解决 Roblox 引擎吞特效的 BUG！]
+                    -- 必须等一瞬间，让玩家的客户端先把特效零件渲染出来，然后再触发爆炸！
+                    task.wait(0.05) 
+                    
+                    local emitCount = 0
+                    for _, particle in pairs(newEffect:GetDescendants()) do
+                        if particle:IsA("ParticleEmitter") then 
+                            local customCount = particle:GetAttribute("EmitCount")
+                            
+                            if customCount and type(customCount) == "number" then
+                                particle:Emit(customCount)
+                            else
+                                particle:Emit(20) 
+                            end
+                            
+                            emitCount += 1
+                        end
+                    end
+                    
+                    game:GetService("Debris"):AddItem(newEffect, 2)
+                else
+                    warn("❌【樱桃炸弹】找不到特效：在 ReplicatedStorage -> Hit 里面没有找到名字叫 [" .. tostring(effectName) .. "] 的东西！")
+                end
+            else
+                warn("❌【樱桃炸弹】配置错误：找不到 ReplicatedStorage.Hit 文件夹，或者 ItemConfig 里没写 ExplosionEffect！")
+            end
+
+            -- 4. 落地瞬间：群体范围扣血
+            local radius = plantConfig.ExplosionRadius or 18
+            local damage = plantConfig.ExplosionDamage or 2500
+            
+            local overlapParams = OverlapParams.new()
+            local hitParts = Workspace:GetPartBoundsInRadius(targetPosition, radius, overlapParams)
+            local processedZombies = {} 
+
+            for _, part in ipairs(hitParts) do
+                local targetModel = part:FindFirstAncestorOfClass("Model")
+                if targetModel and targetModel:GetAttribute("IsZombie") and not processedZombies[targetModel] then
+                    processedZombies[targetModel] = true
+                    local targetHum = targetModel:FindFirstChildOfClass("Humanoid")
+                    if targetHum and targetHum.Health > 0 then
+                        targetHum.Health = math.max(0, targetHum.Health - damage)
+                        
+                        -- 伤害飘字
+                        pcall(function()
+                            local PlantCombatAI = require(script.Parent.PlantCombatAI)
+                            if PlantCombatAI and PlantCombatAI.ShowDamageText then
+                                PlantCombatAI.ShowDamageText(targetModel, damage)
+                            end
+                        end)
+                    end
+                end
+            end
+        end)
+    end)
     
     print("服务端：ToolService 加载完毕！回收提示强制静默功能已上线！")
 end

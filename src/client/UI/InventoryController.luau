@@ -2,7 +2,7 @@
 local InventoryController = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) -- [🌟 引入模块]
+local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) 
 
 function InventoryController.Init()
     local Players = game:GetService("Players")
@@ -26,9 +26,12 @@ function InventoryController.Init()
     local seedPage = pages:WaitForChild("SeedPage")
     local plantPage = pages:WaitForChild("PlantPage")
 
-    mainFrame.Visible = true; mainFrame.Active = true 
+    mainFrame.Visible = true;
+    mainFrame.Active = true 
     local rootGui = mainFrame:FindFirstAncestorOfClass("ScreenGui")
-    if rootGui then rootGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling; rootGui.DisplayOrder = 100 end
+    if rootGui then rootGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
+        rootGui.DisplayOrder = 100 
+    end
 
     mainFrame.ZIndex = mainFrame.ZIndex + 10000
     for _, uiElement in pairs(mainFrame:GetDescendants()) do if uiElement:IsA("GuiObject") then uiElement.ZIndex = uiElement.ZIndex + 10000 end end
@@ -37,7 +40,6 @@ function InventoryController.Init()
         if not newData or not newData.Inventory then return end
         
         if CoinLabel and (CoinLabel:IsA("TextLabel") or CoinLabel:IsA("TextButton")) then 
-            -- [🌟 极简修改：删除了 "💰 " 前缀，现在只会显示纯粹的数字 (例如 1.5K)]
             UIEffectUtil.RollNumber(CoinLabel, newData.Coins, "") 
         end
         
@@ -55,13 +57,14 @@ function InventoryController.Init()
                         newSlot.Index.Visible = false
                         newSlot.Name = seedData.ID 
                         newSlot.ItemName.Text = itemDetail.Name
-                        newSlot.ItemName.TextWrapped = true  -- 开启自动换行
-                        newSlot.ItemName.TextScaled = true   -- 开启文字缩放，确保长单词能完整显示
+                        newSlot.ItemName.TextWrapped = true  
+                        newSlot.ItemName.TextScaled = true   
                         newSlot.Quantity.Text = "x" .. tostring(seedData.Quantity)
-                        
+                    
                         local lastClickTick = 0
                         local function onSeedEquip() 
-                            if os.clock() - lastClickTick < 0.1 then return end; lastClickTick = os.clock(); 
+                            if os.clock() - lastClickTick < 0.1 then return end;
+                            lastClickTick = os.clock(); 
                             ReplicatedStorage:WaitForChild("EquipItemRE"):FireServer("Seed_" .. seedData.ID) 
                         end
                         newSlot.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then onSeedEquip() end end)
@@ -95,19 +98,34 @@ function InventoryController.Init()
                         local newSlot = itemTemplate:Clone()
                         newSlot.Index.Visible = false
                         newSlot.Name = uniqueSlotId 
-                        newSlot.ItemName.TextWrapped = true  -- 开启自动换行
-                        newSlot.ItemName.TextScaled = true   -- 开启文字缩放
-                        
+                        newSlot.ItemName.TextWrapped = true  
+                        newSlot.ItemName.TextScaled = true   
+                      
                         local mutName = ItemConfig.MutationName and ItemConfig.MutationName[mutLevel] or "Unknown"
                         if mutLevel > 1 then newSlot.ItemName.Text = "[" .. mutName .. "] " .. itemDetail.Name
                         else 
                             newSlot.ItemName.Text = itemDetail.Name 
                         end
                         newSlot.Quantity.Text = "x" .. tostring(plantData.Quantity)
-    
+                        
+                        -- ==========================================
+                        -- 👇 [🌟 精准修改：仅给可投掷植物(樱桃炸弹)加角标]
+                        -- ==========================================
+                        if itemDetail.IsThrowable then
+                            local expIcon = Instance.new("ImageLabel")
+                            expIcon.Name = "ExplosionIcon"
+                            expIcon.Size = UDim2.new(0, 24, 0, 24)
+                            expIcon.Position = UDim2.new(0, 4, 0, 4) -- 左上角
+                            expIcon.BackgroundTransparency = 1
+                            expIcon.Image = "rbxassetid://5652766180"
+                            expIcon.ZIndex = 10
+                            expIcon.Parent = newSlot
+                        end
+                        
                         local lastClickTick = 0
                         local function onPlantEquip() 
-                            if os.clock() - lastClickTick < 0.1 then return end; lastClickTick = os.clock();
+                            if os.clock() - lastClickTick < 0.1 then return end;
+                            lastClickTick = os.clock();
                             ReplicatedStorage:WaitForChild("EquipItemRE"):FireServer("Plant_" .. plantData.ID .. "_" .. mutLevel) 
                         end
                         newSlot.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then onPlantEquip() end end)
@@ -153,22 +171,15 @@ function InventoryController.Init()
         end
     end
 
-    -- [🌟 新增/修改代码：监听服务端发来的打开背包指令，支持传参切换分页]
     local openInvRE = ReplicatedStorage:WaitForChild("OpenInventoryRE", 5)
     if openInvRE then
         openInvRE.OnClientEvent:Connect(function(targetPageName)
-            -- 1. 强制显示背包 UI
             inventoryGui.Enabled = true
-            
-            -- 2. 根据服务端传来的参数决定打开哪个页面（如果没有参数，默认打开 SeedPage）
             local pageToOpen = targetPageName or "SeedPage"
             switchTab(pageToOpen)
             
-            -- 3. 智能判断提示文本（植物页显示战斗部署提示，种子页显示农田种植提示）
             local titleStr = (pageToOpen == "PlantPage") and "⚔️ Deploy Notice" or "🌱 Plant Notice"
             local textStr = (pageToOpen == "PlantPage") and "Please select a combat plant from your inventory to deploy!" or "Please select a seed from your inventory to plant!"
-            
-            -- 4. 调用 Roblox 原生的右下角提示框
             pcall(function()
                 game:GetService("StarterGui"):SetCore("SendNotification", {
                     Title = titleStr,
@@ -183,7 +194,7 @@ function InventoryController.Init()
     tabButtons:WaitForChild("SeedTabBtn").MouseButton1Click:Connect(function() switchTab("SeedPage") end)
     tabButtons:WaitForChild("PlantTabBtn").MouseButton1Click:Connect(function() switchTab("PlantPage") end)
 
-    print("客户端：InventoryController 精简版加载完毕！无金币标志已实装！")
+    print("客户端：InventoryController 精简版加载完毕！带有炸弹专属角标！")
 end
 
 return InventoryController

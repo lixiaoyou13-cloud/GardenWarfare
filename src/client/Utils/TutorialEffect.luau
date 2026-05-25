@@ -1,6 +1,7 @@
 -- src/client/Utils/TutorialEffect.luau
 local TutorialEffect = {}
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 -- ==========================================
 -- 1. UI 闪烁特效 (保持不变)
@@ -81,6 +82,60 @@ function TutorialEffect.AddGuideBeam(character, targetPart, beamColor)
         if attTarget then attTarget:Destroy() end
         if guideBeam then guideBeam:Destroy() end
         if highlight then highlight:Destroy() end
+    end
+end
+
+function TutorialEffect.AddUIArrow(targetUI)
+    if not targetUI then return function() end end
+
+    local player = game:GetService("Players").LocalPlayer
+    local playerGui = player:WaitForChild("PlayerGui")
+    
+    -- 创建一个独立的 ScreenGui，确保箭头永远在最上层，不会被遮挡
+    local screenGui = playerGui:FindFirstChild("TutorialArrowGui")
+    if not screenGui then
+        screenGui = Instance.new("ScreenGui")
+        screenGui.Name = "TutorialArrowGui"
+        screenGui.DisplayOrder = 9999 
+        screenGui.Parent = playerGui
+    end
+
+    local arrow = Instance.new("ImageLabel")
+    arrow.Name = "TutorialUIArrow"
+    arrow.Size = UDim2.new(0, 40, 0, 40)
+    arrow.AnchorPoint = Vector2.new(0.5, 1) -- 锚点设为底部居中
+    arrow.BackgroundTransparency = 1
+    arrow.Image = "rbxassetid://120753408134411" -- 🌟 这是一个通用向下箭头的素材ID，你可以自行替换
+    arrow.ImageColor3 = Color3.fromRGB(255, 215, 0) -- 显眼的金色
+
+    arrow.Rotation = - 90
+    arrow.Parent = screenGui
+
+    local startTime = tick()
+    local connection
+    
+    -- 实时跟随目标 UI 并加上下浮动的动画
+    connection = RunService.RenderStepped:Connect(function()
+        -- 确保目标 UI 仍然存在并且可见
+        if targetUI and targetUI.Parent and targetUI.AbsoluteSize.X > 0 then
+            arrow.Visible = true
+            -- 计算浮动偏移量 (上下浮动 8 像素)
+            local bounceOffset = math.sin((tick() - startTime) * 6) * 8
+            
+            -- 定位在目标 UI 的正上方
+            arrow.Position = UDim2.new(
+                0, targetUI.AbsolutePosition.X + (targetUI.AbsoluteSize.X / 2),
+                0, targetUI.AbsolutePosition.Y - 5 + bounceOffset
+            )
+        else
+            arrow.Visible = false
+        end
+    end)
+
+    -- 返回清理函数
+    return function()
+        if connection then connection:Disconnect() end
+        if arrow then arrow:Destroy() end
     end
 end
 

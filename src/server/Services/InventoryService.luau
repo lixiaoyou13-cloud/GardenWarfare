@@ -36,6 +36,7 @@ local function clearGiftRequest(requestId)
     return requestData
 end
 
+
 local function CleanUpGhostItems(data)
     if not data or not data.Hotbar then return false end
     local validHotbar = {}
@@ -95,7 +96,7 @@ function InventoryService.Init()
     removeHotbarRE.Parent = ReplicatedStorage
 
     -- ==========================================
-    -- [战斗植物交换引擎 (F键)]
+    -- [战斗植物交换引擎 (E键)]
     -- ==========================================
     local swapCombatPlantRE = Instance.new("RemoteEvent")
     swapCombatPlantRE.Name = "SwapCombatPlantRE"

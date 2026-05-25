@@ -11,7 +11,7 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 -- [🌟 新增：受击变红反馈逻辑]
 -- ==========================================
 local function FlashZombieRed(zombieModel)
-    -- 如果僵尸已经处于变红状态，直接返回，不再记录颜色（防止记录到红色导致无法恢复）
+    -- 如果僵尸已经处于变红状态，直接返回，不再记录颜色
     if zombieModel:GetAttribute("IsFlashing") then return end
     zombieModel:SetAttribute("IsFlashing", true)
     
@@ -30,9 +30,13 @@ local function FlashZombieRed(zombieModel)
         -- 核心防御：如果僵尸已被销毁，不再执行恢复逻辑
         if not zombieModel or not zombieModel.Parent then return end
         
+        -- 👇 [🌟 核心修复]：检查僵尸是否在此期间被炸弹炸成了焦黑状态
+        local isCharred = zombieModel:GetAttribute("IsCharred")
+        
         for p, color in pairs(originalColors) do
             if p and p.Parent then
-                p.Color = color
+                -- 如果被炸黑了，强制保持焦黑色 (30,30,30)；否则正常恢复原色
+                p.Color = isCharred and Color3.fromRGB(30, 30, 30) or color
             end
         end
         
@@ -397,11 +401,27 @@ function PlantCombatAI.TriggerExplosion(plant, itemDetail, mutationLevel)
                     
                     zHum.Health = zHum.Health - explosionDamage
                     
-                    FlashZombieRed(zModel)
                     PlantCombatAI.ShowDamageText(zModel, explosionDamage)
                     
+                    -- ==========================================
+                    -- 👇 瞬间变黑，不再调用 FlashZombieRed
+                    -- ==========================================
+                    zModel:SetAttribute("IsCharred", true)
+                    
                     for _, p in pairs(zModel:GetDescendants()) do
-                        if p:IsA("BasePart") then p.Color = Color3.fromRGB(20, 20, 20) end
+                        if p:IsA("BasePart") then
+                            p.Color = Color3.fromRGB(30, 30, 30)
+                            p.Material = Enum.Material.Slate -- 变成粗糙的焦炭质感
+                        end
+                        if p:IsA("MeshPart") then
+                            p.TextureID = "" -- 剥离模型自带的彩色贴图
+                        end
+                        if p:IsA("Decal") or p:IsA("Texture") then
+                            p.Transparency = 1 -- 隐藏脸部/表面贴图
+                        end
+                        if p:IsA("Clothing") or p:IsA("Shirt") or p:IsA("Pants") or p:IsA("ShirtGraphic") or p:IsA("CharacterMesh") then
+                            p:Destroy() -- 把衣服瞬间烧光
+                        end
                     end
                 end
             end

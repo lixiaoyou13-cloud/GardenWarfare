@@ -15,9 +15,11 @@ local function ReportAnalytics(eventName, eventData)
     end
 end
 
-
 -- 引入 Viewport 渲染工具
 local UIEffectUtil = require(script.Parent.Parent.Parent.Utils.UIEffectUtil)
+
+-- 👇 新增：引入签到奖励统一配置
+local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
 
 -- 定义颜色渐变
 local GREEN_GRADIENT = ColorSequence.new{
@@ -28,18 +30,12 @@ local GREY_GRADIENT = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 180, 180)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 100, 100))
 }
--- 👇 新增：已领取按钮的专属渐变（清爽蓝）
+-- 已领取按钮的专属渐变（清爽蓝）
 local CLAIMED_GRADIENT = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 200, 255)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 100, 200))
 }
 local CLAIMED_STROKE = Color3.fromRGB(0, 50, 100) -- 按钮描边颜色
--- 特殊奖励天数配置
-local SPECIAL_REWARDS = {
-    [2] = "SnowPea",
-    [5] = "SnowPea",
-    [7] = "SnowPea"
-}
 
 -- 辅助函数：格式化倒计时
 local function GetFormattedRemainingTime()
@@ -72,15 +68,13 @@ local function RenderUI(sevenDayFrame, playerData)
     end
 
     if timeText then timeText.Visible = isClaimedToday end
+    
     -- ==========================================
-    -- 👇 新增：控制内购按钮的显示与隐藏
+    -- 控制内购按钮的显示与隐藏
     local claimAllBtn = sevenDayFrame:FindFirstChild("ClaimAllBattle", true)
     if claimAllBtn then
-        
-        
         --“7天奖励全部领完后，才隐藏内购按钮”
          claimAllBtn.Visible = (signInDays < 7)
-        
     end
     -- ==========================================
 
@@ -92,15 +86,17 @@ local function RenderUI(sevenDayFrame, playerData)
         if not dayNode then continue end
         
         -- ==========================================
-        -- [🌟 修正：直接使用名为 ImageLabel 的 ViewportFrame 渲染 3D 植物]
+        -- [🌟 修正：读取统一配置来渲染 3D 植物]
         -- ==========================================
-        if SPECIAL_REWARDS[i] then
+        local rewardCfg = SignInRewardConfig[i]
+        
+        if rewardCfg and rewardCfg.IsSpecial then
             -- 找到你那个名字叫 ImageLabel，但其实是 ViewportFrame 的节点
             local viewport = dayNode:FindFirstChild("ImageLabel", true)
-            
+           
             if viewport and viewport:IsA("ViewportFrame") then
-                -- 直接渲染 SnowPea 模型进去
-                UIEffectUtil.RenderToViewport(viewport, SPECIAL_REWARDS[i], "Plant")
+                -- 直接将配置里的 ItemId 渲染进去
+                UIEffectUtil.RenderToViewport(viewport, rewardCfg.ItemId, "Plant")
 
                 -- 执行平滑旋转动画
                 if not viewport:GetAttribute("IsRotating") then
@@ -129,13 +125,13 @@ local function RenderUI(sevenDayFrame, playerData)
         local targetText, targetGradient, targetStrokeColor, isActive = "", nil, nil, false
 
         if i <= signInDays then
-            -- 👇 修改：这里把 GREEN_GRADIENT 换成了新加的 CLAIMED_GRADIENT
+            -- 已领取状态
             targetText = "Claimed"; targetGradient = CLAIMED_GRADIENT; targetStrokeColor = CLAIMED_STROKE; isActive = false
         elseif i == signInDays + 1 and not isClaimedToday then
-            -- 保持原本的绿色
+            -- 可领取状态
             targetText = "Claim"; targetGradient = GREEN_GRADIENT; targetStrokeColor = GREEN_STROKE; isActive = true
         else
-            -- 保持原本的灰色
+            -- 锁定状态
             targetText = "Locked"; targetGradient = GREY_GRADIENT; targetStrokeColor = BLACK_STROKE; isActive = false
         end
 
@@ -166,23 +162,15 @@ local function RenderUI(sevenDayFrame, playerData)
                         DayIndex = i,
                         CurrentTotalDays = signInDays + 1
                     })
-                end
-                local rewardTips = {
-                        [1] = "签到成功！获得了 200 金币",
-                        [2] = "签到成功！获得了 2000 金币",
-                        [3] = "签到成功！获得了 1个 寒冰射手种子",
-                        [4] = "签到成功！获得了 10,000 阳光",
-                        [5] = "签到成功！获得了 2个 寒冰射手种子",
-                        [6] = "签到成功！获得了 100,000 阳光",
-                        [7] = "签到成功！获得了 3个 寒冰射手种子"
-                    }
                     
-                    if rewardTips[i] then
-                        UIEffectUtil.ShowTip(rewardTips[i])
+                    -- 👇 改为：直接从配置表里读取 Tip
+                    local currentReward = SignInRewardConfig[i]
+                    if currentReward and currentReward.Tip then
+                        UIEffectUtil.ShowTip(currentReward.Tip)
                     else
                         UIEffectUtil.ShowTip("领取成功！")
                     end
-                    -- ==========================================
+                end
             end)
         end
     end
@@ -223,7 +211,7 @@ function SevenDayPage.Init(sevenDayFrame)
         end)
     end
 
-        -- 监听内购结果回调
+    -- 监听内购结果回调
     MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, isPurchased)
         if productId == PRODUCT_ID then
             -- 埋点：内购最终状态（成功或取消）

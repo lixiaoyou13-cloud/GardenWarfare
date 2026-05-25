@@ -105,8 +105,11 @@ function PlantHoverController.Init()
     -- 👇 [🌟 新增：生命值数值文本]
     local hpText = Instance.new("TextLabel")
     hpText.Name = "HPText"
-    hpText.Size = UDim2.new(1, 0, 0.9, 0) -- 稍微留一点边距
-    hpText.Position = UDim2.new(0, 0, 0.05, 0)
+    
+    -- 【核心修改】：将 Y 轴的 Scale 调大到 1.8，让文本框高度达到血条的 1.8 倍
+    hpText.Size = UDim2.new(1, 0, 1.8, 0) 
+    -- 【核心修改】：因为高度变大了，为了让文字依然在血条中间，往上偏移 -0.4
+    hpText.Position = UDim2.new(0, 0, -0.4, 0)
     hpText.BackgroundTransparency = 1
     hpText.TextColor3 = Color3.fromRGB(255, 255, 255) -- 白色文字
     hpText.TextStrokeTransparency = 0.2 -- 添加微微的黑边，防止文字和绿色进度条融为一体

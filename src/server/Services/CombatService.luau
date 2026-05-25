@@ -5,7 +5,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
--- [🌟 核心修复：移除顶部的 PlotService 引用，防止循环依赖]
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
@@ -96,7 +95,7 @@ local function SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLev
 
 	local plot = lawnPart.Parent.Parent
     
-    -- 👇 [🌟 独立挂载射击 AI]：去掉了 elseif 互斥限制，因为爆炸逻辑已经移交给死亡结算中枢了
+    -- 独立挂载射击 AI
 	if itemDetail.CanAttack then
 		PlantCombatAI.StartShooterAI(newFighter, itemDetail, mutationLevel, plot)
 	end
@@ -114,7 +113,6 @@ end
 -- ==========================================
 
 function CombatService.Init()
-	-- [🌟 新增代码：游戏启动时就创建好 ShowTipRE]
 	if not ReplicatedStorage:FindFirstChild("ShowTipRE") then
 		local showTipRE = Instance.new("RemoteEvent")
 		showTipRE.Name = "ShowTipRE"
@@ -163,26 +161,21 @@ function CombatService.Init()
 		for _, lawnPart in ipairs(lawnFolder:GetChildren()) do
 			if lawnPart:IsA("BasePart") then
 				local prompt = Instance.new("ProximityPrompt")
-				prompt.ActionText = "Deploy"; prompt.ObjectText = "Lawn"; prompt.KeyboardKeyCode = Enum.KeyCode.F
+				prompt.ActionText = "Deploy"; prompt.ObjectText = "Lawn"; prompt.KeyboardKeyCode = Enum.KeyCode.E
 				prompt.RequiresLineOfSight = false; prompt.MaxActivationDistance = 8; prompt.Parent = lawnPart
+				
 				prompt.Triggered:Connect(function(player)
 					local myPlot = GetPlotService().GetPlayerPlot(player)
-					
-					-- 1. 拦截：如果不是自己的地块，直接返回
 					if myPlot ~= plot then return end
-					
-					-- 2. 拦截：如果该格子已经被占用了，直接返回
 					if lawnPart:GetAttribute("OccupiedBy") then return end
 
-					
 					local character = player.Character
 					local equippedCompositeId = character and character:GetAttribute("EquippedSeed")
 					
-					-- [🌟 修改代码：如果没有装备物品，或者装备的不是战斗植物 (Plant)，则打开背包并提示]
+					-- 如果没有装备物品，或者装备的不是战斗植物，则打开背包
 					if not equippedCompositeId or string.split(equippedCompositeId, "_")[1] ~= "Plant" then 
 						local openInvRE = ReplicatedStorage:FindFirstChild("OpenInventoryRE")
 						if openInvRE then
-							-- 传入 "PlantPage" 参数，告诉客户端我们要打开的是植物页面
 							openInvRE:FireClient(player, "PlantPage")
 						end
 						return 
@@ -190,6 +183,14 @@ function CombatService.Init()
 
 					local parts = string.split(equippedCompositeId, "_")
 					local plantId, targetMutation = parts[2], tonumber(parts[3]) or 1
+					
+					-- [🌟 修复] 拦截投掷类植物部署：樱桃炸弹不允许种在地上，只能丢！
+					local itemDetailCheck = ItemConfig.Plants[plantId]
+					if itemDetailCheck and itemDetailCheck.IsThrowable then
+						local showTipRE = ReplicatedStorage:FindFirstChild("ShowTipRE")
+						if showTipRE then showTipRE:FireClient(player, "Click to throw this plant!") end
+						return
+					end
 
 					if PlayerDataManager.ConsumePlant(player, plantId, 1, targetMutation) then
 						local AnalyticsService = game:GetService("AnalyticsService")
@@ -204,23 +205,18 @@ function CombatService.Init()
 							end
 						end
 						
-						-- 记录植物消耗 (Sink)
+						-- 记录植物消耗
 						AnalyticsService:LogEconomyEvent(
-							player, 
-							Enum.AnalyticsEconomyFlowType.Sink, 
-							"Plants", 
-							1, 
-							remainingQuantity,
-							Enum.AnalyticsEconomyTransactionType.Gameplay.Name, 
-							plantId 
+							player, Enum.AnalyticsEconomyFlowType.Sink, "Plants", 1, remainingQuantity,
+							Enum.AnalyticsEconomyTransactionType.Gameplay.Name, plantId 
 						)
 											
-						-- 同步发送自定义埋点
 						AnalyticsService:LogCustomEvent(player, "PlantDeployed_"..plantId, 1)
 						local itemDetail = ItemConfig.Plants[plantId]
 						local baseMaxHP = itemDetail.HP or 300
 						local stats = ItemConfig.MutationStats[targetMutation] or ItemConfig.MutationStats[1]
 						local maxHP = math.floor(baseMaxHP * stats.HealthMul)
+						
 						AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 2, "Step_2_First_Deploy")
 						SpawnCombatPlant(lawnPart, plantId, maxHP, maxHP, targetMutation)
 						PlayerDataManager.AddCombatPlant(player, lawnPart.Name, plantId, maxHP, targetMutation)
@@ -229,8 +225,10 @@ function CombatService.Init()
 			end
 		end
 	end
+
+
 	-- ==========================================
-	-- [🌟 新增：专门接收教程的草坪战斗植物部署指令]
+	-- [接收教程部署指令]
 	-- ==========================================
 	local tutorialDeployRE = ReplicatedStorage:FindFirstChild("TutorialDeployRE") or Instance.new("RemoteEvent")
 	tutorialDeployRE.Name = "TutorialDeployRE"
@@ -286,15 +284,13 @@ function CombatService.ReloadSavedPlants(player)
 	for gridName, plantInfo in pairs(data.CombatPlants) do
 		local lawnPart = lawnFolder:FindFirstChild(gridName)
 		if lawnPart then
-			-- 检查是否已存在同种植物
 			local existing = nil
 			for _, c in ipairs(lawnPart:GetChildren()) do
 				if c:GetAttribute("IsCombatPlant") then existing = c; break end
 			end
 			
 			if existing and existing.Name == plantInfo.PlantId then 
-				-- 👇 [🌟 核心修复：拦截假死与爆炸残留的植物]
-				-- 只有真正存活且从未死过的植物，才允许保留并跳过重建（保留防闪烁优化）
+				-- 拦截假死与爆炸残留的植物
 				if not existing:GetAttribute("NeedsRebuild") and not existing:GetAttribute("Exploded") then
 					continue 
 				end

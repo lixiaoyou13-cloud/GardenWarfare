@@ -80,8 +80,7 @@ function PlantService.Init()
                     PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolder, plantData.Mutation)
                     if prompt then 
                         prompt.Enabled = false
-
-                               
+                              
                         prompt.ActionText = "Harvest"
                         prompt.HoldDuration = 15 -- 还原数据时，成熟的也是15秒长按
                         prompt.Enabled = true 
@@ -116,7 +115,7 @@ function PlantService.Init()
                 prompt.Name = "PlantPrompt"
                 prompt.ActionText = "Plant"
                 prompt.ObjectText = "Soil"
-                prompt.KeyboardKeyCode = Enum.KeyCode.F
+                prompt.KeyboardKeyCode = Enum.KeyCode.E
                 prompt.RequiresLineOfSight = false
                 prompt.MaxActivationDistance = 8
                 prompt.Parent = soil
@@ -159,12 +158,6 @@ function PlantService.Init()
                         local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                         
                         if isOwner then
-                            -- 1. 主人尝试秒收
-                          --  if targetPlant:GetAttribute("IsBeingStolen") then
-                             --   if showNotifRE then showNotifRE:FireClient(player, "Notice", "Plants are being stolen! Equip your weapon to knock the thief away!") end
-                              --  return
-                            --end
-                            
                             -- [主人专属特权]：按下瞬间立刻秒收，不需要等15秒！
                             local plantId = targetPlant.Name
                             local currentYield = targetPlant:GetAttribute("YieldCount") or 1
@@ -178,6 +171,29 @@ function PlantService.Init()
                             PlayerDataManager.RemovePlantedPlant(player, soil.Name)
                             targetPlant:Destroy()
 
+                            -- 👇 [🌟 新增：收获后自动装备]
+                            local compositeId = "Plant_" .. plantId .. "_" .. mutLevel
+                            local playerData = PlayerDataManager.GetPlayerData(player)
+                            if playerData then
+                                if not playerData.Hotbar then playerData.Hotbar = {} end
+                                local inHotbar = false
+                                for _, id in ipairs(playerData.Hotbar) do
+                                    if id == compositeId then inHotbar = true; break end
+                                end
+                                
+                                if not inHotbar and #playerData.Hotbar < 10 then
+                                    table.insert(playerData.Hotbar, compositeId)
+                                    local updateInvRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+                                    if updateInvRE then updateInvRE:FireClient(player, playerData) end
+                                end
+                                
+                                local forceSelectRE = ReplicatedStorage:FindFirstChild("ForceSelectRE")
+                                if forceSelectRE then
+                                    forceSelectRE:FireClient(player, compositeId)
+                                end
+                            end
+                            -- 👆 新增结束
+
                             prompt.Enabled = false
                             prompt.ActionText = "Plant"
                             prompt.HoldDuration = 0.5 -- 地空了，种地时间恢复为0.5秒
@@ -190,12 +206,12 @@ function PlantService.Init()
                             
                             local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
                             if playObtainEffectRE then 
-                                -- 把多段文字合并成一句 (因为 ShowTip 只需要一个 message 参数)
+                                -- 把多段文字合并成一句
                                 local msg = "Gain: " .. currentYield .. "x " .. mutPrefix .. plantName
                                 playObtainEffectRE:FireClient(player, msg)
                             end
                         else
-                            -- 2. 小偷按下F，开始死死按住15秒！
+                            -- 2. 小偷按下E，开始死死按住15秒！
                             if targetPlant:GetAttribute("IsBeingStolen") then
                                 if showNotifRE then showNotifRE:FireClient(player, "Notice", "Someone is already stealing this plant!") end
                                 return
@@ -205,7 +221,7 @@ function PlantService.Init()
                             -- [🌟 新增：给这颗植物打上被偷的专属标签，供客户端雷达扫描]
                             CollectionService:AddTag(targetPlant, "BeingStolen")
                             
-                            if showNotifRE then showNotifRE:FireClient(player, "Notice", "Stealing started! Hold F for 15 seconds.") end
+                            if showNotifRE then showNotifRE:FireClient(player, "Notice", "Stealing started!\nHold E for 15 seconds.") end
                             
                         end
                     end
@@ -283,22 +299,43 @@ function PlantService.Init()
                                 end
                                 
                                 targetPlant:Destroy()
+                                
+                                -- 👇 [🌟 新增：小偷得手后自动装备]
+                                local compositeId = "Plant_" .. plantId .. "_" .. mutLevel
+                                local playerData = PlayerDataManager.GetPlayerData(player)
+                                if playerData then
+                                    if not playerData.Hotbar then playerData.Hotbar = {} end
+                                    local inHotbar = false
+                                    for _, id in ipairs(playerData.Hotbar) do
+                                        if id == compositeId then inHotbar = true; break end
+                                    end
+                                    
+                                    if not inHotbar and #playerData.Hotbar < 10 then
+                                        table.insert(playerData.Hotbar, compositeId)
+                                        local updateInvRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+                                        if updateInvRE then updateInvRE:FireClient(player, playerData) end
+                                    end
+                                    
+                                    local forceSelectRE = ReplicatedStorage:FindFirstChild("ForceSelectRE")
+                                    if forceSelectRE then
+                                        forceSelectRE:FireClient(player, compositeId)
+                                    end
+                                end
+                                -- 👆 新增结束
+
                                 prompt.Enabled = false
                                 prompt.ActionText = "Plant"
-                                
                                 prompt.HoldDuration = 0.5
 
-                                
-                                
                                 task.delay(0.05, function()
                                     if prompt and prompt.Parent then
                                         prompt.Enabled = true
                                     end
                                 end)
-                                                                
+                                                   
                                 local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                                 if showNotifRE then 
-                                   showNotifRE:FireClient(player, "Notice", "Steal Successful! You stole: " .. currentYield .. "x " .. mutPrefix .. plantName)
+                                    showNotifRE:FireClient(player, "Notice", "Steal Successful!\nYou stole: " .. currentYield .. "x " .. mutPrefix .. plantName)
                                 end
                             end
                             return
@@ -318,12 +355,12 @@ function PlantService.Init()
                                 local seedDetail = ItemConfig.Seeds[seedId]
                                 local buyPrice = seedDetail and seedDetail.BuyPrice or 100
 
-
                                 local progressRatio = math.clamp(remaining / growthTime, 0, 1)
                                 local cost = math.max(20, math.floor(buyPrice * 0.35 * progressRatio))
                                 if PlayerDataManager.ConsumeCoins(player, cost) then
                                     local data = PlayerDataManager.GetPlayerData(player)
                                     AnalyticsService:LogEconomyEvent(player, Enum.AnalyticsEconomyFlowType.Sink, "Coins", cost, data and data.Coins or 0, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "SpeedUpPlant_" .. tostring(targetPlant.Name))
+                                   
                                     local newTime = os.time() - growthTime - 1
                                     targetPlant:SetAttribute("PlantedTime", newTime)
                                     PlayerDataManager.UpdatePlantedPlant(player, soil.Name, targetPlant.Name, newTime)
@@ -336,7 +373,7 @@ function PlantService.Init()
                     -- 【种植物的逻辑】 
                     if not isOwner then
                         local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
-                        if showNotifRE then showNotifRE:FireClient(player, "Notice", "This is someone else's plot. You cannot plant here!") end
+                        if showNotifRE then showNotifRE:FireClient(player, "Notice", "This is someone else's plot.\nYou cannot plant here!") end
                         return
                     end
 
@@ -370,7 +407,7 @@ function PlantService.Init()
                             end
                         end
                         AnalyticsService:LogEconomyEvent(player, Enum.AnalyticsEconomyFlowType.Sink, "Seeds", 1, remainingQuantity, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "FarmPlanting_" .. tostring(realId))
-                        
+               
                         local hasStock = false
                         if data and data.Inventory.Seeds then
                             for _, seedData in ipairs(data.Inventory.Seeds) do

@@ -173,12 +173,12 @@ function LuckyDropService.SpawnDrop()
     if not luckyBox.PrimaryPart then luckyBox.PrimaryPart = luckyBox:FindFirstChildWhichIsA("BasePart", true) end
     
     -- ==========================================
-    -- [F 键拾取交互]
+    -- [E 键拾取交互]
     -- ==========================================
     local prompt = Instance.new("ProximityPrompt")
     prompt.ActionText = "Pickup Airdrop"
     prompt.ObjectText = "Mystery Box"
-    prompt.KeyboardKeyCode = Enum.KeyCode.F
+    prompt.KeyboardKeyCode = Enum.KeyCode.E
     prompt.HoldDuration = 0.5 
     prompt.RequiresLineOfSight = false
     prompt.MaxActivationDistance = 12

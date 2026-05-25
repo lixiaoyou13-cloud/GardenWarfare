@@ -60,11 +60,10 @@ local function SpawnMerchant(player, plot)
             child:Destroy()
         end
     end
-
-    -- 1. 随机选择一个植物
-    local seedKeys = {}
-    for k, _ in pairs(ItemConfig.Seeds) do table.insert(seedKeys, k) end
-    if #seedKeys == 0 then return end
+    
+-- 1. 随机选择一个植物 (改为从限时稀有池 BaseLimitedSaleKey 中精准抽取)
+    local seedKeys = ItemConfig.BaseLimitedSaleKey
+    if not seedKeys or #seedKeys == 0 then return end
     
     local randomSeedId = seedKeys[math.random(1, #seedKeys)]
     local seedDetail = ItemConfig.Seeds[randomSeedId]
@@ -141,7 +140,7 @@ local function SpawnMerchant(player, plot)
     local prompt = Instance.new("ProximityPrompt")
     prompt.ActionText = "Buy " .. (seedDetail.Name or randomSeedId)
     prompt.ObjectText = "Price: " .. FormatPrice(price)
-    prompt.KeyboardKeyCode = Enum.KeyCode.F
+    prompt.KeyboardKeyCode = Enum.KeyCode.E
     prompt.MaxActivationDistance = 6
     prompt.RequiresLineOfSight = false
     prompt.Parent = modelRoot

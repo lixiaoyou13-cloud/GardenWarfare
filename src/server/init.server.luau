@@ -118,7 +118,8 @@ CombatService.Init()
 
 local ZombieService = require(script.Services.ZombieService)
 ZombieService.Init()
-
+local FreeRewardService = require(script.Services.FreeRewardService)
+FreeRewardService.Init()
 
 local LevelService = require(script.Services.LevelService)
 LevelService.Init()
@@ -138,6 +139,23 @@ require(script.Services.IAPService).Init()
 require(script.Services.BaseSunflowerService).Init()
 
 require(script.Services.ZombieBoxService)
-
+--[[Players.PlayerAdded:Connect(function(player)
+    player.Chatted:Connect(function(msg)
+        if msg == "/testbomb" then
+            -- 给发消息的玩家直接塞 20 个樱桃炸弹
+            local PDManager = require(script.PlayerDataManager)
+            PDManager.GivePlant(player, "CobCannon", 20, 1)
+            
+            -- 在控制台打印提示
+            print("【开发者测试】已发放 20 个樱桃炸弹给: " .. player.Name)
+            
+            -- 给客户端弹个提示框
+            local showTipRE = game:GetService("ReplicatedStorage"):FindFirstChild("ShowTipRE")
+            if showTipRE then
+                showTipRE:FireClient(player, "获得测试道具：樱桃炸弹 x20！")
+            end
+        end
+    end)
+end)]]
 
 print("所有服务端模块加载完毕！")

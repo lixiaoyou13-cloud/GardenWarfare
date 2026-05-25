@@ -19,15 +19,15 @@ local pendingBoxes = {}
 -- 🌟 1. 盲盒大类概率配置 (权重制)
 -- ==========================================
 local TYPE_WEIGHTS = {
-    Seed = 65,      -- 种子权重 65
-    Plant = 20,     -- 植物权重 20
+    Seed = 90,      -- 种子权重 65
+    Plant = 10,     -- 植物权重 20
     -- 以后想加新类型，只需解开注释并加上权重
     -- Prop = 10,   
     -- Currency = 5 
 }
 
 -- 品质权重配置 (1星~5星)
-local QUALITY_WEIGHTS = { [1] = 70, [2] = 20, [3] = 8, [4] = 1.5, [5] = 0.5 }
+local QUALITY_WEIGHTS = { [1] = 70, [2] = 20, [3] = 8, [4] = 2 }
 
 -- 监听客户端动画播完后发来的“给我发奖”请求
 zombieBoxRE.OnServerEvent:Connect(function(player, action, finalItem)

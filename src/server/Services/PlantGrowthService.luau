@@ -5,6 +5,7 @@ local PlantGrowthService = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local PlotService = require(script.Parent.PlotService)
@@ -155,7 +156,53 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
     local rootPart = grownPlant:IsA("Model") and grownPlant.PrimaryPart or grownPlant
     billboard.Parent = rootPart
     grownPlant.Parent = plantsFolder
-    return grownPlant
+    if plantConfig and plantConfig.Quality and plantConfig.Quality >= 5 then
+        -- 1. 获取地块主人的名字用于广播
+        local ownerName = "Unknown"
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.UserId == ownerId then
+                ownerName = p.Name
+                break
+            end
+        end
+        -- 【核心修复】：改用 ShowTipRE 触发全服 UIEffectUtil.ShowTip
+        -- ==========================================
+        local showTipRE = ReplicatedStorage:FindFirstChild("ShowTipRE")
+        if showTipRE then
+            local msg = "[" .. ownerName .. "]'s 5-Star rare plant [" .. plantConfig.Name .. "] has matured!"
+            showTipRE:FireAllClients(msg) -- 触发全服广播
+        end
+        -- 3. 在 3D 场景中创建一个如同实体模型般的“Legendary”悬浮文字
+        local legendaryBillboard = Instance.new("BillboardGui")
+        legendaryBillboard.Name = "LegendaryTagUI"
+        
+        -- 【核心修复】：使用 Scale 也就是 3D 物理单位(Studs)，而不是像素。
+        -- 这里的 4.5 和 1.2 代表它在场景中的实际物理宽高。它将和模型一样近大远小。
+        legendaryBillboard.Size = UDim2.new(4.5, 0, 1.2, 0) 
+        
+        legendaryBillboard.StudsOffset = Vector3.new(0, 5.2, 0) 
+        
+        -- 【核心修复】：关闭 AlwaysOnTop，开启 LightInfluence，让它完全融入 3D 世界
+        legendaryBillboard.AlwaysOnTop = false -- 开启真实空间遮挡，不再穿透模型
+        legendaryBillboard.LightInfluence = 1 -- 接受场景的光照影响，就像真实模型一样
+        legendaryBillboard.MaxDistance = 150 
+
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.Text = "Legendary"
+        textLabel.TextColor3 = Color3.fromRGB(255, 170, 0) 
+        textLabel.Font = Enum.Font.FredokaOne 
+        textLabel.TextScaled = true 
+        
+        textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        textLabel.TextStrokeTransparency = 0
+
+        textLabel.Parent = legendaryBillboard
+        legendaryBillboard.Parent = rootPart
+    end
+
+    return grownPlant -- [保留原有的这行返回]
 end
 
 -- [生成幼苗]
@@ -265,7 +312,7 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                     if barFill then barFill.Size = UDim2.new(progressRatio, 0, 1, 0) end
                     if progressText then progressText.Text = "⏳ " .. remaining .. "s" end
                 end
-                if prompt and prompt.Parent then prompt.ActionText = "Speed up " .. tostring(remaining * 2) end
+                if prompt and prompt.Parent then prompt.ActionText = "Speed up (" .. tostring(remaining) .. "s)" end
             else
                 local seedId = newPlant.Name 
                 local finalItemDetail = itemDetail

@@ -28,24 +28,54 @@ function ZombieBoxController.Init()
         end
     end)
 end
-
 function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
     local luckyTemplate = itemModels:FindFirstChild("Box")
     if not luckyTemplate then return end
 
     local box = luckyTemplate:Clone()
     
-    -- 1. 找地面放置
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-    if localPlayer.Character then
-        raycastParams.FilterDescendantsInstances = {localPlayer.Character}
+    -- 👇 ================= [核心修复：穿透型找地面逻辑] ================= 👇
+    local function GetRealGroundPos(startPos)
+        local rayOrigin = startPos + Vector3.new(0, 30, 0) -- 从头顶 30 格往下扫
+        local rayDirection = Vector3.new(0, -200, 0)      -- 扫 200 格深
+        
+        local raycastParams = RaycastParams.new()
+        raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+        
+        -- 初始忽略列表
+        local ignoreList = {}
+        if localPlayer.Character then table.insert(ignoreList, localPlayer.Character) end
+        if Workspace:FindFirstChild("Zombies") then table.insert(ignoreList, Workspace:FindFirstChild("Zombies")) end
+        if Workspace:FindFirstChild("Enemies") then table.insert(ignoreList, Workspace:FindFirstChild("Enemies")) end
+        
+        -- 循环穿透：如果打到隐形或无碰撞的零件，就把这个零件加入黑名单，继续往下打
+        while true do
+            raycastParams.FilterDescendantsInstances = ignoreList
+            local result = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+            
+            if not result then 
+                return startPos -- 如果什么都没打到，返回原位置兜底
+            end
+            
+            local hitPart = result.Instance
+            -- 如果打到的零件是全透明的，或者是无碰撞的（且名字不叫地面），就穿透它
+            if (hitPart.Transparency >= 1 or not hitPart.CanCollide) and not string.find(string.lower(hitPart.Name), "ground") and not string.find(string.lower(hitPart.Name), "baseplate") then
+                table.insert(ignoreList, hitPart)
+            else
+                -- 真正打到了实体模型（地面）
+                -- print("📍 盲盒落地，打到了: ", hitPart.Name) -- 测试用：如果还浮空，可以把这句取消注释看看打到了什么
+                return result.Position
+            end
+        end
     end
-    local rayResult = Workspace:Raycast(dropPos, Vector3.new(0, -30, 0), raycastParams)
+
+    local groundPos = GetRealGroundPos(dropPos)
     
-    local cf, size = box:GetBoundingBox()
-    local groundPos = rayResult and rayResult.Position or dropPos
-    box:PivotTo(CFrame.new(groundPos + Vector3.new(0, size.Y/2, 0)))
+    -- 🌟 修复模型隐形包围盒过大的问题：
+    -- 不再使用 size.Y/2，而是固定向上偏移 1.2 格（如果你觉得 1.2 还是浮空，可以改成 0.5 或者 0；如果陷地里了，改成 2 等）
+    local fixedYOffset = 1.2 
+    box:PivotTo(CFrame.new(groundPos + Vector3.new(0, fixedYOffset, 0)))
+    -- 👆 ============================================================= 👆
     
     for _, part in pairs(box:GetDescendants()) do
         if part:IsA("BasePart") then
@@ -54,7 +84,6 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
         end
     end
     
-    -- 🌟 关键：在客户端放入 Workspace，因此只有自己能看到这个盲盒
     box.Parent = Workspace
 
     -- 2. 距离检测与开箱动画
@@ -64,11 +93,9 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
             local char = localPlayer.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             
-            -- 玩家靠近（距离 <= 8）触发开箱
             if hrp and (hrp.Position - box:GetPivot().Position).Magnitude <= 8 then
                 triggered = true
                 
-                -- 特效：宝箱变白发光
                 for _, p in pairs(box:GetDescendants()) do
                     if p:IsA("BasePart") then
                         p.Color = Color3.fromRGB(255, 255, 255)
@@ -83,13 +110,11 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
                 local boxPos = box:GetPivot().Position
                 box:Destroy() 
 
-                -- 动画：上方滚动物品演示
                 local displayModel
                 local iterations = 15 
                 for i = 1, iterations do
                     if displayModel then displayModel:Destroy() end
                     
-                    -- 从客户端库中随机抽一个模型作为过场动画
                     local randomName = fakeItemPool[math.random(1, #fakeItemPool)] or "Seed"
                     local template = itemModels:FindFirstChild(randomName) or itemModels:FindFirstChild("Seed")
                     
@@ -110,7 +135,6 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
                 end
                 if displayModel then displayModel:Destroy() end
 
-                -- 生成真正的奖励实体
                 local templateName = finalItem.type == "Plant" and (finalItem.id .. "_Plant") or finalItem.id
                 local finalTemplate = itemModels:FindFirstChild(templateName) or itemModels:FindFirstChild("Seed")
 
@@ -131,7 +155,6 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
 
                     task.wait(0.5) 
 
-                    -- 动画：抛物线飞入玩家身体
                     local flightTime = 0.6 
                     local startTime = os.clock()
                     local startPos = finalModel:GetPivot().Position
@@ -145,10 +168,8 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
                             connection:Disconnect()
                             finalModel:Destroy()
                             
-                            -- 🌟 动画全部播完后，告诉服务端真正发奖！
                             zombieBoxRE:FireServer("GiveReward", finalItem)
                         else
-                            -- 追踪玩家位置
                             local targetChar = localPlayer.Character
                             local targetHRP = targetChar and targetChar:FindFirstChild("HumanoidRootPart")
                             local endPos = targetHRP and targetHRP.Position or startPos

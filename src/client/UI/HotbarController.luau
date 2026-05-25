@@ -101,7 +101,7 @@ function HotbarController.Init()
                 
                 currentItems[compositeId] = true
                 local targetSlot = hotbarFrame:FindFirstChild(compositeId)
-                
+        
                 local lastClickTick = 0
                 local function onSlotClicked() 
                     if os.clock() - lastClickTick < 0.1 then return end;
@@ -169,8 +169,7 @@ function HotbarController.Init()
                         customIcon.AnchorPoint = Vector2.new(0.5, 0.5)
                         customIcon.BackgroundTransparency = 1;
                         customIcon.ScaleType = Enum.ScaleType.Fit
-                        customIcon.ZIndex = 2;
-                        customIcon.Active = false; customIcon.Parent = targetSlot
+                        customIcon.ZIndex = 2; customIcon.Active = false; customIcon.Parent = targetSlot
                     end
                     if itemDetail and itemDetail.IconId then
                         customIcon.Image = itemDetail.IconId
@@ -216,6 +215,32 @@ function HotbarController.Init()
                     else targetSlot.Quantity.Text = (type(qty) == "number" and "x" or "") .. tostring(qty); targetSlot.Quantity.ZIndex = 3; targetSlot.Quantity.Visible = true end
                 end
 
+                -- ==========================================
+                -- 👇 [🌟 核心修复：兼容种子和植物，只要本体可投掷，就显示角标]
+                -- ==========================================
+                local isExplosive = false
+                local plantRef = ItemConfig.Plants and ItemConfig.Plants[realId]
+                if plantRef and plantRef.IsThrowable then
+                    isExplosive = true
+                end
+
+                local expIcon = targetSlot:FindFirstChild("ExplosionIcon")
+                if isExplosive then
+                    if not expIcon then
+                        expIcon = Instance.new("ImageLabel")
+                        expIcon.Name = "ExplosionIcon"
+                        expIcon.Size = UDim2.new(0, 24, 0, 24)
+                        expIcon.Position = UDim2.new(0, 4, 0, 4) -- 统一左上角
+                        expIcon.BackgroundTransparency = 1
+                        expIcon.Image = "rbxassetid://5652766180"
+                        expIcon.ZIndex = 100 -- 确保渲染在最顶层
+                        expIcon.Parent = targetSlot
+                    end
+                    expIcon.Visible = true
+                else
+                    if expIcon then expIcon.Visible = false end
+                end
+
                 displayIndex += 1 
             end
         end
@@ -230,8 +255,7 @@ function HotbarController.Init()
             if os.clock() - lastBpClickTick < 0.1 then return end;
             lastBpClickTick = os.clock()
             local scaleObj = backpackSlot and backpackSlot:FindFirstChild("UIScale")
-            if scaleObj then TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play();
-            task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) end
+            if scaleObj then TweenService:Create(scaleObj, tweenInfo, {Scale = 0.9}):Play(); task.delay(0.1, function() TweenService:Create(scaleObj, tweenInfo, {Scale = 1}):Play() end) end
             local invGui = basicGui:FindFirstChild("InventoryGui")
             if invGui then invGui.Enabled = not invGui.Enabled end
         end
@@ -281,7 +305,6 @@ function HotbarController.Init()
             end
          end
 
-         -- 👇 [🌟 核心修复 1：保证刷新 UI 后（如拾取空投获得了新物品），当前手持的物品依然能保持放大状态]
          for _, slot in pairs(hotbarFrame:GetChildren()) do
              if slot:IsA("Frame") then
                  local scaleObj = slot:FindFirstChild("UIScale")
@@ -343,18 +366,13 @@ function HotbarController.Init()
         end)
     end
 
-    -- ==========================================
-    -- 👇 [🌟 核心修复 2：监听服务端的物理装备状态，保持 UI 绝对同步！]
-    -- ==========================================
     local function onEquipChanged()
         local char = player.Character
         if not char then return end
         
-        -- 读取服务端最新赋予给角色的真实装备 ID
         local realEquipped = char:GetAttribute("EquippedSeed")
         currentEquippedId = realEquipped
         
-        -- 全局扫描所有格子，强制对应物品变大，其它物品缩回
         for _, slot in pairs(hotbarFrame:GetChildren()) do
             if slot:IsA("Frame") then
                 local isSelected = (slot.Name == currentEquippedId)
@@ -367,7 +385,6 @@ function HotbarController.Init()
     end
 
     local function bindCharacter(char)
-        -- 监听玩家角色上的 EquippedSeed 属性是否发生改变
         char:GetAttributeChangedSignal("EquippedSeed"):Connect(onEquipChanged)
         onEquipChanged()
     end
@@ -375,7 +392,7 @@ function HotbarController.Init()
     if player.Character then bindCharacter(player.Character) end
     player.CharacterAdded:Connect(bindCharacter)
 
-    print("客户端：HotbarController 精简版加载完毕！")
+    print("客户端：HotbarController 已修复！彻底兼容所有爆破类物品图标。")
 end
 
 return HotbarController

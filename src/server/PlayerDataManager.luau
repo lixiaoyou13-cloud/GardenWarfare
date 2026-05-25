@@ -6,8 +6,10 @@ local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AnalyticsService = game:GetService("AnalyticsService")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+-- 👇 新增：引入签到奖励配置
+local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
 
-local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
+local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V20")
 local sessionData = {}
 
 local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE") or Instance.new("RemoteEvent")
@@ -36,6 +38,10 @@ local function GetDefaultData()
         UnlockedPlots = 4,
         SignInDays = 0,       
         LastSignInTime = 0,   
+        
+        -- 👇 新增：签到重置标记（新玩家默认已经重置）
+        SignInReset_V1 = true,
+        
         Hotbar = {"Tool_Shovel","System_Backpack", "Tool_WeaponBlock"},  
         Inventory = { Seeds = { { ID = "Peashooter", Quantity = 1 } }, Plants = {} },
         PlantedPlants = {}, CombatPlants = {},
@@ -45,9 +51,9 @@ local function GetDefaultData()
         ClaimedAchieve = {},
         RollTickets = {0, 0},
         
-        -- 🌟【新增】：新手限时礼包字段
-        NewbieGiftStartTime = 0,     -- 记录触发礼包的 Unix 时间戳
-        NewbieGiftPurchased = false  -- 记录是否已经购买
+        NewbieGiftStartTime = 0,     
+        NewbieGiftPurchased = false, 
+        OnlineRollTimer = 300 
     }
 end
 local function saveWithRetry(userId, dataToSave)
@@ -59,9 +65,31 @@ local function saveWithRetry(userId, dataToSave)
     end
     return false
 end
-
 local function onPlayerAdded(player)
     local isLoaded = false
+    
+    -- 🌟【新增计时器引擎】：每秒执行，满5分钟发一次抽奖券！
+    local function startOnlineTimer(plr)
+        task.spawn(function()
+            while plr and plr.Parent do
+                task.wait(1) -- 每过 1 秒
+                local pData = sessionData[plr.UserId]
+                if pData then
+                    pData.OnlineRollTimer = (pData.OnlineRollTimer or 300) - 1
+                    
+                    if pData.OnlineRollTimer <= 0 then
+                        pData.OnlineRollTimer = 300 -- 重置5分钟
+                        pData.RollTickets[1] = (pData.RollTickets[1] or 0) + 1 -- 增加【池1】次数
+                        
+                        -- 向客户端推送更新，触发红点和次数刷新！
+                        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+                        if updateInventoryRE then updateInventoryRE:FireClient(plr, pData) end
+                    end
+                end
+            end
+        end)
+    end
+
     task.spawn(function()
         local success, savedData = pcall(function() return PlayerDataStore:GetAsync(player.UserId) end)
         if not isLoaded then
@@ -75,10 +103,25 @@ local function onPlayerAdded(player)
                 if type(savedData.ClaimedAchieve) ~= "table" then savedData.ClaimedAchieve = {} end
                 if type(savedData.NewbieGiftStartTime) ~= "number" then savedData.NewbieGiftStartTime = 0 end
                 if type(savedData.NewbieGiftPurchased) ~= "boolean" then savedData.NewbieGiftPurchased = false end
-                if type(savedData.RollTickets) ~= "table" then savedData.RollTickets = {0, 0} end -- 🌟 【兼容老玩家数据】
+                if type(savedData.RollTickets) ~= "table" then savedData.RollTickets = {0, 0} end 
                 
+                -- 🌟 兼容老玩家数据
+                if type(savedData.OnlineRollTimer) ~= "number" then savedData.OnlineRollTimer = 300 end
+                -- ====================================================
+                -- 👇 新增：强制重置所有老玩家的七日签到进度（只触发一次）
+                -- ====================================================
+                if not savedData.SignInReset_V1 then
+                    savedData.SignInDays = 0       -- 签到天数归零
+                    savedData.LastSignInTime = 0   -- 签到时间归零
+                    savedData.SignInReset_V1 = true -- 打上标记，防止下次登录再次被重置
+                    print("🔄 [数据系统] 玩家 " .. player.Name .. " 的七日签到已强制重置！")
+                end
+                -- ====================================================
+
                 sessionData[player.UserId] = savedData
                 print("✅ [数据系统] 玩家 " .. player.Name .. " 数据拉取成功！")
+                
+                startOnlineTimer(player) -- 👈 开启在线计时
                 
                 if (savedData.TutorialStep or 0) == 0 then
                     AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 1, "Step_1_Enter_Game")
@@ -86,15 +129,18 @@ local function onPlayerAdded(player)
             else
                 sessionData[player.UserId] = GetDefaultData()
                 print("🆕 [数据系统] 玩家 " .. player.Name .. " 无存档，发放初始数据。")
+                startOnlineTimer(player) -- 👈 开启在线计时
                 AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 1, "Step_1_Enter_Game")
             end
         end
     end)
+    
     task.delay(5, function()
         if not isLoaded then
             isLoaded = true
-            warn("⚠️ [数据系统] Roblox数据服务请求超时卡死！已强制跳过并下发初始数据，保护游戏进程不崩溃！")
+            warn("⚠️ [数据系统] Roblox数据请求超时！已下发初始数据，保护游戏进程不崩溃！")
             sessionData[player.UserId] = GetDefaultData()
+            startOnlineTimer(player) -- 👈 开启在线计时
         end
     end)
 end
@@ -103,7 +149,7 @@ local function onPlayerRemoving(player)
     local dataToSave = sessionData[player.UserId]
     if dataToSave then
         sessionData[player.UserId] = nil 
-        if (dataToSave.TutorialStep or 0) < 9 then
+        if (dataToSave.TutorialStep or 0) < 8 then -- 🟢 改成 8
             return
         end
         task.spawn(function() saveWithRetry(player.UserId, dataToSave) end)
@@ -121,8 +167,8 @@ function PlayerDataManager.Init()
         for _, player in ipairs(Players:GetPlayers()) do
             local dataToSave = sessionData[player.UserId]
             if dataToSave then 
-                if (dataToSave.TutorialStep or 0) >= 9 then
-                    task.spawn(function() saveWithRetry(player.UserId, dataToSave) end) 
+                if (dataToSave.TutorialStep or 0) >= 8 then -- 8
+                   task.spawn(function() saveWithRetry(player.UserId, dataToSave) end) 
                 end
             end
         end
@@ -483,8 +529,28 @@ end
 function PlayerDataManager.UnlockNextLevel(player, completedLevelId)
     local data = sessionData[player.UserId]
     if not data then return end
+    
+    -- 只有当玩家打通了他们当前的最高关卡时，才需要升级和更新 UI
     if completedLevelId >= (data.UnlockedLevel or 1) then
         data.UnlockedLevel = completedLevelId + 1
+        
+        -- 🌟 【新增：实时更新玩家头顶的最高关卡 UI】
+        local character = player.Character
+        if character then
+            local head = character:FindFirstChild("Head")
+            if head then
+                local titleGui = head:FindFirstChild("PlayerTitleGui")
+                if titleGui then
+                    local textLabel = titleGui:FindFirstChildWhichIsA("TextLabel")
+                    if textLabel then
+                        -- 计算通关层数：(当前解锁层数 - 1)
+                        local maxCleared = math.max(0, data.UnlockedLevel - 1)
+                        textLabel.Text = "MAX  " .. tostring(maxCleared)
+                    end
+                end
+            end
+        end
+
         local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
         if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
     end
@@ -568,13 +634,16 @@ function PlayerDataManager.IncrementUnlockedPlots(player)
 end
 
 function PlayerDataManager.GrantSignInReward(player, day)
-    if day == 1 then PlayerDataManager.GiveCoins(player, 200)
-    elseif day == 2 then PlayerDataManager.GiveCoins(player, 2000)
-    elseif day == 3 then PlayerDataManager.GiveSeed(player, "SnowPea", 1)
-    elseif day == 4 then PlayerDataManager.AddTotalSun(player, 10000)
-    elseif day == 5 then PlayerDataManager.GiveSeed(player, "SnowPea", 2)
-    elseif day == 6 then PlayerDataManager.AddTotalSun(player, 100000)
-    elseif day == 7 then PlayerDataManager.GiveSeed(player, "SnowPea", 3)
+    local rewardData = SignInRewardConfig[day]
+    if not rewardData then return end
+    
+    -- 根据配置的 RewardType 发放对应的奖励
+    if rewardData.RewardType == "Coins" then
+        PlayerDataManager.GiveCoins(player, rewardData.Amount)
+    elseif rewardData.RewardType == "Seed" then
+        PlayerDataManager.GiveSeed(player, rewardData.ItemId, rewardData.Amount)
+    elseif rewardData.RewardType == "Sun" then
+        PlayerDataManager.AddTotalSun(player, rewardData.Amount)
     end
 end
 
@@ -682,14 +751,5 @@ claimLevelRewardRF.OnServerInvoke = function(player, targetLevel)
     return true, msg
 end
 
--- [💡 测试用函数]：给玩家添加抽奖次数，方便你测试
-function PlayerDataManager.AddRollTicket(player, tabIndex, amount)
-    local data = sessionData[player.UserId]
-    if not data then return end
-    if not data.RollTickets then data.RollTickets = {0, 0} end
-    data.RollTickets[tabIndex] = (data.RollTickets[tabIndex] or 0) + amount
-    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
-end
 
 return PlayerDataManager
