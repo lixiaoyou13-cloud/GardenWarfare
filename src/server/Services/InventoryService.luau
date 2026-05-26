@@ -3,6 +3,7 @@ local InventoryService = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
+local PlotService = require(script.Parent.PlotService)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
 local pendingGiftRequests = {}
@@ -19,6 +20,13 @@ local function getDisplayItemName(itemType, realId)
     end
 
     return nil
+end
+
+local function GetCombatEditCost(player)
+    local plot = PlotService.GetPlayerPlot(player)
+    local currentLevel = plot and plot:GetAttribute("CurrentLevel") or 1
+    currentLevel = math.max(1, tonumber(currentLevel) or 1)
+    return 100 + (currentLevel - 1) * 100
 end
 
 local function clearGiftRequest(requestId)
@@ -110,12 +118,13 @@ function InventoryService.Init()
         local parts = string.split(equippedCompositeId, "_")
         if parts[1] ~= "Plant" then return end
         
-        -- 👇 [🌟 新增：战斗置换服务端强校验，扣除 1000 阳光（金币）]
+        -- 👇 [🌟 新增：战斗置换服务端强校验，按当前关卡扣除阳光（金币）]
         if isCombatSwap then
-            if not PlayerDataManager.ConsumeCoins(player, 1000) then
+            local cost = GetCombatEditCost(player)
+            if not PlayerDataManager.ConsumeCoins(player, cost) then
                 local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                 if showNotifRE then 
-                    showNotifRE:FireClient(player, "Notice", "Not enough Sun!") 
+                    showNotifRE:FireClient(player, "Notice", "Not enough Sun! Need " .. tostring(cost) .. " Sun.") 
                 end
                 return -- 如果阳光不够，直接拦截置换行为
             end

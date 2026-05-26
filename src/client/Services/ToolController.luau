@@ -15,6 +15,26 @@ local activePrompts = {} -- 保存对 Prompt 的引用，方便随时清理
 local activeGiftPopup = nil
 local activeGiftRequestId = nil
 
+local function getLocalPlayerPlot(player)
+    local plotsFolder = Workspace:FindFirstChild("Plots")
+    if not plotsFolder then return nil end
+
+    for _, plot in ipairs(plotsFolder:GetChildren()) do
+        if plot:GetAttribute("OwnerId") == player.UserId then
+            return plot
+        end
+    end
+
+    return nil
+end
+
+local function getCombatEditCost(player, fallbackPlot)
+    local plot = fallbackPlot or getLocalPlayerPlot(player)
+    local currentLevel = plot and plot:GetAttribute("CurrentLevel") or 1
+    currentLevel = math.max(1, tonumber(currentLevel) or 1)
+    return 100 + (currentLevel - 1) * 100
+end
+
 function ToolController.Init()
     local player = Players.LocalPlayer
     local mouse = player:GetMouse()
@@ -147,9 +167,11 @@ function ToolController.Init()
                             
                             -- [🌟 战斗中的置换/回收确认弹窗]
                             if actionName == "Swap Plant" or actionName == "Recycle to Backpack" then
+                                local cost = getCombatEditCost(player, plot)
+                                local costText = UIEffectUtil.FormatNumber(cost)
                                 local detailText = if actionName == "Swap Plant"
-                                    then "Swapping plants during combat costs 1K Sun."
-                                    else "Removing plants during combat costs 1K Sun."
+                                    then "Swapping plants during combat costs " .. costText .. " Sun."
+                                    else "Removing plants during combat costs " .. costText .. " Sun."
 
                                 local shown = PopupUtil.ShowConfirm(detailText, function()
                                     -- 传入 true 代表这是战斗中的操作

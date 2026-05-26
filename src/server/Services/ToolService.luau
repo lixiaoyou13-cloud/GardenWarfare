@@ -9,6 +9,13 @@ local CollectionService = game:GetService("CollectionService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 
+local function GetCombatEditCost(player)
+    local plot = PlotService.GetPlayerPlot(player)
+    local currentLevel = plot and plot:GetAttribute("CurrentLevel") or 1
+    currentLevel = math.max(1, tonumber(currentLevel) or 1)
+    return 100 + (currentLevel - 1) * 100
+end
+
 local function ApplyKnockback(targetCharacter, attackerCharacter)
     local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
     local attackerRoot = attackerCharacter:FindFirstChild("HumanoidRootPart")
@@ -97,11 +104,11 @@ function ToolService.Init()
                 if myPlot:GetAttribute("IsLevelActive") then
                     -- 👇 [🌟 新增：战斗中铲除扣费校验]
                     if isCombatRecycle then
-                        -- 如果身上金币(阳光)不足 1000
-                        if not PlayerDataManager.ConsumeCoins(player, 1000) then
+                        local cost = GetCombatEditCost(player)
+                        if not PlayerDataManager.ConsumeCoins(player, cost) then
                             local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                             if showNotifRE then 
-                                showNotifRE:FireClient(player, "Notice", "Not enough Sun!") 
+                                showNotifRE:FireClient(player, "Notice", "Not enough Sun! Need " .. tostring(cost) .. " Sun.") 
                             end
                             return -- 直接拦截回收操作
                         end
