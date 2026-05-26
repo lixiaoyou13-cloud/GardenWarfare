@@ -9,7 +9,7 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 -- 👇 新增：引入签到奖励配置
 local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
 
-local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V20")
+local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
 local sessionData = {}
 
 local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE") or Instance.new("RemoteEvent")
@@ -653,10 +653,10 @@ claimAllBattleRF.Parent = ReplicatedStorage
 
 claimAllBattleRF.OnServerInvoke = function(player)
     local data = PlayerDataManager.GetPlayerData(player)
-    if not data then return false, "数据加载中..." end
+    if not data then return false, "Loading data..." end
     
     local currentDays = data.SignInDays or 0
-    if currentDays >= 7 then return false, "已经全部领取过了" end
+    if currentDays >= 7 then return false, "Already claimed all" end
     
     for day = currentDays + 1, 7 do
         PlayerDataManager.GrantSignInReward(player, day)
@@ -668,7 +668,7 @@ claimAllBattleRF.OnServerInvoke = function(player)
     local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
     if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
     
-    return true, "一键领取成功！"
+    return true, "Claim successful with one click!"
 end
 
 local claimSignInRF = ReplicatedStorage:FindFirstChild("ClaimSignInRF")
@@ -716,22 +716,22 @@ end
 
 claimLevelRewardRF.OnServerInvoke = function(player, targetLevel)
     local data = sessionData[player.UserId]
-    if not data then return false, "数据仍在加载中..." end
+    if not data then return false, "Data still loading..." end
 
     if not data.ClaimedAchieve then data.ClaimedAchieve = {} end
 
     local currentUnlocked = data.UnlockedLevel or 1
     if currentUnlocked <= targetLevel then
-        return false, "关卡进度不足，无法领取！"
+        return false, "Progress not enough to claim!"
     end
 
     if data.ClaimedAchieve[tostring(targetLevel)] then
-        return false, "您已经领取过该奖励了！"
+        return false, "You have already claimed this reward！"
     end
 
     local LevelRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LevelRewardConfig"))
     local rewardData = LevelRewardConfig[targetLevel]
-    if not rewardData then return false, "配置不存在" end
+    if not rewardData then return false, "Configuration does not exist" end
 
     local msg = "Reward Claimed: "
     if rewardData.Seed then

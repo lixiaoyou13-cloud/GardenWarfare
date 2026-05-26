@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+-- 👇 [🌟 增加这一行，把特效工具箱拿过来]
+local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
 
 -- ==========================================
 -- [🌟 新增：受击变红反馈逻辑]
@@ -263,6 +265,15 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             attackAnimTrack = animator:LoadAnimation(anim)
             attackAnimTrack.Priority = Enum.AnimationPriority.Action
             attackAnimTrack.Looped = false
+
+            -- ==========================================
+            -- 👇 [🌟 新增：在这里监听攻击动画打好的关键帧！]
+            -- ==========================================
+            attackAnimTrack:GetMarkerReachedSignal("VFX"):Connect(function()
+                print("【调试1】动画播到了 VFX 帧！触发成功！") -- 👉 加上这句
+                EffectUtil.PlayAttackVFX(plant)
+            end)
+            -- ==========================================
         end
 
         local idleAnimTrack = nil

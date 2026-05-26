@@ -28,16 +28,16 @@ function ShopService.RefreshStock()
         if seedId then
             local itemDetail = ItemConfig.Seeds[seedId]
             local restockById = {
-                [1] = 20, -- Peashooter
-                [2] = 10, -- Wall
-                [3] = 8,  -- PotatoMine
-                [4] = 5,  -- KernelPult
-                [5] = 4,  -- Jalapeno
-                [6] = 3,  -- CoconutTree
-                [7] = 2,  -- FumeShroom
-                [8] = 2,  -- Cactus
-                [9] = 1,  -- Sunflower
-                [10] = 1, -- Melonpult
+                [1] = 20, -- Peashooter (Id = 1)
+                [2] = 10, -- Wall (Id = 2)
+                [9] = 8,  -- PotatoMine (Id = 9)
+                [3] = 5,  -- KernelPult (Id = 3)
+                [12] = 4, -- Jalapeno (Id = 12)
+                [5] = 3,  -- CoconutTree (Id = 5)
+                [10] = 2, -- FumeShroom (Id = 10)
+                [13] = 2, -- Cactus (Id = 13)
+                [14] = 1, -- Sunflower (Id = 14)
+                [16] = 1, -- Melonpult (Id = 16)
             }
 
             local restockAmount = restockById[itemDetail.Id] or 1

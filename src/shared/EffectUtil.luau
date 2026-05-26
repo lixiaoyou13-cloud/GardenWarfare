@@ -110,5 +110,57 @@ end
 function EffectUtil.HideAllMutations(model)
     EffectUtil.ApplyMutationEffects(model, 1)
 end
+-- ==========================================
+-- 👇 [🌟 把这段新增的代码粘贴在这里] 👇
+-- ==========================================
+function EffectUtil.PlayAttackVFX(model)
+    if not model then return end
+
+    -- 1. 遍历模型内的【所有】节点（解决有多个 VFX 节点的问题，比如双持武器）
+    for _, node in ipairs(model:GetDescendants()) do
+        
+        -- 2. 忽略大小写判定（VFX, vfx, Vfx 都能识别）
+        if string.upper(node.Name) == "VFX" then
+            print("【调试2】在植物身上找到了 VFX 节点！") -- 👉 加上这句
+            
+            -- 3. 把当前 VFX 节点自身，以及它内部的所有子代，放进一个列表里统一检查
+            -- （解决你直接把 ParticleEmitter 命名为 VFX 的情况）
+            local nodesToCheck = node:GetDescendants()
+            table.insert(nodesToCheck, node)
+            
+
+            for _, child in ipairs(nodesToCheck) do
+                if child:IsA("ParticleEmitter") then
+                    
+                    -- 4. 获取 EmitCount
+                    local emitCount = child:GetAttribute("EmitCount")
+                    
+                    if not emitCount then
+                        local countValueNode = child:FindFirstChild("EmitCount")
+                        if countValueNode and (countValueNode:IsA("IntValue") or countValueNode:IsA("NumberValue")) then
+                            emitCount = countValueNode.Value
+                        end
+                    end
+
+                    -- 5. 强转为数字，防止你在属性里错建成了 String (文本) 类型
+                    emitCount = tonumber(emitCount)
+                    
+                    -- 如果还是没有配置 EmitCount，给一个明显的默认值(15)，方便你肉眼确认特效触发了
+                    if not emitCount or emitCount <= 0 then
+                        emitCount = 15 
+                    end
+
+                    print("【调试3】找到了粒子发射器，准备发射数量: ", emitCount) -- 👉 加上这句
+
+                    -- 6. 瞬间发射粒子！
+                    child:Emit(emitCount)
+                end
+            end
+        end
+    end
+end
+-- ==========================================
+-- 👆 [🌟 新增代码结束] 👆
+-- ==========================================
 
 return EffectUtil

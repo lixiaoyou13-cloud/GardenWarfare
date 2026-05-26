@@ -272,7 +272,7 @@ function CombatService.ClearAllCombatPlants(player)
 	end
 end
 
--- [🌟 修复版：智能重新载入（解决闪烁与复活假死问题）]
+-- [🌟 修复版：智能重新载入（彻底解决阵亡假死与被啃咬隐藏不恢复的问题）]
 function CombatService.ReloadSavedPlants(player)
 	local data = PlayerDataManager.GetPlayerData(player)
 	if not data or not data.CombatPlants then return end
@@ -285,18 +285,51 @@ function CombatService.ReloadSavedPlants(player)
 		local lawnPart = lawnFolder:FindFirstChild(gridName)
 		if lawnPart then
 			local existing = nil
+            
+			-- 1. 找出当前格子上的植物
 			for _, c in ipairs(lawnPart:GetChildren()) do
-				if c:GetAttribute("IsCombatPlant") then existing = c; break end
+				if c:GetAttribute("IsCombatPlant") then 
+                    existing = c 
+                    break 
+                end
 			end
 			
 			if existing and existing.Name == plantInfo.PlantId then 
-				-- 拦截假死与爆炸残留的植物
-				if not existing:GetAttribute("NeedsRebuild") and not existing:GetAttribute("Exploded") then
+				-- 2. 【核心判定】：植物是否已经“社会性死亡”？
+                -- 如果已被标记重建、被引爆，或者血量归零，通通视作死亡！
+				if existing:GetAttribute("NeedsRebuild") 
+                or existing:GetAttribute("Exploded") 
+                or (existing:GetAttribute("Health") or 1) <= 0 then
+					existing:Destroy()
+					existing = nil
+				else
+					-- 3. 【状态清除】：植物还活着，但可能被啃咬得半透明了或残血了
+					-- 强制恢复满血
+					local maxHP = existing:GetAttribute("MaxHealth") or 300
+					existing:SetAttribute("Health", maxHP)
+					
+					-- 强制恢复所有零件的原始可见度（解除啃咬隐藏状态）
+					for _, part in ipairs(existing:GetDescendants()) do
+						if part:IsA("BasePart") then
+							local origTrans = part:GetAttribute("OriginalTransparency")
+							if origTrans then
+								part.Transparency = origTrans
+							end
+						end
+					end
+					
+					-- 唤醒可能被意外关闭的特效（重新刷一遍等级特效）
+					EffectUtil.ApplyMutationEffects(existing, plantInfo.Mutation or 1)
+					
+					-- 植物健康且恢复完毕，无需再重建，跳过并处理下一个格子
 					continue 
 				end
 			end 
 
+			-- 4. 如果植物名不符（比如占位不对），或者上面判定它死了（已被清空）
 			if existing then existing:Destroy() end
+
+            -- 5. 重新生成一个崭新、满血且正常的植物！
 			local itemDetail = ItemConfig.Plants[plantInfo.PlantId]
 			if itemDetail then
 				local baseMaxHP = itemDetail.HP or 300

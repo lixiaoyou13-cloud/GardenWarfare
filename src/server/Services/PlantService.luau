@@ -355,8 +355,8 @@ function PlantService.Init()
                                 local seedDetail = ItemConfig.Seeds[seedId]
                                 local buyPrice = seedDetail and seedDetail.BuyPrice or 100
 
-                                local progressRatio = math.clamp(remaining / growthTime, 0, 1)
-                                local cost = math.max(20, math.floor(buyPrice * 0.35 * progressRatio))
+                                local cost = buyPrice * 2
+                                
                                 if PlayerDataManager.ConsumeCoins(player, cost) then
                                     local data = PlayerDataManager.GetPlayerData(player)
                                     AnalyticsService:LogEconomyEvent(player, Enum.AnalyticsEconomyFlowType.Sink, "Coins", cost, data and data.Coins or 0, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "SpeedUpPlant_" .. tostring(targetPlant.Name))

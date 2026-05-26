@@ -50,7 +50,7 @@ function ShopController.Init()
             if child:IsA("Frame") and child ~= shopSlotTemplate then child:Destroy() end
         end
 
-        for i = 1, 10 do
+        for i = 1, #currentStockData do
             local slotData = currentStockData[i]
             local slot = shopSlotTemplate:Clone()
             slot.Name = string.format("%02d_Slot", i)

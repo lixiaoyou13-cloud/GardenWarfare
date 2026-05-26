@@ -474,6 +474,25 @@ showTipRE.OnClientEvent:Connect(function(message)
     UIEffectUtil.ShowTip(message)
 end)
 
+
+showTipRE.OnClientEvent:Connect(function(message)
+    UIEffectUtil.ShowTip(message)
+end)
+
+-- ==========================================
+-- 🌟 新增：监听补偿弹窗指令并显示 UI
+-- ==========================================
+local PopupUtil = require(script.Utils.PopupUtil)
+local showCompensationPopupRE = ReplicatedStorage:WaitForChild("ShowCompensationPopupRE", 10)
+if showCompensationPopupRE then
+    showCompensationPopupRE.OnClientEvent:Connect(function(message)
+        -- 使用现有的弹窗组件，点击确定后自动关闭
+        PopupUtil.ShowConfirm(message, function()
+            -- 留空即可，弹窗会自动消失
+        end)
+    end)
+end
+
 InventoryController.Init()
 HotbarController.Init()
 ShopController.Init()

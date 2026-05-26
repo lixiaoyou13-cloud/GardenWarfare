@@ -200,12 +200,16 @@ function SevenDayPage.Init(sevenDayFrame)
         RenderUI(sevenDayFrame, data)
     end)
 
-    if claimAllBtn then
+   if claimAllBtn then
        claimAllBtn.MouseButton1Click:Connect(function()
+            -- 🌟 新增：向服务器发送主动购买信号，证明这是新订单，不需要发补偿！
+            local markIntentRE = ReplicatedStorage:FindFirstChild("MarkPurchaseIntentRE")
+            if markIntentRE then markIntentRE:FireServer() end
+
             -- 埋点：点击内购按钮（追踪付费意向）
             ReportAnalytics("SignIn_PurchaseClick", {
                 ProductId = PRODUCT_ID,
-                Price = 29 -- 这里填入你的实际定价
+                Price = 4 -- 这里填入你的实际定价
             })
             MarketplaceService:PromptProductPurchase(Players.LocalPlayer, PRODUCT_ID)
         end)

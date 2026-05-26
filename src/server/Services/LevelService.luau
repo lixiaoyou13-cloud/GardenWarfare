@@ -51,6 +51,7 @@ function LevelService.Init()
 
     endBattleRE.OnServerEvent:Connect(function(player)
         local plot = PlotService.GetPlayerPlot(player)
+    
         -- 如果没在战斗中，直接无视
         if not plot or not plot:GetAttribute("IsLevelActive") then return end
 
@@ -62,20 +63,28 @@ function LevelService.Init()
         -- 1. 标记游戏结束
         plot:SetAttribute("IsGameOver", true)
         
-        -- 2. 👇【核心修复】强力清理专属场地的僵尸，加上 OwnerId 判断
+        -- 2. 强力清理专属场地的僵尸，加上 OwnerId 判断
         for _, obj in pairs(Workspace:GetChildren()) do
             if obj:IsA("Model") and obj:GetAttribute("IsZombie") and obj:GetAttribute("OwnerId") == player.UserId then
                 obj:Destroy()
             end
         end
 
-        -- 3. 恢复植物到非战斗状态
-        ZombieService.RestorePlotPlants(plot, player)
+        -- ==========================================
+        -- 👇 [🌟 核心修复：第二步精确落位] 👇
+        -- ==========================================
+        -- 引入 CombatService (动态引入防止循环依赖)
+        local CombatService = require(script.Parent.CombatService)
         
-        -- 4. 强制触发结算
+        -- 调用我们刚才写好的“超级恢复函数”
+        -- 这一行代码会把隐身的、残血的、被炸掉的植物彻底满血复原！
+        CombatService.ReloadSavedPlants(player)
+        -- ==========================================
+        
+        -- 3. 强制触发结算
         ZombieService.FinalSettlement(player, plot, false)
     end)
-
+    
     Players.PlayerAdded:Connect(function(player)
         task.spawn(function()
             local plot = nil

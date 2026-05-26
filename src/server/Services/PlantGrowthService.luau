@@ -296,12 +296,18 @@ end
 function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt, plantsFolder)
     task.spawn(function()
         local growthTime = itemDetail.GrowthTime
+        -- 👇 1. 获取该植物种子的购买原价（保底100）
+        local buyPrice = itemDetail.BuyPrice or 100 
+
         while newPlant and newPlant.Parent do
             local elapsed = os.time() - (newPlant:GetAttribute("PlantedTime") or os.time())
             local remaining = math.max(0, growthTime - elapsed)
            
+            -- 用于植物头顶进度条的比例
             local progressRatio = math.clamp(elapsed / growthTime, 0, 1)
             
+            local currentCost = buyPrice * 2
+
             local billboard = newPlant:FindFirstChild("GrowthUI", true)
             if remaining > 0 then
                 if billboard then 
@@ -310,10 +316,19 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                     local progressText = billboard:FindFirstChild("ProgressText", true)
                     
                     if barFill then barFill.Size = UDim2.new(progressRatio, 0, 1, 0) end
+                    -- 头顶UI继续显示倒计时秒数
                     if progressText then progressText.Text = "⏳ " .. remaining .. "s" end
                 end
-                if prompt and prompt.Parent then prompt.ActionText = "Speed up (" .. tostring(remaining) .. "s)" end
+
+                -- 👇 3. 🌟 核心修复：把原先显示的秒数，替换为真实阳光花费！
+                if prompt and prompt.Parent then 
+                    -- 你可以把 Coins 改成 ☀️ 或者 阳光，只要你喜欢
+                    prompt.ActionText = "Speed up (" .. currentCost .. " Coins)" 
+                end
             else
+                -- ==========================================
+                -- 以下为植物成熟的代码，保持原样不动
+                -- ==========================================
                 local seedId = newPlant.Name 
                 local finalItemDetail = itemDetail
                 local finalPlantId = seedId
@@ -331,7 +346,7 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                         PlayerDataManager.UnlockSeed(player, finalPlantId)
                         local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                         if showNotifRE then
-                           showNotifRE:FireClient(player, "📖 Collection Unlocked!", "The seed grew into [" .. finalItemDetail.Name .. "]! Available in Shop!")
+                           showNotifRE:FireClient(player, "📖 Collection Unlocked!", "The seed grew into [" .. finalItemDetail.Name .. "]!\nAvailable in Shop!")
                         end
                     end
                     
@@ -376,7 +391,7 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                 local savedMutation = pData and pData.PlantedPlants[soil.Name] and pData.PlantedPlants[soil.Name].Mutation or 1
                 PlantGrowthService.SpawnMaturePlant(soil, finalItemDetail, plot, plantsFolder, savedMutation)
                 newPlant:Destroy() 
-                 
+                  
                 if prompt then 
                     prompt.ActionText = "Harvest"
                     prompt.HoldDuration = 15 -- 成熟后变15秒长按
