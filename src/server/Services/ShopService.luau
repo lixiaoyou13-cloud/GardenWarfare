@@ -14,37 +14,37 @@ local nextRefreshTime = 0
 function ShopService.RefreshStock()
     currentShopItems = {}
     playerSpecificStock = {} 
-    
-   local seedKeys = {}
-    for k, seedData in pairs(ItemConfig.Seeds) do 
-        if seedData.IsSellable ~= false then
-            table.insert(seedKeys, k) 
-        end
-    end
-    table.sort(seedKeys, function(a, b) return (ItemConfig.Seeds[a].Id or 0) < (ItemConfig.Seeds[b].Id or 0) end)
 
-    for i = 1, #seedKeys do
-        local seedId = seedKeys[i]
+    for _, seedId in ipairs(ItemConfig.IdToSeedKey or {}) do
         if seedId then
             local itemDetail = ItemConfig.Seeds[seedId]
-            local restockById = {
-                [1] = 20, -- Peashooter (Id = 1)
-                [2] = 10, -- Wall (Id = 2)
-                [9] = 8,  -- PotatoMine (Id = 9)
-                [3] = 5,  -- KernelPult (Id = 3)
-                [12] = 4, -- Jalapeno (Id = 12)
-                [5] = 3,  -- CoconutTree (Id = 5)
-                [10] = 2, -- FumeShroom (Id = 10)
-                [13] = 2, -- Cactus (Id = 13)
-                [14] = 1, -- Sunflower (Id = 14)
-                [16] = 1, -- Melonpult (Id = 16)
-            }
+            if itemDetail and itemDetail.IsSellable ~= false then
+                local restockById = {
+                    [1] = 20, 
+                    [2] = 15, 
+                    [3] = 10,
+                    [4] = 6,
+                    [5] = 6,
+                    [6] = 6,
+                    [7] = 20,
+                    [8] = 6,
+                    [9] = 6,
+                    [10] = 6,
+                    [11] = 6,
+                    [12] = 6, 
+                    [13] = 6, 
+                    [14] = 6, 
+                    [15] = 6, 
+                    [16] = 3, 
+                    [17] = 3, 
+                    [18] = 2,
+                    [19] = 1,
 
-            local restockAmount = restockById[itemDetail.Id] or 1
-            
-            table.insert(currentShopItems, { SeedId = seedId, MaxStock = restockAmount })
-        else
-            table.insert(currentShopItems, { SeedId = nil, MaxStock = 0 })
+                }
+
+                local restockAmount = restockById[itemDetail.Id] or 1
+                table.insert(currentShopItems, { SeedId = seedId, MaxStock = restockAmount })
+            end
         end
     end
     

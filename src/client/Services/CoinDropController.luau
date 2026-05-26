@@ -5,12 +5,25 @@ local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
+local SoundService = game:GetService("SoundService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) 
 
 local COIN_IMAGE_ID = "rbxassetid://102426033120992"
 local EXPLOSION_IMAGE_ID = "rbxassetid://123456" 
+local SUN_PICKUP_SOUND_ID = "rbxassetid://116731565409481"
+
+local function playSunPickupSound()
+    -- 直接用音效 AssetId 创建本地 Sound，避免 SoundService 中对象名/路径不一致导致找不到或不响。
+    local pickupSound = Instance.new("Sound")
+    pickupSound.Name = "LocalSunPickupSound"
+    pickupSound.SoundId = SUN_PICKUP_SOUND_ID
+    pickupSound.Volume = 1
+    pickupSound.Parent = SoundService
+    SoundService:PlayLocalSound(pickupSound)
+    Debris:AddItem(pickupSound, 3)
+end
 
 function CoinDropController.Init()
     local playDropRE = ReplicatedStorage:WaitForChild("PlayCoinDropRE")
@@ -53,6 +66,7 @@ function CoinDropController.Init()
                     
                     -- 3. 飞行结束（击中玩家）后销毁实体，再呼出 UI 动画
                     tween.Completed:Connect(function()
+                        playSunPickupSound()
                         sunPart:Destroy()
                         UIEffectUtil.Play2DCollectEffect(amount) 
                     end)
@@ -142,6 +156,7 @@ function CoinDropController.Init()
                         
                         -- [🌟 重点：等待飞行结束接触到玩家身体后，再弹出 UI 动画]
                         tween.Completed:Connect(function()
+                            playSunPickupSound()
                             coin.Transparency = 1
                             if gui then gui.Enabled = false end
                             if trail then trail.Enabled = false end

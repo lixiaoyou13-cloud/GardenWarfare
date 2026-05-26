@@ -1,17 +1,26 @@
 -- src/shared/ItemConfig.luau
 local ItemConfig = {
 	IdToSeedKey = {
-		"Peashooter",   -- 0级解锁 (1星)
-		"Wall",         -- 3级解锁 (1星)
-		"KernelPult",   -- 8级解锁 (2星)
-		"CoconutTree",  -- 12级解锁 (2星)
-		"PotatoMine",   -- 18级解锁 (4星)
-		"FumeShroom",   -- 23级解锁 (4星)
-		"Jalapeno",     -- 27级解锁 (4星)
-		"Cactus",       -- 32级解锁 (4星)
-		"Sunflower",    -- 40级解锁 (4星)
-		"Melonpult"     -- 50级解锁 (5星)
-	},
+        "Peashooter",
+        "Wall",
+        "CherryBomb",
+        "KernelPult",
+        "CarrotShooter",
+        "CoconutTree",
+        "SnowPea",
+        "RadishShooter",
+        "PotatoMine",
+        "FumeShroom",
+        "Magnetshroom",
+        "Jalapeno",
+        "Cactus",
+        "Sunflower",
+        "TwinSunflower",
+        "Melonpult",
+        "Threepeater",
+        "IceMelonpult",
+        "CobCannon"
+    },
 	
 	BaseLimitedSaleKey = {
 		-- ==========================================
@@ -52,8 +61,8 @@ local ItemConfig = {
 			Quality = 1,
 			GrowthTime = 15,
 			YieldPlant = "Wall",
-			BuyPrice = 200,       
-			UnlockLevel = 3, -- ✅ 3级解锁
+			BuyPrice = 400,       
+			UnlockLevel = 2, -- ✅ 3级解锁
 		},
 
 		-- ==========================================
@@ -65,8 +74,8 @@ local ItemConfig = {
 			Quality = 2,
 			GrowthTime = 180,
 			YieldPlant = "KernelPult",
-			BuyPrice = 3000,      
-			UnlockLevel = 8, -- ✅ 8级解锁
+			BuyPrice = 1000,      
+			UnlockLevel = 7, -- ✅ 8级解锁
 		},
 		["CarrotShooter"] = {
 			Id = 4,
@@ -75,7 +84,7 @@ local ItemConfig = {
 			GrowthTime = 180,
 			YieldPlant = "CarrotShooter",
 			BuyPrice = 3000,       
-			UnlockLevel = 0, 
+			UnlockLevel = 10, -- ✅ 0级解锁
 		},
 		["CoconutTree"] = {
 			Id = 5,
@@ -83,8 +92,8 @@ local ItemConfig = {
 			Quality = 2,
 			GrowthTime = 180,
 			YieldPlant = "CoconutTree",
-			BuyPrice = 3000,     
-			UnlockLevel = 12, -- ✅ 12级解锁
+			BuyPrice = 9000,     
+			UnlockLevel = 14, -- ✅ 12级解锁
 		},
 
 		-- ==========================================
@@ -96,8 +105,8 @@ local ItemConfig = {
 			Quality = 3,           
 			GrowthTime = 900,      
 			YieldPlant = "SnowPea",
-			IsSellable = false,
-			BuyPrice = 35000,
+			UnlockLevel = 17, -- ✅ 0级解锁
+			BuyPrice = 50000,
 		},
 		["CherryBomb"] = {
 			Id = 7,
@@ -105,8 +114,8 @@ local ItemConfig = {
 			Quality = 3,           
 			GrowthTime = 900,     
 			YieldPlant = "CherryBomb",
-			IsSellable = false,
-			BuyPrice = 35000,
+			UnlockLevel = 4, -- ✅ 0级解锁
+			BuyPrice = 500,
 		},
 		["RadishShooter"] = {
 			Id = 8,
@@ -114,8 +123,8 @@ local ItemConfig = {
 			Quality = 3,           
 			GrowthTime = 900,     
 			YieldPlant = "RadishShooter",
-			IsSellable = false,
-			BuyPrice = 35000,
+			UnlockLevel = 23, -- ✅ 0级解锁
+			BuyPrice = 100000,
 		},
 
 		-- ==========================================
@@ -127,8 +136,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "PotatoMine",
-			BuyPrice = 150000,    
-			UnlockLevel = 18, -- ✅ 18级解锁
+			BuyPrice = 320000,    
+			UnlockLevel = 29, -- ✅ 18级解锁
 		},
 		["FumeShroom"] = {
 			Id = 10,
@@ -137,7 +146,7 @@ local ItemConfig = {
 			GrowthTime = 1800,
 			YieldPlant = "FumeShroom",
 			BuyPrice = 150000,    
-			UnlockLevel = 23, -- ✅ 23级解锁
+			UnlockLevel = 36, -- ✅ 23级解锁
 		},
 		["Magnetshroom"] = {
 			Id = 11,
@@ -145,8 +154,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Magnetshroom",
-			BuyPrice = 150000,       
-			IsSellable = false,
+			BuyPrice = 850000,       
+			UnlockLevel = 44, -- ✅ 0级解锁
 		},
 		["Jalapeno"] = {
 			Id = 12,
@@ -154,8 +163,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Jalapeno",
-			BuyPrice = 150000,     
-			UnlockLevel = 27, -- ✅ 27级解锁
+			BuyPrice = 1500000,     
+			UnlockLevel = 53, -- ✅ 27级解锁
 		},
 		["Cactus"] = {
 			Id = 13,
@@ -163,8 +172,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Cactus",
-			BuyPrice = 150000,    
-			UnlockLevel = 32, -- ✅ 32级解锁
+			BuyPrice = 2700000,    
+			UnlockLevel = 63, -- ✅ 32级解锁
 		},
 		["Sunflower"] = {
 			Id = 14,
@@ -172,8 +181,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 1800,
 			YieldPlant = "Sunflower",
-			BuyPrice = 150000,    
-			UnlockLevel = 40, -- ✅ 40级解锁
+			BuyPrice = 5000000,    
+			UnlockLevel = 72, -- ✅ 40级解锁
 		},
 
 		-- ==========================================
@@ -185,8 +194,8 @@ local ItemConfig = {
 			Quality = 5,           
 			GrowthTime = 3600,     
 			YieldPlant = "TwinSunflower",
-			IsSellable = false,
-			BuyPrice = 500000,
+			UnlockLevel = 80, -- ✅ 0级解锁
+			BuyPrice = 8000000,
 		},
 		["Melonpult"] = {
 			Id = 16,
@@ -194,8 +203,8 @@ local ItemConfig = {
 			Quality = 5,           
 			GrowthTime = 3600,     
 			YieldPlant = "Melonpult",
-			BuyPrice = 500000,    
-			UnlockLevel = 50, -- ✅ 50级解锁
+			BuyPrice = 10000000,    
+			UnlockLevel = 86, -- ✅ 50级解锁
 		},
 		["Threepeater"] = {
 			Id = 17,
@@ -203,8 +212,8 @@ local ItemConfig = {
 			Quality = 5,           
 			GrowthTime = 3600,     
 			YieldPlant = "Threepeater",
-			IsSellable = false,
-			BuyPrice = 500000,
+			UnlockLevel = 91, -- ✅ 0级解锁
+			BuyPrice = 24000000,
 		},
 		["IceMelonpult"] = {
 			Id = 18,
@@ -212,8 +221,8 @@ local ItemConfig = {
 			Quality = 5,           
 			GrowthTime = 3600,     
 			YieldPlant = "IceMelonpult",
-			IsSellable = false,
-			BuyPrice = 500000,
+			UnlockLevel = 96, -- ✅ 0级解锁
+			BuyPrice = 55000000,
 		},
 		["CobCannon"] = {
 			Id = 19,
@@ -221,8 +230,8 @@ local ItemConfig = {
 			Quality = 5,
 			GrowthTime = 3600,
 			YieldPlant = "CobCannon",
-			BuyPrice = 500000,       
-			IsSellable = false,
+			BuyPrice = 100000000,       
+			UnlockLevel = 100, -- ✅ 0级解锁
 		},
 	},
 	
@@ -247,7 +256,7 @@ local ItemConfig = {
 		["Wall"] = {
 			Id = "Wall",
 			Name = "Wall-nut",
-			HP = 5000,
+			HP = 10000,
 			Quality = 1,
 			IdleAnimId = "rbxassetid://130556607788926",
 			CanAttack = false,
@@ -359,12 +368,12 @@ local ItemConfig = {
 			Id = "PotatoMine",
 			Name = "Potato Mine",
 			HP = 1500,
-			Attack = 5000,
+			Attack = 999999,
 			Quality = 4,
 			IdleAnimId = "rbxassetid://90962037485623",
 			CanAttack = false,
 			ExplosionType = "Single", -- 💥 接触爆炸
-			ExplosionDamage = 5000,
+			ExplosionDamage = 999999,
 			Description = "Description: Explodes on contact, dealing massive single-target damage.",
 		},
 		["FumeShroom"] = {
@@ -402,11 +411,11 @@ local ItemConfig = {
 			Id = "Jalapeno",
 			Name = "Jalapeno",
 			HP = 3000,
-			Attack = 5000,
+			Attack = 999999,
 			Quality = 4,
 			CanAttack = false,
 			ExplosionType = "Row", -- 💥 接触爆炸（清行）
-			ExplosionDamage = 5000,
+			ExplosionDamage =999999,
 			Description = "Description: Explodes instantly, destroying all zombies in a lane.",
 		},
 		["Cactus"] = {
