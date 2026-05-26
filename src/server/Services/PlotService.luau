@@ -9,6 +9,59 @@ local PlotUnlockConfig = require(ReplicatedStorage.Shared.PlotUnlockConfig)
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 
 local playerPlots = {}
+local MAX_LEVEL_PART_NAME = "PlayerMaxLevelPart"
+
+local function ClearMaxLevelPart(plot)
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj.Name == MAX_LEVEL_PART_NAME then
+            obj:Destroy()
+        end
+    end
+end
+
+local function SpawnMaxLevelPart(plot, data)
+    ClearMaxLevelPart(plot)
+
+    local maxPos = plot:FindFirstChild("MAXPos", true)
+    if not maxPos or not maxPos:IsA("BasePart") then
+        warn("服务端：地块 " .. plot.Name .. " 中未找到 MAXPos，无法生成 Max Level 展示牌！")
+        return
+    end
+
+    local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
+    local template = itemModels and itemModels:FindFirstChild("ShowLevelPart")
+    if not template then
+        warn("服务端：ReplicatedStorage.ItemModels.ShowLevelPart 不存在，无法生成 Max Level 展示牌！")
+        return
+    end
+
+    local showLevelPart = template:Clone()
+    showLevelPart.Name = MAX_LEVEL_PART_NAME
+
+    local billboardGui = showLevelPart:FindFirstChild("BillboardGui", true)
+    local textLabel = billboardGui and billboardGui:FindFirstChild("TextLabel")
+    if textLabel and textLabel:IsA("TextLabel") then
+        textLabel.Text = "Max Level : " .. tostring(data and data.UnlockedLevel or 1)
+    end
+
+    if showLevelPart:IsA("Model") then
+        local _, size = showLevelPart:GetBoundingBox()
+        showLevelPart:PivotTo(maxPos.CFrame * CFrame.new(0, (maxPos.Size.Y / 2) + (size.Y / 2), 0))
+    elseif showLevelPart:IsA("BasePart") then
+        showLevelPart.CFrame = maxPos.CFrame * CFrame.new(0, (maxPos.Size.Y / 2) + (showLevelPart.Size.Y / 2), 0)
+    end
+
+    for _, part in ipairs(showLevelPart:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Anchored = true
+        end
+    end
+    if showLevelPart:IsA("BasePart") then
+        showLevelPart.Anchored = true
+    end
+
+    showLevelPart.Parent = plot
+end
 
 local function ResetPlotForNextOwner(plot)
     local soilsFolder = plot:FindFirstChild("Soils")
@@ -70,7 +123,7 @@ end
 function PlotService.AssignPlot(player)
     if playerPlots[player.UserId] then return playerPlots[player.UserId] end
 
-    PlayerDataManager.WaitForPlayerData(player)
+    local data = PlayerDataManager.WaitForPlayerData(player)
 
     local plotsFolder = Workspace:WaitForChild("Plots")
     local chosenPlot = nil
@@ -91,6 +144,8 @@ function PlotService.AssignPlot(player)
         chosenPlot:SetAttribute("IsLevelActive", false)
 
         ResetPlotForNextOwner(chosenPlot)
+
+        SpawnMaxLevelPart(chosenPlot, data)
         
         -- 生成基地向日葵
         local BaseSunflowerService = require(script.Parent.BaseSunflowerService)
@@ -553,6 +608,9 @@ function PlotService.ReleasePlot(player)
                 harvestPrompt:Destroy()
             end
         end
+
+        -- 2.5 销毁 Max Level 展示牌
+        ClearMaxLevelPart(plot)
 
         -- 3. 兜底销毁场上的 OwnerId 关联对象（僵尸、基地向日葵、其他专属模型）
         for _, obj in pairs(game.Workspace:GetChildren()) do
