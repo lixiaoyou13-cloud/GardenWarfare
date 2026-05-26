@@ -92,8 +92,6 @@ end
 -- [🌟 极简特效函数：直接复制，原汁原味]
 -- ==========================================
 local function PlayHitEffect(hitPos, itemDetail)
-    local hitEffectPrefab = ReplicatedStorage:FindFirstChild("HitEffect_1", true)
-
     local effectPart = Instance.new("Part")
     effectPart.Size = Vector3.new(0.1, 0.1, 0.1)
     effectPart.Transparency = 1
@@ -102,35 +100,65 @@ local function PlayHitEffect(hitPos, itemDetail)
     effectPart.Position = hitPos
     effectPart.Parent = Workspace
 
+    local hitEffectName = itemDetail and itemDetail.HitEffectTexture
+    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
+    local hitEffectPrefab = nil
+
+    if typeof(hitEffectName) == "string" and hitEffectName ~= "" and hitFolder then
+        local template = hitFolder:FindFirstChild(hitEffectName)
+        if template and template:IsA("BasePart") then
+            hitEffectPrefab = template
+        end
+    end
+
     if hitEffectPrefab then
         local clone = hitEffectPrefab:Clone()
-        clone.Parent = effectPart
-        
-        if clone:IsA("Attachment") or clone:IsA("BasePart") then
-            clone.Position = Vector3.new(0, 0, 0) 
-        end
+        clone.Anchored = true
+        clone.CanCollide = false
+        clone.CFrame = CFrame.new(hitPos)
+        clone.Parent = Workspace
+
+        -- 等一瞬间让客户端先渲染出克隆体，避免 Roblox 吞掉瞬发 Emit
+        task.wait(0.05)
 
         for _, child in ipairs(clone:GetDescendants()) do
             if child:IsA("ParticleEmitter") then
+                local emitCount = child:GetAttribute("EmitCount")
+                if not emitCount then
+                    local countValueNode = child:FindFirstChild("EmitCount")
+                    if countValueNode and (countValueNode:IsA("IntValue") or countValueNode:IsA("NumberValue")) then
+                        emitCount = countValueNode.Value
+                    end
+                end
+
+                emitCount = tonumber(emitCount)
+                if not emitCount or emitCount <= 0 then
+                    emitCount = 15
+                end
+
                 child.Enabled = true
-                child:Emit(child:GetAttribute("EmitCount") or 15)
-                task.delay(0.15, function() child.Enabled = false end)
+                child:Emit(emitCount)
+                task.delay(0.15, function()
+                    if child and child.Parent then
+                        child.Enabled = false
+                    end
+                end)
             elseif child:IsA("Light") then
                 child.Enabled = true
-                task.delay(0.15, function() child.Enabled = false end)
+                task.delay(0.15, function()
+                    if child and child.Parent then
+                        child.Enabled = false
+                    end
+                end)
             end
         end
-        
-        if clone:IsA("ParticleEmitter") then
-            clone.Enabled = true
-            clone:Emit(clone:GetAttribute("EmitCount") or 15)
-            task.delay(0.15, function() clone.Enabled = false end)
-        end
+
+        Debris:AddItem(clone, 1.5)
     else
         local attachment = Instance.new("Attachment", effectPart)
         local particles = Instance.new("ParticleEmitter", attachment)
-        particles.Texture = itemDetail.HitEffectTexture or "rbxassetid://243098098"
-        particles.Color = ColorSequence.new(itemDetail.HitEffectColor or Color3.fromRGB(255, 215, 0))
+        particles.Texture = (itemDetail and itemDetail.HitEffectTexture) or "rbxassetid://243098098"
+        particles.Color = ColorSequence.new((itemDetail and itemDetail.HitEffectColor) or Color3.fromRGB(255, 215, 0))
         particles.Size = NumberSequence.new(1, 0)
         particles.Rate = 0
         particles.Speed = NumberRange.new(5, 10)
@@ -270,7 +298,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             -- 👇 [🌟 新增：在这里监听攻击动画打好的关键帧！]
             -- ==========================================
             attackAnimTrack:GetMarkerReachedSignal("VFX"):Connect(function()
-                print("【调试1】动画播到了 VFX 帧！触发成功！") -- 👉 加上这句
+             
                 EffectUtil.PlayAttackVFX(plant)
             end)
             -- ==========================================

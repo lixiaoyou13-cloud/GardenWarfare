@@ -121,7 +121,6 @@ function EffectUtil.PlayAttackVFX(model)
         
         -- 2. 忽略大小写判定（VFX, vfx, Vfx 都能识别）
         if string.upper(node.Name) == "VFX" then
-            print("【调试2】在植物身上找到了 VFX 节点！") -- 👉 加上这句
             
             -- 3. 把当前 VFX 节点自身，以及它内部的所有子代，放进一个列表里统一检查
             -- （解决你直接把 ParticleEmitter 命名为 VFX 的情况）
@@ -150,7 +149,7 @@ function EffectUtil.PlayAttackVFX(model)
                         emitCount = 15 
                     end
 
-                    print("【调试3】找到了粒子发射器，准备发射数量: ", emitCount) -- 👉 加上这句
+    
 
                     -- 6. 瞬间发射粒子！
                     child:Emit(emitCount)
