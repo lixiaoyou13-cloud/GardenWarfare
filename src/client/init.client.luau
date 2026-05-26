@@ -234,6 +234,67 @@ task.spawn(function()
     local inBattleFrame = playProperty:WaitForChild("InBattle", 5)
     local endBattleBtn = inBattleFrame and inBattleFrame:WaitForChild("EndBattle", 5)
     local levelText = inBattleFrame and inBattleFrame:WaitForChild("LevelText", 5)
+    local battleProgress = inBattleFrame and inBattleFrame:WaitForChild("Progress", 5)
+    local currentTotalZombies = 0
+    local currentZombiesDefeated = 0
+    local battleProgressFill = nil
+
+    local function setupBattleProgressBar()
+        if not battleProgress then return end
+
+        battleProgress.ClipsDescendants = true
+
+        battleProgressFill = battleProgress:FindFirstChild("BattleProgressFill")
+            or battleProgress:FindFirstChild("Fill", true)
+            or battleProgress:FindFirstChild("BarFill", true)
+            or battleProgress:FindFirstChild("ProgressFill", true)
+
+        if not battleProgressFill then
+            battleProgressFill = Instance.new("Frame")
+            battleProgressFill.Name = "BattleProgressFill"
+            battleProgressFill.AnchorPoint = Vector2.new(0, 0)
+            battleProgressFill.Position = UDim2.new(0, 0, 0, 0)
+            battleProgressFill.Size = UDim2.new(0, 0, 1, 0)
+            battleProgressFill.BackgroundColor3 = Color3.fromRGB(90, 255, 90)
+            battleProgressFill.BackgroundTransparency = 0.15
+            battleProgressFill.BorderSizePixel = 0
+            battleProgressFill.ZIndex = battleProgress.ZIndex + 1
+
+            local fillGradient = Instance.new("UIGradient")
+            fillGradient.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(160, 255, 120)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 190, 50)),
+            })
+            fillGradient.Parent = battleProgressFill
+
+            battleProgressFill.Parent = battleProgress
+        end
+    end
+
+    local function updateBattleProgress(defeated, totalZombies)
+        if not battleProgress then return end
+        setupBattleProgressBar()
+
+        currentZombiesDefeated = defeated or currentZombiesDefeated or 0
+        currentTotalZombies = totalZombies or currentTotalZombies or 0
+
+        local displayTotal = math.max(currentTotalZombies, 0)
+        local displayDefeated = math.clamp(currentZombiesDefeated, 0, displayTotal)
+        local ratio = displayTotal > 0 and math.clamp(displayDefeated / displayTotal, 0, 1) or 0
+
+        local fill = battleProgressFill
+            or battleProgress:FindFirstChild("Fill", true)
+            or battleProgress:FindFirstChild("BarFill", true)
+            or battleProgress:FindFirstChild("ProgressFill", true)
+        if fill and (fill:IsA("Frame") or fill:IsA("ImageLabel") or fill:IsA("ImageButton")) then
+            fill.Size = UDim2.new(ratio, 0, fill.Size.Y.Scale, fill.Size.Y.Offset)
+        end
+    end
+
+    if battleProgress then
+        battleProgress.Visible = false
+        updateBattleProgress(0, 0)
+    end
     -- 👇 [🌟 新增：获取 CurrentDisplay 及实时监听 MaxLevel 数据]
     local currentUnlockedLevel = 0
     local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE")
@@ -418,10 +479,12 @@ task.spawn(function()
         end)
 
         setSpeedRE.OnClientEvent:Connect(updateSpeedUI)
-        ReplicatedStorage:WaitForChild("SyncBattleUI_RE").OnClientEvent:Connect(function(isActive, currentLevelId)
+        ReplicatedStorage:WaitForChild("SyncBattleUI_RE").OnClientEvent:Connect(function(isActive, currentLevelId, totalZombies, zombiesDefeated)
             if isActive then
                 startBattleBtn.Visible = false
                 inBattleFrame.Visible = true
+                if battleProgress then battleProgress.Visible = true end
+                updateBattleProgress(zombiesDefeated or 0, totalZombies or currentTotalZombies)
                 
                 -- 🌟 关键修改：仅在 currentLevelId 有效时更新 CurrentLevel
                 if levelText then levelText.Text = "Level " .. currentLevelId end 
@@ -444,6 +507,11 @@ task.spawn(function()
                 end
                 
             else
+                if battleProgress then
+                    battleProgress.Visible = false
+                    updateBattleProgress(0, 0)
+                end
+
                 -- 战斗结束逻辑保持不变...
                 if player:GetAttribute("AutoBattle") then
                     levelText.Text = "Restarting..."

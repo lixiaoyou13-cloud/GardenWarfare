@@ -17,6 +17,37 @@ local LevelConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("S
 
 ZombieService.AnimationCache = {}
 
+local function GetSyncBattleUIRemote()
+    return ReplicatedStorage:FindFirstChild("SyncBattleUI_RE")
+end
+
+local function CountLevelZombies(levelData)
+    local totalZombies = 0
+    if levelData and levelData.Waves then
+        for _, wave in ipairs(levelData.Waves) do
+            if wave.Zombies then
+                for _, zombieGroup in ipairs(wave.Zombies) do
+                    totalZombies += zombieGroup.Count or 0
+                end
+            end
+        end
+    end
+    return totalZombies
+end
+
+local function SyncBattleProgress(player, plot, isActive, levelId)
+    local syncBattleUI_RE = GetSyncBattleUIRemote()
+    if not syncBattleUI_RE then return end
+
+    syncBattleUI_RE:FireClient(
+        player,
+        isActive,
+        levelId or plot:GetAttribute("CurrentLevel") or 1,
+        plot:GetAttribute("TotalZombies") or 0,
+        plot:GetAttribute("ZombiesDefeated") or 0
+    )
+end
+
 local function IsBattleCancelled(plot, player)
     if not plot then return true end
     if plot:GetAttribute("IsGameOver") then return true end
@@ -478,6 +509,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
         -- [🌟 修复]：由于手动撤退会调用 obj:Destroy()，在此处增加安全判断，防止访问已销毁的实例
         if zombie and zombie.Parent and humanoid and humanoid.Parent and humanoid.Health <= 0 then
             plot:SetAttribute("ZombiesDefeated", (plot:GetAttribute("ZombiesDefeated") or 0) + 1)
+            SyncBattleProgress(player, plot, true)
             
             if activeSessions[player.UserId] then
                 activeSessions[player.UserId].TotalKills += 1
@@ -556,9 +588,11 @@ end
 function ZombieService.StartLevel(plot, levelId, player)
     if IsBattleCancelled(plot, player) then return end
 
+    local levelData = LevelConfig[levelId] or ZombieService.GenerateInfiniteLevel(levelId)
+    local totalZombies = CountLevelZombies(levelData)
+
     if not activeSessions[player.UserId] or levelId == 1 then
         activeSessions[player.UserId] = { TotalCoins = 0, TotalSeeds = 0, TotalKills = 0 }
-        plot:SetAttribute("ZombiesDefeated", 0)
     end
     local session = activeSessions[player.UserId]
 
@@ -566,11 +600,10 @@ function ZombieService.StartLevel(plot, levelId, player)
     plot:SetAttribute("IsGameOver", false)
     plot:SetAttribute("CurrentLevel", levelId)
     plot:SetAttribute("ActiveZombies", 0) 
+    plot:SetAttribute("TotalZombies", totalZombies)
+    plot:SetAttribute("ZombiesDefeated", 0)
 
-    local syncBattleUI_RE = game:GetService("ReplicatedStorage"):FindFirstChild("SyncBattleUI_RE")
-    if syncBattleUI_RE then syncBattleUI_RE:FireClient(player, true, levelId) end
-
-    local levelData = LevelConfig[levelId] or ZombieService.GenerateInfiniteLevel(levelId)
+    SyncBattleProgress(player, plot, true, levelId)
     local MAX_ACTIVE_ZOMBIES = 30 
     
     if levelData and levelData.Waves then
@@ -693,13 +726,15 @@ end
 
 function ZombieService.FinalSettlement(player, plot, isVictory)
     local session = activeSessions[player.UserId]
+    local lastLevel = plot:GetAttribute("CurrentLevel") or 1
+
     if not session then 
         -- 如果 session 已经没了，说明已经结算过了，直接重置状态
         plot:SetAttribute("IsLevelActive", false)
+        SyncBattleProgress(player, plot, false, lastLevel)
         return 
     end
 
-    local lastLevel = plot:GetAttribute("CurrentLevel") or 1
     local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
     local data = PlayerDataManager.GetPlayerData(player)
     
@@ -728,6 +763,7 @@ function ZombieService.FinalSettlement(player, plot, isVictory)
     -- 清理缓存并释放锁定
     activeSessions[player.UserId] = nil 
     plot:SetAttribute("IsLevelActive", false)
+    SyncBattleProgress(player, plot, false, lastLevel)
 end
 
 function ZombieService.Init()

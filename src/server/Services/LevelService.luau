@@ -45,7 +45,6 @@ function LevelService.Init()
         local levelId = targetLevel or 1 
         print("【关卡系统】玩家 " .. player.Name .. " 战斗刷新：第 " .. levelId .. " 关")
 
-        syncBattleUI_RE:FireClient(player, true, levelId)
         ZombieService.StartLevel(plot, levelId, player)
     end)
 
@@ -97,7 +96,7 @@ function LevelService.Init()
             if plot then
                 plot:GetAttributeChangedSignal("IsLevelActive"):Connect(function()
                     if not plot:GetAttribute("IsLevelActive") then
-                        syncBattleUI_RE:FireClient(player, false, 1)
+                        syncBattleUI_RE:FireClient(player, false, 1, 0, 0)
                     end
                 end)
             end
