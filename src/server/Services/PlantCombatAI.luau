@@ -9,6 +9,14 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 -- 👇 [🌟 增加这一行，把特效工具箱拿过来]
 local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
 
+local function GetSafeGameSpeed(plot)
+    local speedMult = plot and tonumber(plot:GetAttribute("GameSpeed")) or 1
+    if speedMult ~= 1 and speedMult ~= 2 and speedMult ~= 4 then
+        return 1
+    end
+    return speedMult
+end
+
 -- ==========================================
 -- [🌟 新增：受击变红反馈逻辑]
 -- ==========================================
@@ -277,6 +285,11 @@ end
 -- [3. 射手类植物 AI]
 -- ==========================================
 function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
+    if plant:GetAttribute("ShooterAIStarted") then
+        return
+    end
+    plant:SetAttribute("ShooterAIStarted", true)
+
     task.spawn(function()
         local attackInterval = itemDetail.AttackInterval or 1.5
         local baseAttackDamage = itemDetail.Attack or 20
@@ -317,7 +330,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             local hp = plant:GetAttribute("Health") or 0
             if hp <= 0 or plant:GetAttribute("IsDead") then task.wait(0.5); continue end
 
-            local speedMult = plot:GetAttribute("GameSpeed") or 1
+            local speedMult = GetSafeGameSpeed(plot)
             local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
             if not rootPart then task.wait(0.5); continue end
 
@@ -394,6 +407,18 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                 end
                 task.wait(0.1 / speedMult)
             end
+        end
+
+        if attackAnimTrack then
+            attackAnimTrack:Stop(0.1)
+            attackAnimTrack:Destroy()
+        end
+        if idleAnimTrack then
+            idleAnimTrack:Stop(0.1)
+            idleAnimTrack:Destroy()
+        end
+        if plant then
+            plant:SetAttribute("ShooterAIStarted", nil)
         end
     end)
 end

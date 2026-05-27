@@ -4,6 +4,55 @@ local EquipmentService = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 
+local holdTrackCache = setmetatable({}, { __mode = "k" })
+local characterCleanupBound = setmetatable({}, { __mode = "k" })
+
+local function stopAndDestroyHoldTrack(animator)
+    local track = holdTrackCache[animator]
+    if track then
+        pcall(function()
+            track:Stop(0.1)
+            track:Destroy()
+        end)
+        holdTrackCache[animator] = nil
+    end
+end
+
+local function getHoldTrack(animator, humanoid)
+    local cached = holdTrackCache[animator]
+    if cached then
+        return cached
+    end
+
+    local holdAnim = Instance.new("Animation")
+    holdAnim.AnimationId = (humanoid.RigType == Enum.HumanoidRigType.R15) and "rbxassetid://507768375" or "rbxassetid://128428514"
+
+    local track = animator:LoadAnimation(holdAnim)
+    track.Name = "CustomHoldAnim"
+    track.Priority = Enum.AnimationPriority.Action
+    holdTrackCache[animator] = track
+
+    holdAnim:Destroy()
+    return track
+end
+
+local function bindCharacterAnimationCleanup(character, humanoid, animator)
+    if characterCleanupBound[character] then
+        return
+    end
+    characterCleanupBound[character] = true
+
+    humanoid.Died:Connect(function()
+        stopAndDestroyHoldTrack(animator)
+    end)
+
+    character.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            stopAndDestroyHoldTrack(animator)
+        end
+    end)
+end
+
 -- [🌟 终极特效控制系统：支持 Attachment 容器穿透]
 local function ApplyMutationEffects(model, mutationLevel)
     mutationLevel = mutationLevel or 1
@@ -48,13 +97,15 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
     local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
+    bindCharacterAnimationCleanup(character, humanoid, animator)
 
     -- 1. 清理旧模型和动画
     local oldItem = character:FindFirstChild("HeldItem_Custom")
     if oldItem then oldItem:Destroy() end
 
-    for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-        if track.Name == "CustomHoldAnim" then track:Stop() end
+    local previousItem = character:GetAttribute("EquippedSeed")
+    if previousItem ~= compositeId then
+        stopAndDestroyHoldTrack(animator)
     end
 
     if not compositeId then 
@@ -63,11 +114,7 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
     end
 
     -- 2. 播放动画
-    local holdAnim = Instance.new("Animation")
-    holdAnim.AnimationId = (humanoid.RigType == Enum.HumanoidRigType.R15) and "rbxassetid://507768375" or "rbxassetid://128428514"
-    local track = animator:LoadAnimation(holdAnim)
-    track.Name = "CustomHoldAnim"
-    track.Priority = Enum.AnimationPriority.Action 
+    local track = getHoldTrack(animator, humanoid)
     track:Play()
 
     -- 3. [🌟 核心原理：根据标签寻找对应模型，并解析变异等级]

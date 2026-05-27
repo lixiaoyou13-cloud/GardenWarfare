@@ -14,6 +14,37 @@ local PopupUtil = require(script.Parent.Parent.Utils.PopupUtil)
 local activePrompts = {} -- 保存对 Prompt 的引用，方便随时清理
 local activeGiftPopup = nil
 local activeGiftRequestId = nil
+local weaponAttackAnimId = "rbxassetid://135432663541165"
+local weaponAttackTrackCache = setmetatable({}, { __mode = "k" })
+
+local function stopAndDestroyWeaponAttackTrack(animator)
+    local track = weaponAttackTrackCache[animator]
+    if track then
+        pcall(function()
+            track:Stop(0.05)
+            track:Destroy()
+        end)
+        weaponAttackTrackCache[animator] = nil
+    end
+end
+
+local function getWeaponAttackTrack(animator)
+    local cached = weaponAttackTrackCache[animator]
+    if cached then
+        return cached
+    end
+
+    local attackAnim = Instance.new("Animation")
+    attackAnim.AnimationId = weaponAttackAnimId
+
+    local track = animator:LoadAnimation(attackAnim)
+    track.Name = "WeaponBlockAttackAnim"
+    track.Priority = Enum.AnimationPriority.Action3
+    weaponAttackTrackCache[animator] = track
+
+    attackAnim:Destroy()
+    return track
+end
 
 local function getLocalPlayerPlot(player)
     local plotsFolder = Workspace:FindFirstChild("Plots")
@@ -354,7 +385,29 @@ function ToolController.Init()
     end)
 
     local function bindCharacter(char)
-        char:GetAttributeChangedSignal("EquippedSeed"):Connect(updateToolState)
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        local animator = humanoid and (humanoid:FindFirstChildOfClass("Animator") or humanoid)
+
+        char:GetAttributeChangedSignal("EquippedSeed"):Connect(function()
+            local equippedItem = char:GetAttribute("EquippedSeed")
+            if equippedItem ~= "Tool_WeaponBlock" and animator then
+                stopAndDestroyWeaponAttackTrack(animator)
+            end
+            updateToolState()
+        end)
+
+        if humanoid and animator then
+            humanoid.Died:Connect(function()
+                stopAndDestroyWeaponAttackTrack(animator)
+            end)
+        end
+
+        char.AncestryChanged:Connect(function(_, parent)
+            if not parent and animator then
+                stopAndDestroyWeaponAttackTrack(animator)
+            end
+        end)
+
         updateToolState()
     end
 
@@ -394,8 +447,6 @@ function ToolController.Init()
     -- ==========================================
     -- [鼠标点击行为中枢：投掷 / 近战攻击 / 赠送]
     -- ==========================================
-    local attackAnim = Instance.new("Animation")
-    attackAnim.AnimationId = "rbxassetid://135432663541165" 
     local isAttacking = false 
     local isThrowingBomb = false
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -441,8 +492,7 @@ function ToolController.Init()
                 local humanoid = char:FindFirstChildOfClass("Humanoid")
                 if humanoid then
                     local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
-                    local track = animator:LoadAnimation(attackAnim)
-                    track.Priority = Enum.AnimationPriority.Action3 
+                    local track = getWeaponAttackTrack(animator)
                     track:Play(0.05)
 
                     task.spawn(function()
