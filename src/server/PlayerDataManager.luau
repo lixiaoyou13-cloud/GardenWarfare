@@ -14,6 +14,7 @@ local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
 local sessionData = {}
 local X2_SUN_GAME_PASS_ID = 1856661235
 local x2SunOwnershipCache = {}
+local ROLL_TAB1_CASH_COST = 200000
 
 local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE") or Instance.new("RemoteEvent")
 analyticsRE.Name = "AnalyticsRE"
@@ -68,6 +69,7 @@ local function saveWithRetry(userId, dataToSave)
     end
     return false
 end
+
 local function onPlayerAdded(player)
     local isLoaded = false
     
@@ -229,15 +231,32 @@ function PlayerDataManager.Init()
     end
     
     performRollRF.OnServerInvoke = function(player, tabIndex)
+        tabIndex = tonumber(tabIndex) or 1
+        if tabIndex ~= 1 and tabIndex ~= 2 then
+            return false, "Invalid roll tab"
+        end
+
         local data = sessionData[player.UserId]
         if not data then return false, "数据仍在加载中..." end
         if not data.RollTickets then data.RollTickets = {0, 0} end
         
-        local tickets = data.RollTickets[tabIndex] or 0
-        if tickets <= 0 then return false, "抽奖次数不足！" end
-        
-        -- 1. 扣除对应池子的次数
-        data.RollTickets[tabIndex] = tickets - 1
+        -- 兼容旧数据/异常数据里 RollTickets 使用字符串键的情况，避免误判为 0 后先扣阳光。
+        local tickets = tonumber(data.RollTickets[tabIndex]) or tonumber(data.RollTickets[tostring(tabIndex)]) or 0
+        data.RollTickets[tabIndex] = tickets
+        data.RollTickets[tostring(tabIndex)] = nil
+
+        if tickets > 0 then
+            -- 1. 永远优先扣除对应池子的免费次数；只有没有免费次数时才会进入阳光扣费分支。
+            data.RollTickets[tabIndex] = tickets - 1
+        elseif tabIndex == 1 then
+            -- 第 1 页没有免费次数时，允许消耗 200K 阳光继续抽奖
+            if (data.Coins or 0) < ROLL_TAB1_CASH_COST then
+                return false, "Not enough Sun!"
+            end
+            data.Coins -= ROLL_TAB1_CASH_COST
+        else
+            return false, "抽奖次数不足！"
+        end
         
         -- 2. 获取真正的随机奖励
         local RollConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RollConfig"))

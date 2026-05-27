@@ -96,7 +96,7 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
     billboard.Size = UDim2.new(0, 160, 0, 55)
     billboard.StudsOffset = Vector3.new(0, 3.5, 0)
     billboard.AlwaysOnTop = true
-    billboard.MaxDistance = 20 
+    billboard.MaxDistance = 50
     
     local bgFrame = Instance.new("Frame")
     bgFrame.Size = UDim2.new(1, 0, 1, 0)
@@ -239,7 +239,7 @@ function PlantGrowthService.CreateSeedling(seedId, soil, itemDetail, plantedTime
     billboard.Size = UDim2.new(0, 180, 0, 60)
     billboard.StudsOffset = Vector3.new(0, 3.5, 0)
     billboard.AlwaysOnTop = true
-    billboard.MaxDistance = 20 
+    billboard.MaxDistance = 50
     
     local bgFrame = Instance.new("Frame")
     bgFrame.Size = UDim2.new(1, 0, 1, 0)

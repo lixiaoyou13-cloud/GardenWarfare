@@ -9,6 +9,7 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 
 local PRODUCT_NEWBIE_GIFT = 3594585526 -- 新手礼包 ID
 local PRODUCT_SEVEN_DAY = 3582734340   -- 七天签到一键领取的内购 ID
+local PRODUCT_RARE_ROLL_TICKET = 3599579545 -- 稀有抽奖次数 ID
 
 local function GetConfiguredProductId(itemDetail)
     if type(itemDetail.ProductId) == "number" and itemDetail.ProductId > 0 then
@@ -160,7 +161,33 @@ function IAPService.Init()
         end
 
         -- ==========================================
-        -- [3] 商店植物/种子 Developer Product 购买
+        -- [3] 稀有抽奖次数 Developer Product
+        -- ==========================================
+        if receiptInfo.ProductId == PRODUCT_RARE_ROLL_TICKET then
+            local data = PlayerDataManager.GetPlayerData(player)
+            if not data then
+                return Enum.ProductPurchaseDecision.NotProcessedYet
+            end
+
+            if type(data.RollTickets) ~= "table" then
+                data.RollTickets = {0, 0}
+            end
+            data.RollTickets[2] = (tonumber(data.RollTickets[2]) or 0) + 1
+            data.RollTickets["2"] = nil
+
+            local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+            if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+
+            local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
+            if playObtainEffectRE then
+                playObtainEffectRE:FireClient(player, "Purchase Successful!\nObtained 1x Rare Pull!")
+            end
+
+            return Enum.ProductPurchaseDecision.PurchaseGranted
+        end
+
+        -- ==========================================
+        -- [4] 商店植物/种子 Developer Product 购买
         -- ==========================================
         local shopReward = FindShopRewardByProductId(receiptInfo.ProductId)
         if shopReward then
