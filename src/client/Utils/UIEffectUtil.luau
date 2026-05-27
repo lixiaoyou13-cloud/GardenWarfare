@@ -5,28 +5,14 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
+local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
 local currentTipId = 0 -- 内部变量，用于追踪当前的提示任务
 
 -- ==========================================
 -- [🌟 核心算法：数字智能精简 (例如 1500 -> 1.5K, 1000 -> 1K)]
 -- ==========================================
 local function FormatNumber(num)
-    if num >= 1000000000 then
-        -- 🌟 新增：转换 B (Billion, 十亿)
-        local str = string.format("%.1fB", num / 1000000000)
-        return string.gsub(str, "%.0B", "B")
-    elseif num >= 1000000 then
-        -- 转换 M (Million, 百万)
-        local str = string.format("%.1fM", num / 1000000)
-        return string.gsub(str, "%.0M", "M")
-    elseif num >= 1000 then
-        -- 转换 K (Kilo, 千)
-        local str = string.format("%.1fK", num / 1000)
-        return string.gsub(str, "%.0K", "K")
-    else
-        -- 小于 1000 的数字直接显示
-        return tostring(math.floor(num))
-    end
+    return NumberFormatUtil.FormatNumber(num)
 end
 UIEffectUtil.FormatNumber = FormatNumber
 

@@ -5,9 +5,20 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) 
+
+local function GetConfiguredProductId(itemDetail)
+    if type(itemDetail.ProductId) == "number" and itemDetail.ProductId > 0 then
+        return itemDetail.ProductId
+    end
+    if type(itemDetail.IAPProductId) == "number" and itemDetail.IAPProductId > 0 then
+        return itemDetail.IAPProductId
+    end
+    return nil
+end
 
 function ShopController.Init()
     local player = Players.LocalPlayer
@@ -86,7 +97,7 @@ function ShopController.Init()
                     if inPriceText then inPriceText.Text = "Sold Out" end
                     buyBtn.ImageColor3 = Color3.fromRGB(200, 50, 50)
                 else
-                    if inPriceText then inPriceText.Text = itemDetail.BuyPrice end
+                    if inPriceText then inPriceText.Text = UIEffectUtil.FormatNumber(itemDetail.BuyPrice or 0) end
                     buyBtn.ImageColor3 = Color3.fromRGB(255, 255, 255)
                     buyBtn.Activated:Connect(function()
                         local success, msg = ReplicatedStorage:WaitForChild("BuyItemRF"):InvokeServer(i, 1)
@@ -110,6 +121,28 @@ function ShopController.Init()
                     end)
                 end
             end
+
+            local iapBuyBtn = slot:FindFirstChild("IAPBuyBtn")
+            if iapBuyBtn then
+                local productId = GetConfiguredProductId(itemDetail)
+                local hasProduct = productId ~= nil
+                local iapPriceText = iapBuyBtn:FindFirstChild("PriceText")
+
+                iapBuyBtn.Visible = hasProduct
+                iapBuyBtn.Active = hasProduct
+                iapBuyBtn.AutoButtonColor = hasProduct
+
+                if iapPriceText then
+                    iapPriceText.Text = UIEffectUtil.FormatNumber(itemDetail.IAPPrice or 0)
+                end
+
+                if hasProduct then
+                    iapBuyBtn.Activated:Connect(function()
+                        MarketplaceService:PromptProductPurchase(player, productId)
+                    end)
+                end
+            end
+
             slot.Visible = true
             slot.Parent = itemList
         end
@@ -280,7 +313,7 @@ function ShopController.Init()
 
         local price = GetEquippedPrice(equippedId)
         if price then
-            ShowTagAboveDave(myDave, "Price: $" .. tostring(price))
+            ShowTagAboveDave(myDave, "Price: $" .. UIEffectUtil.FormatNumber(price))
         end
     end)
 

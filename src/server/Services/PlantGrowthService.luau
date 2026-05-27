@@ -8,6 +8,7 @@ local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
 local PlotService = require(script.Parent.PlotService)
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local CoinDropService = require(script.Parent.CoinDropService)
@@ -323,7 +324,7 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                 -- 👇 3. 🌟 核心修复：把原先显示的秒数，替换为真实阳光花费！
                 if prompt and prompt.Parent then 
                     -- 你可以把 Coins 改成 ☀️ 或者 阳光，只要你喜欢
-                    prompt.ActionText = "Speed up (" .. currentCost .. " Coins)" 
+                    prompt.ActionText = "Speed up (" .. NumberFormatUtil.FormatNumber(currentCost) .. " Coins)" 
                 end
             else
                 -- ==========================================

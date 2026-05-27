@@ -6,6 +6,7 @@ local AnalyticsService = game:GetService("AnalyticsService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local PlotUnlockConfig = require(ReplicatedStorage.Shared.PlotUnlockConfig)
+local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 
 local playerPlots = {}
@@ -527,7 +528,7 @@ function PlotService.UpdateSoilVisuals(player, plot)
                         end)
                     end
                     -- 更新提示框上显示的价格
-                    prompt.ObjectText = "Price:" .. tostring(PlotUnlockConfig.UnlockPrices[soilId])
+                    prompt.ObjectText = "Price:" .. NumberFormatUtil.FormatNumber(PlotUnlockConfig.UnlockPrices[soilId])
                     -- 👆 [核心修复区结束]
 
                 else

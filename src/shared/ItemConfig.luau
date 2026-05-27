@@ -46,6 +46,8 @@ local ItemConfig = {
 		-- ==========================================
 		-- ⭐ 1星种子 (15秒 | 200金币)
 		-- ==========================================
+
+		--  IsSellable = false,
 		["Peashooter"] = {
 			Id = 1,
 			Name = "Peashooter Seed",
@@ -54,6 +56,8 @@ local ItemConfig = {
 			YieldPlant = "Peashooter",
 			BuyPrice = 200,       
 			UnlockLevel = 0, -- ✅ 0级解锁
+			IAPProductId = 3599509881, -- Roblox Developer Product ID
+			IAPPrice = 2,
 		},
 		["Wall"] = {
 			Id = 2,
@@ -63,6 +67,8 @@ local ItemConfig = {
 			YieldPlant = "Wall",
 			BuyPrice = 400,       
 			UnlockLevel = 2, -- ✅ 3级解锁
+			IAPProductId = 3599513941, -- Roblox Developer Product ID
+			IAPPrice = 4,
 		},
 
 		-- ==========================================
@@ -76,6 +82,8 @@ local ItemConfig = {
 			YieldPlant = "KernelPult",
 			BuyPrice = 1000,      
 			UnlockLevel = 7, -- ✅ 8级解锁
+			IAPProductId = 3599525245, -- Roblox Developer Product ID
+			IAPPrice = 12,
 		},
 		["CarrotShooter"] = {
 			Id = 4,
@@ -85,6 +93,8 @@ local ItemConfig = {
 			YieldPlant = "CarrotShooter",
 			BuyPrice = 3000,       
 			UnlockLevel = 10, -- ✅ 0级解锁
+			IAPProductId = 3599525415, -- Roblox Developer Product ID
+			IAPPrice = 18,
 		},
 		["CoconutTree"] = {
 			Id = 5,
@@ -94,6 +104,8 @@ local ItemConfig = {
 			YieldPlant = "CoconutTree",
 			BuyPrice = 9000,     
 			UnlockLevel = 14, -- ✅ 12级解锁
+			IAPProductId = 3599525663, -- Roblox Developer Product ID
+			IAPPrice = 28,
 		},
 
 		-- ==========================================
@@ -107,6 +119,8 @@ local ItemConfig = {
 			YieldPlant = "SnowPea",
 			UnlockLevel = 17, -- ✅ 0级解锁
 			BuyPrice = 50000,
+			IAPProductId = 3599525941, -- Roblox Developer Product ID
+			IAPPrice = 45,
 		},
 		["CherryBomb"] = {
 			Id = 7,
@@ -116,6 +130,8 @@ local ItemConfig = {
 			YieldPlant = "CherryBomb",
 			UnlockLevel = 4, -- ✅ 0级解锁
 			BuyPrice = 500,
+			IAPProductId = 3599516921, -- Roblox Developer Product ID
+			IAPPrice = 2,
 		},
 		["RadishShooter"] = {
 			Id = 8,
@@ -125,6 +141,8 @@ local ItemConfig = {
 			YieldPlant = "RadishShooter",
 			UnlockLevel = 23, -- ✅ 0级解锁
 			BuyPrice = 100000,
+			IAPProductId =3599526232, -- Roblox Developer Product ID
+			IAPPrice = 65,
 		},
 
 		-- ==========================================
@@ -138,6 +156,8 @@ local ItemConfig = {
 			YieldPlant = "PotatoMine",
 			BuyPrice = 320000,    
 			UnlockLevel = 29, -- ✅ 18级解锁
+			IAPProductId = 3599526403, -- Roblox Developer Product ID
+			IAPPrice = 90,
 		},
 		["FumeShroom"] = {
 			Id = 10,
@@ -147,6 +167,8 @@ local ItemConfig = {
 			YieldPlant = "FumeShroom",
 			BuyPrice = 150000,    
 			UnlockLevel = 36, -- ✅ 23级解锁
+			IAPProductId = 3599526628, -- Roblox Developer Product ID
+			IAPPrice = 120,
 		},
 		["Magnetshroom"] = {
 			Id = 11,
@@ -156,6 +178,8 @@ local ItemConfig = {
 			YieldPlant = "Magnetshroom",
 			BuyPrice = 850000,       
 			UnlockLevel = 44, -- ✅ 0级解锁
+			IAPProductId = 3599526993, -- Roblox Developer Product ID
+			IAPPrice = 155,
 		},
 		["Jalapeno"] = {
 			Id = 12,
@@ -165,6 +189,8 @@ local ItemConfig = {
 			YieldPlant = "Jalapeno",
 			BuyPrice = 1500000,     
 			UnlockLevel = 53, -- ✅ 27级解锁
+			IAPProductId = 3599527190, -- Roblox Developer Product ID
+			IAPPrice = 190,
 		},
 		["Cactus"] = {
 			Id = 13,
@@ -174,6 +200,8 @@ local ItemConfig = {
 			YieldPlant = "Cactus",
 			BuyPrice = 2700000,    
 			UnlockLevel = 63, -- ✅ 32级解锁
+			IAPProductId = 3599527499, -- Roblox Developer Product ID
+			IAPPrice = 230,
 		},
 		["Sunflower"] = {
 			Id = 14,
@@ -183,6 +211,8 @@ local ItemConfig = {
 			YieldPlant = "Sunflower",
 			BuyPrice = 5000000,    
 			UnlockLevel = 72, -- ✅ 40级解锁
+			IAPProductId = 3599527640, -- Roblox Developer Product ID
+			IAPPrice = 270,
 		},
 
 		-- ==========================================
@@ -196,6 +226,8 @@ local ItemConfig = {
 			YieldPlant = "TwinSunflower",
 			UnlockLevel = 80, -- ✅ 0级解锁
 			BuyPrice = 8000000,
+			IAPProductId = 3599527917, -- Roblox Developer Product ID
+			IAPPrice = 320,
 		},
 		["Melonpult"] = {
 			Id = 16,
@@ -205,6 +237,8 @@ local ItemConfig = {
 			YieldPlant = "Melonpult",
 			BuyPrice = 10000000,    
 			UnlockLevel = 86, -- ✅ 50级解锁
+			IAPProductId = 3599528132, -- Roblox Developer Product ID
+			IAPPrice = 370,
 		},
 		["Threepeater"] = {
 			Id = 17,
@@ -214,6 +248,8 @@ local ItemConfig = {
 			YieldPlant = "Threepeater",
 			UnlockLevel = 91, -- ✅ 0级解锁
 			BuyPrice = 24000000,
+			IAPProductId = 3599528340, -- Roblox Developer Product ID
+			IAPPrice = 420,
 		},
 		["IceMelonpult"] = {
 			Id = 18,
@@ -223,6 +259,8 @@ local ItemConfig = {
 			YieldPlant = "IceMelonpult",
 			UnlockLevel = 96, -- ✅ 0级解锁
 			BuyPrice = 55000000,
+			IAPProductId = 3599528561, -- Roblox Developer Product ID
+			IAPPrice = 460,
 		},
 		["CobCannon"] = {
 			Id = 19,
@@ -232,6 +270,8 @@ local ItemConfig = {
 			YieldPlant = "CobCannon",
 			BuyPrice = 100000000,       
 			UnlockLevel = 100, -- ✅ 0级解锁
+			IAPProductId = 3599528978, -- Roblox Developer Product ID
+			IAPPrice = 499,
 		},
 	},
 	
@@ -252,6 +292,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(85, 255, 127),
 			ProjectileName = "Pea", 
 			Description = "Description: Shoots peas to deal basic damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["Wall"] = {
 			Id = "Wall",
@@ -261,6 +303,8 @@ local ItemConfig = {
 			IdleAnimId = "rbxassetid://130556607788926",
 			CanAttack = false,
 			Description = "Description: High HP. Blocks zombies.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 
 		-- ==========================================
@@ -281,6 +325,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Kernel", 
 			Description = "Description: Lobs kernels to deal basic damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["CarrotShooter"] = {
 			Id = "CarrotShooter",
@@ -297,6 +343,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Carrot", 
 			Description = "Description: Shoots carrots to deal basic damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["CoconutTree"] = {
 			Id = "CoconutTree",
@@ -313,6 +361,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 170, 0),
 			ProjectileName = "Coconut", 
 			Description = "Description: Lobs a heavy coconut, dealing single-target damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 
 		-- ==========================================
@@ -331,6 +381,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
 			ProjectileName = "IcePea", 
 			Description = "Details: Fires frost peas, inflicts damage and applies slow!",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["CherryBomb"] = {
 			Id = "CherryBomb",
@@ -343,6 +395,8 @@ local ItemConfig = {
 			ExplosionDamage = 3000, 
 			ExplosionEffect = "CherryBombHit", 
 			Description = "Details: Explodes instantly in a large area!",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["RadishShooter"] = {
 			Id = "RadishShooter",
@@ -359,6 +413,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "WhiteRadish", 
 			Description = "Description: Shoots heavy radishes to deal high damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 
 		-- ==========================================
@@ -375,6 +431,8 @@ local ItemConfig = {
 			ExplosionType = "Single", -- 💥 接触爆炸
 			ExplosionDamage = 999999,
 			Description = "Description: Explodes on contact, dealing massive single-target damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["FumeShroom"] = {
 			Id = "FumeShroom",
@@ -390,6 +448,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(170, 85, 255), 
 			ProjectileName = "Spore", 
 			Description = "Description: Sprays high-damage spores to suppress zombies ahead.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["Magnetshroom"] = {
 			Id = "Magnetshroom",
@@ -406,6 +466,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Lightning", 
 			Description = "Description: Fires lightning to deal heavy electric damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["Jalapeno"] = {
 			Id = "Jalapeno",
@@ -417,6 +479,8 @@ local ItemConfig = {
 			ExplosionType = "Row", -- 💥 接触爆炸（清行）
 			ExplosionDamage =999999,
 			Description = "Description: Explodes instantly, destroying all zombies in a lane.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["Cactus"] = {
 			Id = "Cactus",
@@ -432,6 +496,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
 			ProjectileName = "Spike", 
 			Description = "Description: Fires sharp spikes with strong piercing power.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["Sunflower"] = {
 			Id = "Sunflower",
@@ -447,6 +513,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
 			ProjectileName = "Sunflower",  
 			Description = "Description: Generates value and assists in combat.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 
 		-- ==========================================
@@ -466,6 +534,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(217, 255, 0),
 			ProjectileName = "Sunbeam", 
 			Description = "Details: Fires laser to deal massive damage!",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["Melonpult"] = {
 			Id = "Melonpult",
@@ -482,6 +552,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
 			ProjectileName = "Melon", 
 			Description = "Details: Lobs watermelons to deal massive damage!",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["Threepeater"] = {
 			Id = "Threepeater",
@@ -497,6 +569,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Pea", 
 			Description = "Description: Fires multiple peas to deal insane damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["IceMelonpult"] = {
 			Id = "IceMelonpult",
@@ -513,6 +587,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
 			ProjectileName = "IceMelon", 
 			Description = "Details: Hurls ice melon to deal extreme damage and slow targets!",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 		["CobCannon"] = {
 			Id = "CobCannon",
@@ -529,6 +605,8 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Corn", 
 			Description = "Description: The ultimate weapon. Lobs giant cobs for devastating damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
 		},
 	},
 	

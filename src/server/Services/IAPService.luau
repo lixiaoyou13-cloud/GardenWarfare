@@ -5,9 +5,61 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 
 local PRODUCT_NEWBIE_GIFT = 3594585526 -- 新手礼包 ID
 local PRODUCT_SEVEN_DAY = 3582734340   -- 七天签到一键领取的内购 ID
+
+local function GetConfiguredProductId(itemDetail)
+    if type(itemDetail.ProductId) == "number" and itemDetail.ProductId > 0 then
+        return itemDetail.ProductId
+    end
+    if type(itemDetail.IAPProductId) == "number" and itemDetail.IAPProductId > 0 then
+        return itemDetail.IAPProductId
+    end
+    return nil
+end
+
+local function FindShopRewardByProductId(productId)
+    for seedId, seedDetail in pairs(ItemConfig.Seeds or {}) do
+        local configProductId = GetConfiguredProductId(seedDetail)
+        if configProductId == productId then
+            return {
+                ItemType = "Seed",
+                ItemId = seedId,
+                Amount = seedDetail.IAPAmount or seedDetail.Amount or 1,
+                Name = seedDetail.Name or seedId,
+            }
+        end
+    end
+
+    for plantId, plantDetail in pairs(ItemConfig.Plants or {}) do
+        local configProductId = GetConfiguredProductId(plantDetail)
+        if configProductId == productId then
+            return {
+                ItemType = "Plant",
+                ItemId = plantId,
+                Amount = plantDetail.IAPAmount or plantDetail.Amount or 1,
+                Mutation = plantDetail.IAPMutation or plantDetail.Mutation or 1,
+                Name = plantDetail.Name or plantId,
+            }
+        end
+    end
+
+    return nil
+end
+
+local function GrantShopReward(player, reward)
+    if reward.ItemType == "Seed" then
+        PlayerDataManager.GiveSeed(player, reward.ItemId, reward.Amount, true)
+        return true
+    elseif reward.ItemType == "Plant" then
+        PlayerDataManager.GivePlant(player, reward.ItemId, reward.Amount, reward.Mutation or 1)
+        return true
+    end
+
+    return false
+end
 
 function IAPService.Init()
     -- 1. 补偿弹窗事件
@@ -104,6 +156,33 @@ function IAPService.Init()
                 end
             end
             
+            return Enum.ProductPurchaseDecision.PurchaseGranted
+        end
+
+        -- ==========================================
+        -- [3] 商店植物/种子 Developer Product 购买
+        -- ==========================================
+        local shopReward = FindShopRewardByProductId(receiptInfo.ProductId)
+        if shopReward then
+            local data = PlayerDataManager.GetPlayerData(player)
+            if not data then
+                return Enum.ProductPurchaseDecision.NotProcessedYet
+            end
+
+            local granted = GrantShopReward(player, shopReward)
+            if not granted then
+                warn("[IAPService] Unknown shop reward type for productId: " .. tostring(receiptInfo.ProductId))
+                return Enum.ProductPurchaseDecision.NotProcessedYet
+            end
+
+            local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
+            if playObtainEffectRE then
+                playObtainEffectRE:FireClient(
+                    player,
+                    "Purchase Successful!\nObtained " .. tostring(shopReward.Amount) .. "x " .. tostring(shopReward.Name) .. "!"
+                )
+            end
+
             return Enum.ProductPurchaseDecision.PurchaseGranted
         end
 
