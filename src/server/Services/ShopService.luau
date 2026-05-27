@@ -89,9 +89,9 @@ local function CalculateItemPrice(compositeId)
     local baseBuyPrice = seedDetail.BuyPrice or 0
 
     if itemType == "Seed" then
-        return math.floor(baseBuyPrice * 0.8)
+        return math.floor(baseBuyPrice * 0.3)
     elseif itemType == "Plant" then
-        local price = baseBuyPrice * 1.2
+        local price = baseBuyPrice * 0.4
         if mutLvl == 2 then price = price * 2
         elseif mutLvl == 3 then price = price * 3
         elseif mutLvl == 4 then price = price * 4
