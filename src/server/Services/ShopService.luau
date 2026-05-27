@@ -192,7 +192,7 @@ function ShopService.Init()
         end
 
         if consumeSuccess then
-            PlayerDataManager.GiveCoins(player, price)
+            PlayerDataManager.GiveCoinsRaw(player, price)
             
             AnalyticsService:LogEconomyEvent(
                 player, Enum.AnalyticsEconomyFlowType.Source, "Coins", price, 
@@ -267,7 +267,7 @@ function ShopService.Init()
                 end
             end
 
-            PlayerDataManager.GiveCoins(player, totalEarned)
+            PlayerDataManager.GiveCoinsRaw(player, totalEarned)
 
             AnalyticsService:LogEconomyEvent(
                 player, Enum.AnalyticsEconomyFlowType.Source, "Coins", totalEarned, 

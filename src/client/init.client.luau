@@ -18,7 +18,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local MarketplaceService = game:GetService("MarketplaceService")
 local AnalyticsRE = ReplicatedStorage:WaitForChild("AnalyticsRE")
+local X2_SUN_GAME_PASS_ID = 1856661235
 
 local function pullCameraUp()
     -- 必须稍微等待一下，确保 Roblox 的默认相机系统已经绑定到了玩家角色上
@@ -124,6 +126,30 @@ task.spawn(function()
     local shopGui = basicGui:WaitForChild("ShopGui")
     local codexGui = basicGui:WaitForChild("Codex")
     local playProperty = basicGui:WaitForChild("PlayProperty")
+
+    local x2SunBtn = playProperty:FindFirstChild("X2Sun")
+    if x2SunBtn and not x2SunBtn:GetAttribute("IAPBound") then
+        x2SunBtn:SetAttribute("IAPBound", true)
+        local function refreshX2SunButton()
+            local ownsPass = false
+            pcall(function()
+                ownsPass = MarketplaceService:UserOwnsGamePassAsync(player.UserId, X2_SUN_GAME_PASS_ID)
+            end)
+            x2SunBtn.Visible = not ownsPass
+            x2SunBtn.Active = not ownsPass
+        end
+
+        refreshX2SunButton()
+        x2SunBtn.Activated:Connect(function()
+            MarketplaceService:PromptGamePassPurchase(player, X2_SUN_GAME_PASS_ID)
+        end)
+
+        MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(purchasingPlayer, passId, wasPurchased)
+            if purchasingPlayer == player and passId == X2_SUN_GAME_PASS_ID and wasPurchased then
+                refreshX2SunButton()
+            end
+        end)
+    end
 
     local panels = {
         { gui = inventoryGui, frame = inventoryGui:WaitForChild("MainFrame", 5) },

@@ -42,7 +42,7 @@ function UIEffectUtil.RollNumber(textLabel, newValue, prefix)
 end
 
 -- [🌟 UI模块 2：金币飞天特效 (已巨大化)]
-function UIEffectUtil.Play2DCollectEffect(amount, onCompleteCallback)
+function UIEffectUtil.Play2DCollectEffect(amount, onCompleteCallback, displayText)
     local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
     local screenGui = playerGui:FindFirstChild("CoinCollectGui") or Instance.new("ScreenGui")
     screenGui.ResetOnSpawn = false
@@ -67,7 +67,7 @@ function UIEffectUtil.Play2DCollectEffect(amount, onCompleteCallback)
     textLabel.BackgroundTransparency = 1; 
     
     -- 【🌟 浮空数值也应用 K/M 进制缩写】
-    textLabel.Text = "+" .. FormatNumber(amount); 
+    textLabel.Text = displayText or ("+" .. FormatNumber(amount)); 
     
     textLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
     textLabel.TextStrokeColor3 = Color3.fromRGB(150, 80, 0); textLabel.TextStrokeTransparency = 0; textLabel.Font = Enum.Font.GothamBlack; textLabel.TextScaled = true

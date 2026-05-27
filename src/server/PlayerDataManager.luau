@@ -5,12 +5,15 @@ local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AnalyticsService = game:GetService("AnalyticsService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 -- 👇 新增：引入签到奖励配置
 local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
 
 local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
 local sessionData = {}
+local X2_SUN_GAME_PASS_ID = 1856661235
+local x2SunOwnershipCache = {}
 
 local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE") or Instance.new("RemoteEvent")
 analyticsRE.Name = "AnalyticsRE"
@@ -490,9 +493,45 @@ end
 function PlayerDataManager.GiveCoins(player, amount)
     local data = sessionData[player.UserId];
     if not data then return end
+    local finalAmount = amount
+    if PlayerDataManager.IsX2SunActive(player) then
+        finalAmount = amount * 2
+    end
+    data.Coins += finalAmount
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    return finalAmount
+end
+
+function PlayerDataManager.GiveCoinsRaw(player, amount)
+    local data = sessionData[player.UserId];
+    if not data then return end
     data.Coins += amount
     local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
     if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    return amount
+end
+
+function PlayerDataManager.IsX2SunActive(player)
+    if not player then return false end
+    if x2SunOwnershipCache[player.UserId] == true then
+        return true
+    end
+
+    local ownsPass = false
+    local success, result = pcall(function()
+        return MarketplaceService:UserOwnsGamePassAsync(player.UserId, X2_SUN_GAME_PASS_ID)
+    end)
+    if success then
+        ownsPass = result == true
+        if ownsPass then
+            x2SunOwnershipCache[player.UserId] = true
+        end
+    else
+        warn("[PlayerDataManager] Failed to check X2Sun game pass ownership for " .. player.Name .. ": " .. tostring(result))
+    end
+
+    return ownsPass
 end
 
 function PlayerDataManager.ConsumePlant(player, plantId, amount, mutationLevel)
@@ -599,7 +638,11 @@ function PlayerDataManager.CollectAllSun(player)
     local data = sessionData[player.UserId]
     if data and data.TotalSun and data.TotalSun > 0 then
         local amount = data.TotalSun
-        data.Coins += amount 
+        local finalAmount = amount
+        if PlayerDataManager.IsX2SunActive(player) then
+            finalAmount = amount * 2
+        end
+        data.Coins += finalAmount 
         data.TotalSun = 0    
         
         local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
@@ -609,12 +652,12 @@ function PlayerDataManager.CollectAllSun(player)
             player, 
             Enum.AnalyticsEconomyFlowType.Source, 
             "Coins", 
-            amount, 
+            finalAmount, 
             data.Coins,
             Enum.AnalyticsEconomyTransactionType.Gameplay.Name, 
             "Sunflower_Collect" 
         )
-        return amount
+        return finalAmount
     end
     return 0
 end

@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil) 
@@ -13,6 +14,33 @@ local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
 local COIN_IMAGE_ID = "rbxassetid://102426033120992"
 local EXPLOSION_IMAGE_ID = "rbxassetid://123456" 
 local SUN_PICKUP_SOUND_ID = "rbxassetid://116731565409481"
+local X2_SUN_GAME_PASS_ID = 1856661235
+local ownsX2SunCache = false
+
+local function ownsX2SunPass()
+    if ownsX2SunCache then
+        return true
+    end
+
+    local player = Players.LocalPlayer
+    local success, result = pcall(function()
+        return MarketplaceService:UserOwnsGamePassAsync(player.UserId, X2_SUN_GAME_PASS_ID)
+    end)
+
+    if success and result == true then
+        ownsX2SunCache = true
+        return true
+    end
+
+    return false
+end
+
+local function getSunPickupDisplayText(amount, isX2)
+    if isX2 then
+        return "+" .. UIEffectUtil.FormatNumber(amount) .. "x2"
+    end
+    return nil
+end
 
 local function playSunPickupSound()
     -- 直接用音效 AssetId 创建本地 Sound，避免 SoundService 中对象名/路径不一致导致找不到或不响。
@@ -31,7 +59,8 @@ function CoinDropController.Init()
 
     local harvestRE = ReplicatedStorage:FindFirstChild("HarvestSunRE")
     if harvestRE then
-        harvestRE.OnClientEvent:Connect(function(amount, startPos)
+        harvestRE.OnClientEvent:Connect(function(amount, startPos, isX2Sun)
+            local displayText = getSunPickupDisplayText(amount, isX2Sun == true)
             -- 如果服务端传来了起点坐标，就播放 3D 飞行特效
             if startPos then
                 local char = Players.LocalPlayer.Character
@@ -68,14 +97,14 @@ function CoinDropController.Init()
                     tween.Completed:Connect(function()
                         playSunPickupSound()
                         sunPart:Destroy()
-                        UIEffectUtil.Play2DCollectEffect(amount) 
+                        UIEffectUtil.Play2DCollectEffect(amount, nil, displayText) 
                     end)
                     return
                 end
             end
             
             -- 如果没有获取到位置，作为兜底直接播放 UI 动画
-            UIEffectUtil.Play2DCollectEffect(amount) 
+            UIEffectUtil.Play2DCollectEffect(amount, nil, displayText) 
         end)
     end
 
@@ -162,10 +191,11 @@ function CoinDropController.Init()
                             if trail then trail.Enabled = false end
                             
                             -- 呼出屏幕上的 UI 增加动画，并通知服务端真正加钱
+                            local displayText = getSunPickupDisplayText(valuePerCoin, ownsX2SunPass())
                             UIEffectUtil.Play2DCollectEffect(valuePerCoin, function() 
                                 pickupRE:FireServer(valuePerCoin, false)
                                 coin:Destroy()
-                            end)
+                            end, displayText)
                         end)
                     end
                 end

@@ -305,11 +305,12 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                                             sun:Destroy()
                                             if player and player.Parent then
                                                 -- 🌟【核心重构】：逐个递增金币，而不是一次性给完！屏幕上的数字会疯狂跳动！
-                                                PlayerDataManager.GiveCoins(player, currentReward)
+                                                local finalReward = PlayerDataManager.GiveCoins(player, currentReward)
+                                                local isX2Sun = finalReward == currentReward * 2
                                                 
                                                 -- 通知客户端播放单次加钱的飘字音效和动效
                                                 if harvestRE then 
-                                                    harvestRE:FireClient(player, currentReward, rootNow.Position) 
+                                                    harvestRE:FireClient(player, currentReward, rootNow.Position, isX2Sun) 
                                                 end
                                             end
                                         end)
