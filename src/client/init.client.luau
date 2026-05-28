@@ -34,7 +34,7 @@ local function pullCameraUp()
     -- 给相机 0.1 秒的反应时间把镜头推出去，然后再解除限制，允许玩家自由缩放
     task.wait(0.1)
     player.CameraMinZoomDistance = 0.5
-    player.CameraMaxZoomDistance = 128
+
 end
 
 local localPlayer = game:GetService("Players").LocalPlayer
