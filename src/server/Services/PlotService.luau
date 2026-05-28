@@ -42,7 +42,7 @@ local function SpawnMaxLevelPart(plot, data)
     local billboardGui = showLevelPart:FindFirstChild("BillboardGui", true)
     local textLabel = billboardGui and billboardGui:FindFirstChild("TextLabel")
     if textLabel and textLabel:IsA("TextLabel") then
-        textLabel.Text = "Max Level : " .. tostring(data and data.UnlockedLevel or 1)
+        textLabel.Text = "Max Lv." .. tostring(data and data.UnlockedLevel or 1)
     end
 
     if showLevelPart:IsA("Model") then

@@ -21,23 +21,28 @@ local Workspace = game:GetService("Workspace")
 local MarketplaceService = game:GetService("MarketplaceService")
 local AnalyticsRE = ReplicatedStorage:WaitForChild("AnalyticsRE")
 local X2_SUN_GAME_PASS_ID = 1856661235
+local localPlayer = game:GetService("Players").LocalPlayer
+local initialCameraMaxZoomDistance = localPlayer.CameraMaxZoomDistance
+localPlayer.CameraMaxZoomDistance = initialCameraMaxZoomDistance
+
+local function restoreInitialCameraMaxZoomDistance()
+    localPlayer.CameraMaxZoomDistance = initialCameraMaxZoomDistance
+end
 
 local function pullCameraUp()
     -- 必须稍微等待一下，确保 Roblox 的默认相机系统已经绑定到了玩家角色上
     task.wait(0.5) 
     
     -- 强行将相机拉远到 45 的距离
-    local player = game:GetService("Players").LocalPlayer
-    player.CameraMinZoomDistance = 45
-    player.CameraMaxZoomDistance = 45
+    localPlayer.CameraMinZoomDistance = 45
+    localPlayer.CameraMaxZoomDistance = 45
     
-    -- 给相机 0.1 秒的反应时间把镜头推出去，然后再解除限制，允许玩家自由缩放
+    -- 给相机 0.1 秒的反应时间把镜头推出去，然后再解除最小距离限制；最大距离恢复到玩家进入游戏时的初始值
     task.wait(0.1)
-    player.CameraMinZoomDistance = 0.5
-
+    localPlayer.CameraMinZoomDistance = 0.5
+    restoreInitialCameraMaxZoomDistance()
 end
 
-local localPlayer = game:GetService("Players").LocalPlayer
 -- 监听玩家角色生成（每次进入游戏或死亡重生时都会触发）
 localPlayer.CharacterAdded:Connect(function()
     pullCameraUp()
@@ -321,26 +326,6 @@ task.spawn(function()
         battleProgress.Visible = false
         updateBattleProgress(0, 0)
     end
-    -- 👇 [🌟 新增：获取 CurrentDisplay 及实时监听 MaxLevel 数据]
-    local currentUnlockedLevel = 0
-    local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE")
-    updateInventoryRE.OnClientEvent:Connect(function(data)
-        if data and data.UnlockedLevel then
-            -- 玩家的 MaxLevel 实际上是最高解锁关卡 - 1
-            currentUnlockedLevel = math.max(0, data.UnlockedLevel - 1)
-            
-            -- 如果玩家正在战斗页面，通关的瞬间立刻刷新 MaxLevel 文本，实现无缝衔接
-            if inBattleFrame and inBattleFrame.Visible then
-                local currentDisplay = inBattleFrame:FindFirstChild("CurrentDisplay")
-                if currentDisplay then
-                    local maxLevelLabel = currentDisplay:FindFirstChild("MaxLevel")
-                    if maxLevelLabel then
-                        maxLevelLabel.Text = "MaxLevel : " .. tostring(currentUnlockedLevel)
-                    end
-                end
-            end
-        end
-    end)
     local btnSpeed1_5 = inBattleFrame and inBattleFrame:WaitForChild("SpeedButton*1.5", 5)
     local btnSpeed4 = inBattleFrame and inBattleFrame:WaitForChild("SpeedButton*4", 5)
     local btnAutoBattle = inBattleFrame and inBattleFrame:WaitForChild("AutoBattle", 5)
@@ -512,25 +497,7 @@ task.spawn(function()
                 if battleProgress then battleProgress.Visible = true end
                 updateBattleProgress(zombiesDefeated or 0, totalZombies or currentTotalZombies)
                 
-                -- 🌟 关键修改：仅在 currentLevelId 有效时更新 CurrentLevel
                 if levelText then levelText.Text = "Level " .. currentLevelId end 
-                
-                local currentDisplay = inBattleFrame:FindFirstChild("CurrentDisplay")
-                if currentDisplay then
-                    local curLevelLabel = currentDisplay:FindFirstChild("CurrentLevel")
-                    local maxLevelLabel = currentDisplay:FindFirstChild("MaxLevel")
-                    
-                    if curLevelLabel then
-                        curLevelLabel.Text = "Current Level : " .. tostring(currentLevelId)
-                    end
-                    
-                    -- 🌟 关键修改：MaxLevel 不依赖事件传入的参数，而是使用我们之前通过 UpdateInventoryRE 缓存好的全局变量 currentUnlockedLevel
-                    if maxLevelLabel then
-                        -- 如果 global 的 currentUnlockedLevel 还没来得及更新，这里显示至少为 1
-                        local displayMax = math.max(0, currentUnlockedLevel)
-                        maxLevelLabel.Text = "MaxLevel : " .. tostring(displayMax)
-                    end
-                end
                 
             else
                 if battleProgress then
