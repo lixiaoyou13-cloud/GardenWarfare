@@ -12,6 +12,7 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local PlotService = require(script.Parent.PlotService) 
 
 local QUALITY_WEIGHTS = { [1] = 45, [2] = 30, [3] = 15, [4] = 8, [5] = 2 }
+local AIRDROP_DROP_DURATION = 20
 
 function LuckyDropService.OnAirdropDelivered(player, dropPosition, luckyBox)
     print("【空投】" .. player.Name .. " 成功将空投运回基地！")
@@ -320,7 +321,7 @@ function LuckyDropService.SpawnDrop()
     luckyBox.Parent = Workspace
 
     local tweenValue = Instance.new("NumberValue")
-    local dropTween = TweenService:Create(tweenValue, TweenInfo.new(12, Enum.EasingStyle.Linear), {Value = 1})
+    local dropTween = TweenService:Create(tweenValue, TweenInfo.new(AIRDROP_DROP_DURATION, Enum.EasingStyle.Linear), {Value = 1})
     
     tweenValue:GetPropertyChangedSignal("Value"):Connect(function()
         if luckyBox and luckyBox.Parent then luckyBox:PivotTo(startCFrame:Lerp(targetCFrame, tweenValue.Value)) end
