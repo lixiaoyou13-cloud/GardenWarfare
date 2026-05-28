@@ -15,6 +15,7 @@ local sessionData = {}
 local X2_SUN_GAME_PASS_ID = 1856661235
 local x2SunOwnershipCache = {}
 local ROLL_TAB1_CASH_COST = 200000
+local onlineRollTimerStarted = false
 
 local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE") or Instance.new("RemoteEvent")
 analyticsRE.Name = "AnalyticsRE"
@@ -70,30 +71,37 @@ local function saveWithRetry(userId, dataToSave)
     return false
 end
 
-local function onPlayerAdded(player)
-    local isLoaded = false
-    
-    -- 🌟【新增计时器引擎】：每秒执行，满5分钟发一次抽奖券！
-    local function startOnlineTimer(plr)
-        task.spawn(function()
-            while plr and plr.Parent do
-                task.wait(1) -- 每过 1 秒
+local function startGlobalOnlineRollTimer()
+    if onlineRollTimerStarted then return end
+    onlineRollTimerStarted = true
+
+    task.spawn(function()
+        while true do
+            task.wait(1)
+
+            local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+            for _, plr in ipairs(Players:GetPlayers()) do
                 local pData = sessionData[plr.UserId]
                 if pData then
                     pData.OnlineRollTimer = (pData.OnlineRollTimer or 300) - 1
-                    
+
                     if pData.OnlineRollTimer <= 0 then
-                        pData.OnlineRollTimer = 300 -- 重置5分钟
-                        pData.RollTickets[1] = (pData.RollTickets[1] or 0) + 1 -- 增加【池1】次数
-                        
-                        -- 向客户端推送更新，触发红点和次数刷新！
-                        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-                        if updateInventoryRE then updateInventoryRE:FireClient(plr, pData) end
+                        pData.OnlineRollTimer = 300
+                        pData.RollTickets = pData.RollTickets or {0, 0}
+                        pData.RollTickets[1] = (pData.RollTickets[1] or 0) + 1
+
+                        if updateInventoryRE then
+                            updateInventoryRE:FireClient(plr, pData)
+                        end
                     end
                 end
             end
-        end)
-    end
+        end
+    end)
+end
+
+local function onPlayerAdded(player)
+    local isLoaded = false
 
     task.spawn(function()
         local success, savedData = pcall(function() return PlayerDataStore:GetAsync(player.UserId) end)
@@ -126,15 +134,12 @@ local function onPlayerAdded(player)
                 sessionData[player.UserId] = savedData
                 print("✅ [数据系统] 玩家 " .. player.Name .. " 数据拉取成功！")
                 
-                startOnlineTimer(player) -- 👈 开启在线计时
-                
                 if (savedData.TutorialStep or 0) == 0 then
                     AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 1, "Step_1_Enter_Game")
                 end
             else
                 sessionData[player.UserId] = GetDefaultData()
                 print("🆕 [数据系统] 玩家 " .. player.Name .. " 无存档，发放初始数据。")
-                startOnlineTimer(player) -- 👈 开启在线计时
                 AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 1, "Step_1_Enter_Game")
             end
         end
@@ -145,7 +150,6 @@ local function onPlayerAdded(player)
             isLoaded = true
             warn("⚠️ [数据系统] Roblox数据请求超时！已下发初始数据，保护游戏进程不崩溃！")
             sessionData[player.UserId] = GetDefaultData()
-            startOnlineTimer(player) -- 👈 开启在线计时
         end
     end)
 end
@@ -162,6 +166,8 @@ local function onPlayerRemoving(player)
 end
 
 function PlayerDataManager.Init()
+    startGlobalOnlineRollTimer()
+
     Players.PlayerAdded:Connect(onPlayerAdded)
     for _, player in ipairs(Players:GetPlayers()) do
         task.spawn(function() onPlayerAdded(player) end)

@@ -82,23 +82,13 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 	local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
 	if prompt then prompt.Enabled = false end
 
-	local animator = newFighter:FindFirstChildOfClass("AnimationController") or newFighter:FindFirstChildOfClass("Humanoid")
-	if animator then animator = animator:FindFirstChildOfClass("Animator") or Instance.new("Animator", animator) end
-
-	if itemDetail.IdleAnimId and itemDetail.IdleAnimId ~= "" and animator then
-		local anim = Instance.new("Animation")
-		anim.AnimationId = itemDetail.IdleAnimId
-		local idleTrack = animator:LoadAnimation(anim)
-		idleTrack.Priority = Enum.AnimationPriority.Idle
-		idleTrack.Looped = true
-		idleTrack:Play() 
-	end
-
 	local plot = lawnPart.Parent.Parent
     
-    -- 独立挂载射击 AI
+	-- 动画统一交给 PlantCombatAI 管理，避免 CombatService 和 AI 重复 LoadAnimation。
 	if itemDetail.CanAttack then
 		PlantCombatAI.StartShooterAI(newFighter, itemDetail, mutationLevel, plot)
+	else
+		PlantCombatAI.StartIdleAnimation(newFighter, itemDetail)
 	end
 
 	return newFighter

@@ -284,6 +284,41 @@ end
 -- ==========================================
 -- [3. 射手类植物 AI]
 -- ==========================================
+function PlantCombatAI.StartIdleAnimation(plant, itemDetail)
+    if plant:GetAttribute("PlantCombatIdleStarted") then
+        return
+    end
+    plant:SetAttribute("PlantCombatIdleStarted", true)
+
+    task.spawn(function()
+        local idleAnimTrack = nil
+        local animController = plant:FindFirstChildOfClass("AnimationController") or plant:FindFirstChildOfClass("Humanoid")
+        local animator = animController and (animController:FindFirstChildOfClass("Animator") or Instance.new("Animator", animController))
+
+        if itemDetail.IdleAnimId and itemDetail.IdleAnimId ~= "" and animator then
+            local anim = Instance.new("Animation")
+            anim.AnimationId = itemDetail.IdleAnimId
+            idleAnimTrack = animator:LoadAnimation(anim)
+            idleAnimTrack.Priority = Enum.AnimationPriority.Idle
+            idleAnimTrack.Looped = true
+            idleAnimTrack:Play(0.1)
+            anim:Destroy()
+        end
+
+        while plant.Parent and (plant:GetAttribute("Health") or 1) > 0 and not plant:GetAttribute("IsDead") do
+            task.wait(1)
+        end
+
+        if idleAnimTrack then
+            idleAnimTrack:Stop(0.1)
+            idleAnimTrack:Destroy()
+        end
+        if plant then
+            plant:SetAttribute("PlantCombatIdleStarted", nil)
+        end
+    end)
+end
+
 function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
     if plant:GetAttribute("ShooterAIStarted") then
         return
@@ -306,6 +341,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             attackAnimTrack = animator:LoadAnimation(anim)
             attackAnimTrack.Priority = Enum.AnimationPriority.Action
             attackAnimTrack.Looped = false
+            anim:Destroy()
 
             -- ==========================================
             -- 👇 [🌟 新增：在这里监听攻击动画打好的关键帧！]
@@ -324,6 +360,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             idleAnimTrack = animator:LoadAnimation(anim)
             idleAnimTrack.Priority = Enum.AnimationPriority.Idle
             idleAnimTrack.Looped = true
+            anim:Destroy()
         end
 
         while plant.Parent do

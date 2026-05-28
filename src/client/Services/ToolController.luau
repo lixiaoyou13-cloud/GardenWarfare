@@ -260,7 +260,11 @@ function ToolController.Init()
         
         -- 如果拿起了铲子，或者举起了成熟的植物(Plant_开头)
         if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) then
-            for _, obj in ipairs(Workspace:GetDescendants()) do
+            local plot = getLocalPlayerPlot(player)
+            if not plot then return end
+
+            -- 只扫描本地玩家自己的基地，避免每次切换工具都遍历整张地图。
+            for _, obj in ipairs(plot:GetDescendants()) do
                 if obj:IsA("Model") and (obj:GetAttribute("IsCombatPlant") or obj:GetAttribute("PlantedOn")) then
                     checkAndAddPrompt(obj, equippedItem)
                 end
@@ -421,7 +425,8 @@ function ToolController.Init()
                 if char then
                     local equippedItem = char:GetAttribute("EquippedSeed")
                     if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) then
-                        if desc:GetAttribute("IsCombatPlant") or desc:GetAttribute("PlantedOn") then
+                        local plot = getLocalPlayerPlot(player)
+                        if plot and desc:IsDescendantOf(plot) and (desc:GetAttribute("IsCombatPlant") or desc:GetAttribute("PlantedOn")) then
                             checkAndAddPrompt(desc, equippedItem)
                         end
                     end
