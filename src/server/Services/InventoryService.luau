@@ -5,7 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local PlotService = require(script.Parent.PlotService)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
-local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
+local CombatService = require(script.Parent.CombatService)
 local pendingGiftRequests = {}
 local playerPendingGiftRequest = {}
 local nextGiftRequestId = 0
@@ -113,106 +113,81 @@ function InventoryService.Init()
     -- 👇 [🌟 核心修改：接受 isCombatSwap 参数判定是否需要扣钱]
     swapCombatPlantRE.OnServerEvent:Connect(function(player, oldPlantModel, equippedCompositeId, isCombatSwap)
         if not oldPlantModel or not oldPlantModel.Parent then return end
+        if type(equippedCompositeId) ~= "string" then return end
         if not oldPlantModel:GetAttribute("IsCombatPlant") then return end
-        
+
         local parts = string.split(equippedCompositeId, "_")
         if parts[1] ~= "Plant" then return end
-        
-        -- 👇 [🌟 新增：战斗置换服务端强校验，按当前关卡扣除阳光（金币）]
-        if isCombatSwap then
-            local cost = GetCombatEditCost(player)
-            if not PlayerDataManager.ConsumeCoins(player, cost) then
-                local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
-                if showNotifRE then 
-                    showNotifRE:FireClient(player, "Notice", "Not enough Sun! Need " .. tostring(cost) .. " Sun.") 
-                end
-                return -- 如果阳光不够，直接拦截置换行为
-            end
-        end
-        -- 👆 新增结束
 
         local newPlantId = parts[2]
         local newMutLevel = tonumber(parts[3]) or 1
+        local newPlantConfig = ItemConfig.Plants[newPlantId]
+        if not newPlantConfig or newPlantConfig.IsThrowable then return end
 
-        local oldPlantId = oldPlantModel.Name
-        local oldMutLevel = oldPlantModel:GetAttribute("MutationLevel") or 1
+        local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
+        local newTemplate = itemModelsFolder and (itemModelsFolder:FindFirstChild(newPlantId .. "_Plant") or itemModelsFolder:FindFirstChild(newPlantId))
+        if not newTemplate then return end
+
         local gridPart = oldPlantModel.Parent
+        if not gridPart or not gridPart:IsA("BasePart") then return end
 
-        -- 库存数据转移 (扣掉准备种的，收回要挖掉的)
-        if PlayerDataManager.ConsumePlant(player, newPlantId, 1, newMutLevel) then
-            -- 👇 [🌟 静默收回旧植物]
-            PlayerDataManager.GivePlant(player, oldPlantId, 1, oldMutLevel)
+        local myPlot = PlotService.GetPlayerPlot(player)
+        local lawnFolder = myPlot and myPlot:FindFirstChild("Lawn")
+        if not myPlot or not lawnFolder or gridPart.Parent ~= lawnFolder then return end
 
-            -- 进行 3D 物理模型的替换
-            local ItemModels = ReplicatedStorage:FindFirstChild("ItemModels")
-            local newTemplate = ItemModels and (ItemModels:FindFirstChild(newPlantId .. "_Plant") or ItemModels:FindFirstChild(newPlantId))
-            
-            if newTemplate then
-                local cframe = oldPlantModel:GetPivot()
-                PlayerDataManager.RemoveCombatPlant(player, gridPart.Name)
-                oldPlantModel:Destroy()
+        local data = PlayerDataManager.GetPlayerData(player)
+        if not data then return end
 
-                local newPlant = newTemplate:Clone()
-                newPlant.Parent = gridPart
-                newPlant:PivotTo(cframe)
+        local gridName = gridPart.Name
+        local combatInfo = data.CombatPlants and data.CombatPlants[gridName]
+        if not combatInfo then return end
+        if gridPart:GetAttribute("OccupiedBy") ~= oldPlantModel.Name then return end
 
-                -- 👇 [🌟 核心修复：防止植物被踢飞，兼容动画]
-                local plantConfig = ItemConfig.Plants[newPlantId]
-                local targetAnimId = plantConfig and plantConfig.IdleAnimId
+        local oldPlantId = combatInfo.PlantId or oldPlantModel.Name
+        local oldMutLevel = combatInfo.Mutation or oldPlantModel:GetAttribute("MutationLevel") or 1
+        if oldPlantModel.Name ~= oldPlantId then return end
 
-                for _, part in ipairs(newPlant:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        -- 1. 关闭碰撞，玩家会直接穿模，绝对无法踢飞植物
-                        part.CanCollide = false 
-                        
-                        -- 2. 兼容动画的锚固逻辑（仅锚固主节点和特效，释放四肢交给动画控制）
-                        if targetAnimId and newPlant.PrimaryPart and part == newPlant.PrimaryPart then
-                            part.Anchored = true
-                        elseif part.Name == "Glow" or part.Name == "HolyLight" or part.Name == "Lightning" then
-                            part.Anchored = true
-                        else
-                            part.Anchored = not targetAnimId 
-                        end
-                    end
+        -- ==========================================
+        -- Step 1: 按铲除/回收规则处理旧战斗植物
+        -- ==========================================
+        if myPlot:GetAttribute("IsLevelActive") then
+            if not isCombatSwap then
+                local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                if showNotifRE then
+                    showNotifRE:FireClient(player, "Notice", "Cannot replace plants during combat!")
                 end
+                return
+            end
 
-                -- 3. 补充播放动画的逻辑，确保置换出来的植物也是活蹦乱跳的
-                if targetAnimId then
-                    local animController = newPlant:FindFirstChildOfClass("AnimationController") or newPlant:FindFirstChildOfClass("Humanoid")
-                    if not animController then 
-                        animController = Instance.new("AnimationController")
-                        animController.Parent = newPlant 
-                    end
-                    local animator = animController:FindFirstChildOfClass("Animator")
-                    if not animator then 
-                        animator = Instance.new("Animator")
-                        animator.Parent = animController 
-                    end
-                    local anim = Instance.new("Animation")
-                    anim.AnimationId = targetAnimId
-                    local track = animator:LoadAnimation(anim)
-                    track.Priority = Enum.AnimationPriority.Idle
-                    track.Looped = true
-                    track:Play()
+            local cost = GetCombatEditCost(player)
+            if not PlayerDataManager.ConsumeCoins(player, cost) then
+                local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                if showNotifRE then
+                    showNotifRE:FireClient(player, "Notice", "Not enough Sun! Need " .. tostring(cost) .. " Sun.")
                 end
-                -- 👆 新增结束
-
-                newPlant:SetAttribute("IsCombatPlant", true)
-                newPlant:SetAttribute("MutationLevel", newMutLevel)
-                
-                if plantConfig then
-                    local hp = plantConfig.HP or 100
-                    local mutStats = ItemConfig.MutationStats and ItemConfig.MutationStats[newMutLevel]
-                    if mutStats then hp = hp * (mutStats.HPMul or 1) end
-                    newPlant:SetAttribute("MaxHealth", hp)
-                    newPlant:SetAttribute("Health", hp)
-                end
-                
-                EffectUtil.ApplyMutationEffects(newPlant, newMutLevel)
-                
-                PlayerDataManager.AddCombatPlant(player, gridPart.Name, newPlantId, newPlant:GetAttribute("Health"), newMutLevel)
+                return
             end
         end
+
+        PlayerDataManager.GivePlant(player, oldPlantId, 1, oldMutLevel)
+        PlayerDataManager.RemoveCombatPlant(player, gridName)
+        gridPart:SetAttribute("OccupiedBy", nil)
+        local prompt = gridPart:FindFirstChildOfClass("ProximityPrompt")
+        if prompt then prompt.Enabled = true end
+        oldPlantModel:Destroy()
+
+        -- ==========================================
+        -- Step 2: 按普通部署规则消耗手中新植物并统一生成
+        -- ==========================================
+        if not PlayerDataManager.ConsumePlant(player, newPlantId, 1, newMutLevel) then return end
+
+        local baseMaxHP = newPlantConfig.HP or 300
+        local stats = ItemConfig.MutationStats[newMutLevel] or ItemConfig.MutationStats[1]
+        local maxHP = math.floor(baseMaxHP * stats.HealthMul)
+        local newPlant = CombatService.SpawnCombatPlant(gridPart, newPlantId, maxHP, maxHP, newMutLevel)
+        if not newPlant then return end
+
+        PlayerDataManager.AddCombatPlant(player, gridName, newPlantId, maxHP, newMutLevel)
     end)
 
 

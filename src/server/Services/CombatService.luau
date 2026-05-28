@@ -13,12 +13,13 @@ local PlantCombatAI = require(script.Parent.PlantCombatAI)
 -- ==========================================
 -- [核心：生成战斗植物]
 -- ==========================================
-local function SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLevel)
+function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLevel)
 	local itemDetail = ItemConfig.Plants[plantId]
 	local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
+	if not itemModelsFolder then return nil end
 	local combatModel = itemModelsFolder:FindFirstChild(plantId .. "_Plant") or itemModelsFolder:FindFirstChild(plantId)
 	
-	if not combatModel or not itemDetail then return end
+	if not combatModel or not itemDetail then return nil end
 
 	local newFighter = combatModel:Clone()
 	newFighter.Name = plantId
@@ -99,6 +100,12 @@ local function SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLev
 	if itemDetail.CanAttack then
 		PlantCombatAI.StartShooterAI(newFighter, itemDetail, mutationLevel, plot)
 	end
+
+	return newFighter
+end
+
+local function SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLevel)
+	return CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLevel)
 end
 
 -- ==========================================

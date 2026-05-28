@@ -601,8 +601,8 @@ function PlayerDataManager.UnlockNextLevel(player, completedLevelId)
                 if titleGui then
                     local textLabel = titleGui:FindFirstChildWhichIsA("TextLabel")
                     if textLabel then
-                        -- 计算通关层数：(当前解锁层数 - 1)
-                        local maxCleared = math.max(0, data.UnlockedLevel - 1)
+                        -- 直接显示当前解锁层数
+                        local maxCleared = data.UnlockedLevel or 1
                         textLabel.Text = "MAX  " .. tostring(maxCleared)
                     end
                 end

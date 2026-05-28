@@ -54,8 +54,8 @@ Players.PlayerAdded:Connect(function(player)
                 if not data then task.wait(0.5) end
             end
 
-            -- 计算通关层数：(当前解锁层数 - 1)，使用 math.max 兜底防止出现负数
-            local maxCleared = math.max(0, (data.UnlockedLevel or 1) - 1)
+            -- 直接显示当前解锁层数
+            local maxCleared = data.UnlockedLevel or 1
             
             -- 清理旧头衔（防止角色重置时重复生成）
             local oldTitle = head:FindFirstChild("PlayerTitleGui")
