@@ -31,11 +31,8 @@ RollConfig.Pools = {
     [2] = { 
         -- 【页签 2：高级池】 (共 12 种植物 | 包含 3 个五星 | 加农炮为极低概率 2%)
         
-        -- ⭐ 1星 
-        { Id = "Peashooter",   Weight = 150, DisplayRate = "15%" },   -- 商城
-        
-        -- ⭐⭐ 2星 
-        { Id = "KernelPult",   Weight = 130, DisplayRate = "13%" },   -- 商城
+     
+
         { Id = "CarrotShooter",Weight = 130, DisplayRate = "13%" },   -- 🎁 非商城
         
         -- ⭐⭐⭐ 3星 
@@ -44,14 +41,14 @@ RollConfig.Pools = {
         { Id = "RadishShooter",Weight = 100, DisplayRate = "10%" },   -- 🎁 非商城
         
         -- ⭐⭐⭐⭐ 4星 
-        { Id = "FumeShroom",   Weight = 70,  DisplayRate = "7%" },    -- 商城
-        { Id = "Magnetshroom", Weight = 70,  DisplayRate = "7%" },    -- 🎁 非商城
-        { Id = "Cactus",       Weight = 70,  DisplayRate = "7%" },    -- 商城
+        { Id = "FumeShroom",   Weight = 100,  DisplayRate = "10%" },    -- 商城
+        { Id = "Magnetshroom", Weight = 100,  DisplayRate = "10%" },    -- 🎁 非商城
+        { Id = "Cactus",       Weight = 130,  DisplayRate = "13%" },    -- 商城
         
         -- ⭐⭐⭐⭐⭐ 5星 (共 3 个，加农炮压轴)
-        { Id = "TwinSunflower",Weight = 30,  DisplayRate = "3%" },    -- 🎁 非商城
-        { Id = "IceMelonpult", Weight = 30,  DisplayRate = "3%" },    -- 🎁 非商城
-        { Id = "CobCannon",    Weight = 20,  DisplayRate = "2%" },    -- 🎁 非商城 (💣终极大奖，全场最低 2%)
+        { Id = "TwinSunflower",Weight = 80,  DisplayRate = "8%" },    -- 🎁 非商城
+        { Id = "IceMelonpult", Weight = 90,  DisplayRate = "9%" },    -- 🎁 非商城
+        { Id = "CobCannon",    Weight = 70,  DisplayRate = "7%" },    -- 🎁 非商城 (💣终极大奖，全场最低 2%)
     }
 }
 

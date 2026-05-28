@@ -28,12 +28,16 @@ function RollController.Init()
     local rollPage = basicGui:WaitForChild("RollPage")
     rollPage.DisplayOrder = 999
     local bgFrame = rollPage:WaitForChild("BGFrame") 
-    local cashFrame = bgFrame:FindFirstChild("Cash")
-    local maskFrame = rollPage:WaitForChild("MaskFrame")
-    local scrollList = maskFrame:WaitForChild("ScrollList")
+    local page1 = bgFrame:FindFirstChild("Page_1") or rollPage:WaitForChild("Page_1")
+    local page2 = bgFrame:FindFirstChild("Page_2") or rollPage:WaitForChild("Page_2")
+    local pages = {page1, page2}
+    local currentPage = pages[1]
+    local cashFrame = nil
+    local maskFrame = nil
+    local scrollList = nil
     
     -- 🌟 获取倒计时文本标�?
-    local getTimeText = bgFrame:WaitForChild("GetTimeText")
+    local getTimeText = nil
     
     -- 🌟 本地倒计时缓�?
     local localRollTimer = 300
@@ -59,21 +63,17 @@ function RollController.Init()
     local tab1OriginalPos = tab1Btn.Position
     local tab2OriginalPos = tab2Btn.Position
 
-    local layout = scrollList:FindFirstChildOfClass("UIListLayout")
-    local PADDING = 10
-    if layout then 
-        PADDING = layout.Padding.Offset
-        layout:Destroy() 
-    end
-
     local closeBtn = rollPage:WaitForChild("CloseBtn") 
-    local drawBtn = rollPage:WaitForChild("DrawBtn")   
+    local drawBtn = nil
     
     local uiTemplates = ReplicatedStorage:WaitForChild("UITemplates")
     local rollItemTemplate = uiTemplates:WaitForChild("RollItemTemplate")
     
     local ITEM_HEIGHT = rollItemTemplate.Size.Y.Offset
     if ITEM_HEIGHT == 0 then ITEM_HEIGHT = 130 end 
+
+    local PADDING = 10
+    local FIXED_SCROLL_SLOT_COUNT = 30
 
     local isRolling = false
     local idleConnection = nil 
@@ -85,6 +85,93 @@ function RollController.Init()
     local TAB_SELECTED_SCALE = 1.3 
     local TAB_SELECTED_OFFSET_X = 35 
     local TAB_TWEEN_INFO = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    local scrollSlotsByPage = {}
+
+    local function SortSlots(slots)
+        table.sort(slots, function(a, b)
+            if a.LayoutOrder ~= b.LayoutOrder then
+                return a.LayoutOrder < b.LayoutOrder
+            end
+
+            if a.Position.Y.Offset ~= b.Position.Y.Offset then
+                return a.Position.Y.Offset < b.Position.Y.Offset
+            end
+
+            return a.Name < b.Name
+        end)
+    end
+
+    local function EnsureScrollListSlots(page)
+        if not page then return end
+
+        local pageMaskFrame = page:WaitForChild("MaskFrame")
+        local pageScrollList = pageMaskFrame:WaitForChild("ScrollList")
+        local slots = {}
+
+        for _, child in ipairs(pageScrollList:GetChildren()) do
+            if child:IsA("GuiObject") then
+                table.insert(slots, child)
+            end
+        end
+
+        if #slots > 0 then
+            SortSlots(slots)
+            scrollSlotsByPage[page] = slots
+            return
+        end
+
+        local layout = pageScrollList:FindFirstChildOfClass("UIListLayout")
+        local pagePadding = layout and layout.Padding.Offset or PADDING
+
+        for i = 1, FIXED_SCROLL_SLOT_COUNT do
+            local slot = rollItemTemplate:Clone()
+            slot.Name = "Slot_" .. i
+            slot.LayoutOrder = i
+            slot.AnchorPoint = Vector2.new(0.5, 0.5)
+            slot.Position = UDim2.new(0.5, 0, 0, ((i - 1) * (ITEM_HEIGHT + pagePadding)) + (ITEM_HEIGHT / 2))
+            slot.Parent = pageScrollList
+            table.insert(slots, slot)
+        end
+
+        scrollSlotsByPage[page] = slots
+    end
+
+    for _, page in ipairs(pages) do
+        EnsureScrollListSlots(page)
+    end
+
+    local function RefreshCurrentPageRefs()
+        currentPage = pages[currentTab]
+        if not currentPage then return end
+
+        for index, page in ipairs(pages) do
+            if page then
+                page.Visible = index == currentTab
+            end
+        end
+
+        cashFrame = currentPage:FindFirstChild("Cash")
+        maskFrame = currentPage:WaitForChild("MaskFrame")
+        scrollList = maskFrame:WaitForChild("ScrollList")
+        drawBtn = currentPage:WaitForChild("DrawBtn")
+        getTimeText = currentPage:WaitForChild("GetTimeText")
+
+        local layout = scrollList:FindFirstChildOfClass("UIListLayout")
+        PADDING = layout and layout.Padding.Offset or 10
+    end
+
+    RefreshCurrentPageRefs()
+
+    local function RefreshDrawButtonText()
+        if not drawBtn then return end
+
+        local drawText = drawBtn:FindFirstChildWhichIsA("TextLabel")
+        if drawText then
+            drawText.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
+        else
+            drawBtn.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
+        end
+    end
 
     local function RefreshCashUI()
         if not cashFrame then return end
@@ -174,12 +261,7 @@ function RollController.Init()
         CreateOrUpdateRedDot(openPageBtn, totalTickets)
         
         -- 更新抽奖按钮�?Pull (x) 文字
-        local drawText = drawBtn:FindFirstChildWhichIsA("TextLabel")
-        if drawText then
-            drawText.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
-        else
-            drawBtn.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
-        end
+        RefreshDrawButtonText()
 
         RefreshCashUI()
     end
@@ -277,11 +359,105 @@ function RollController.Init()
         end
     end
 
+    local function GetExistingSlot(container)
+        if not container then return nil end
+        if container:FindFirstChild("Icom") or container:FindFirstChild("BG") or container:FindFirstChildWhichIsA("ViewportFrame") then
+            return container
+        end
+
+        local namedSlot = container:FindFirstChild("Slot") or container:FindFirstChild("RollItemTemplate")
+        if namedSlot and namedSlot:IsA("GuiObject") then
+            return namedSlot
+        end
+
+        for _, child in ipairs(container:GetChildren()) do
+            if child:IsA("GuiObject") then
+                return child
+            end
+        end
+
+        return nil
+    end
+
+    local function GetScrollSlots()
+        if currentPage and scrollSlotsByPage[currentPage] then
+            return scrollSlotsByPage[currentPage]
+        end
+
+        local slots = {}
+        if not scrollList then return slots end
+
+        for _, child in ipairs(scrollList:GetChildren()) do
+            if child:IsA("GuiObject") then
+                table.insert(slots, child)
+            end
+        end
+
+        SortSlots(slots)
+
+        if currentPage then
+            scrollSlotsByPage[currentPage] = slots
+        end
+
+        return slots
+    end
+
+    local function GetSlotCenterY(slot)
+        if not slot then return 0 end
+
+        local height = slot.AbsoluteSize.Y
+        if height <= 0 then
+            height = slot.Size.Y.Offset
+        end
+
+        return slot.Position.Y.Offset + (height * (0.5 - slot.AnchorPoint.Y))
+    end
+
+    local function GetAverageSlotSpacing(slots)
+        if #slots <= 1 then
+            return ITEM_HEIGHT + PADDING
+        end
+
+        local totalSpacing = 0
+        local spacingCount = 0
+
+        for i = 2, #slots do
+            local spacing = GetSlotCenterY(slots[i]) - GetSlotCenterY(slots[i - 1])
+            if spacing > 0 then
+                totalSpacing += spacing
+                spacingCount += 1
+            end
+        end
+
+        if spacingCount <= 0 then
+            return ITEM_HEIGHT + PADDING
+        end
+
+        return totalSpacing / spacingCount
+    end
+
+    local function GetIdleLoopHeight(slots, poolCount)
+        if #slots <= 0 then
+            return ITEM_HEIGHT + PADDING
+        end
+
+        -- Studio 里建议按奖池顺序预摆至少两轮 Slot；这样这里可以用第 1 轮到第 2 轮的实际距离做无缝循环。
+        if poolCount > 0 and #slots >= poolCount + 1 then
+            local repeatedSetHeight = GetSlotCenterY(slots[poolCount + 1]) - GetSlotCenterY(slots[1])
+            if repeatedSetHeight > 0 then
+                return repeatedSetHeight
+            end
+        end
+
+        local averageSpacing = GetAverageSlotSpacing(slots)
+        return math.max(averageSpacing, (GetSlotCenterY(slots[#slots]) - GetSlotCenterY(slots[1])) + averageSpacing)
+    end
+
     -- ==========================================
     -- [大奖展示引擎]
     -- ==========================================
     local function SetupLowestProbShowcase()
-        if not bgFrame then return end
+        if not currentPage then return end
         
         local targetPool = RollConfig.Pools[currentTab] or RollConfig.Pools[1]
         local sortedPool = {}
@@ -294,26 +470,13 @@ function RollController.Init()
         end)
         
         for i = 1, 3 do
-            local showContainer = bgFrame:FindFirstChild("Show_" .. i)
+            local showContainer = currentPage:FindFirstChild("Show_" .. i)
             local prizeData = sortedPool[i]
-            
-            if showContainer then
-                for _, child in pairs(showContainer:GetChildren()) do
-                    if child:IsA("GuiObject") then child:Destroy() end
-                end
-                
-                if prizeData then
-                    local slot = rollItemTemplate:Clone()
-                    slot.Size = UDim2.new(1, 0, 1, 0)
-                    slot.Position = UDim2.new(0.5, 0, 0.5, 0)
-                    slot.AnchorPoint = Vector2.new(0.5, 0.5)
-                    
+
+            if showContainer and prizeData then
+                local slot = GetExistingSlot(showContainer)
+                if slot then
                     ConfigureSlot(slot, prizeData.Id)
-                    
-                    local uiScale = slot:FindFirstChildOfClass("UIScale")
-                    if uiScale then uiScale:Destroy() end
-                    
-                    slot.Parent = showContainer
                 end
             end
         end
@@ -331,7 +494,7 @@ function RollController.Init()
 
         for _, slot in pairs(scrollList:GetChildren()) do
             if slot:IsA("GuiObject") then
-                local slotCenterY = listOffsetY + slot.Position.Y.Offset
+                local slotCenterY = listOffsetY + GetSlotCenterY(slot)
                 local dist = math.abs(slotCenterY - maskCenterY)
                 local ratio = math.clamp(dist / maxDist, 0, 1)
 
@@ -375,10 +538,10 @@ function RollController.Init()
         
         -- 使用渲染步进保证 60�?144�?极致顺滑
         showcaseSpinConnection = RunService.RenderStepped:Connect(function(dt)
-            if not bgFrame then return end
+            if not currentPage then return end
             -- 遍历那三个展示框 (Show_1, Show_2, Show_3)
             for i = 1, 3 do
-                local showContainer = bgFrame:FindFirstChild("Show_" .. i)
+                local showContainer = currentPage:FindFirstChild("Show_" .. i)
                 if showContainer then
                     for _, slot in pairs(showContainer:GetChildren()) do
                         if slot:IsA("GuiObject") then
@@ -410,32 +573,24 @@ function RollController.Init()
     -- ==========================================
     local function StartIdleScroll()
         if idleConnection then idleConnection:Disconnect() end
-        
-        for _, child in pairs(scrollList:GetChildren()) do
-            if child:IsA("GuiObject") then child:Destroy() end
-        end
 
         local pool = RollConfig.Pools[currentTab] or RollConfig.Pools[1]
         local poolCount = #pool
-        local indexCount = 1
+        local slots = GetScrollSlots()
 
-        for set = 1, 2 do
-            for i = 1, poolCount do
-                local slot = rollItemTemplate:Clone()
-                local itemId = pool[i].Id 
-                
-                slot.AnchorPoint = Vector2.new(0.5, 0.5) 
-                local exactCenterY = (indexCount - 1) * (ITEM_HEIGHT + PADDING) + (ITEM_HEIGHT / 2)
-                slot.Position = UDim2.new(0.5, 0, 0, exactCenterY)
-                
-                indexCount += 1
-                
-                ConfigureSlot(slot, itemId)
-                slot.Parent = scrollList
+        if #slots <= 0 then
+            warn("RollController: current page ScrollList has no fixed Slot. It should be initialized from RollItemTemplate once during RollController.Init().")
+            return
+        end
+
+        for index, slot in ipairs(slots) do
+            if poolCount > 0 then
+                local poolIndex = ((index - 1) % poolCount) + 1
+                ConfigureSlot(slot, pool[poolIndex].Id)
             end
         end
 
-        local setHeight = poolCount * (ITEM_HEIGHT + PADDING)
+        local setHeight = GetIdleLoopHeight(slots, poolCount)
         currentIdleY = 0
 
         idleConnection = RunService.RenderStepped:Connect(function(dt)
@@ -484,37 +639,33 @@ function RollController.Init()
         local finalPrize = result
         -- 🌟 ========================================================
         
-        local ADD_ITEMS = 25 
-        local EXTRA_PADDING = 10 
-        
-        local existingCount = 0
-        for _, child in pairs(scrollList:GetChildren()) do
-            if child:IsA("GuiObject") then existingCount += 1 end
+        local ADD_ITEMS = 20
+        local EXTRA_PADDING = 5
+        local MIN_RECOMMENDED_SLOT_COUNT = ADD_ITEMS + EXTRA_PADDING + 1
+        local slots = GetScrollSlots()
+        local slotCount = #slots
+
+        if slotCount <= 0 then
+            UIEffectUtil.ShowTip("Roll slots are not configured")
+            isRolling = false
+            StartIdleScroll()
+            return
         end
 
-        local WIN_INDEX = existingCount + ADD_ITEMS
-        local TOTAL_END = WIN_INDEX + EXTRA_PADDING 
+        if slotCount < MIN_RECOMMENDED_SLOT_COUNT then
+            warn("RollController: current page ScrollList has " .. slotCount .. " fixed Slots; recommend at least " .. MIN_RECOMMENDED_SLOT_COUNT .. " Slots for a longer draw animation.")
+        end
 
-        for i = existingCount + 1, TOTAL_END do
-            local slot = rollItemTemplate:Clone()
-            local itemId = ""
-            
-            slot.AnchorPoint = Vector2.new(0.5, 0.5)
-            local exactCenterY = (i - 1) * (ITEM_HEIGHT + PADDING) + (ITEM_HEIGHT / 2)
-            slot.Position = UDim2.new(0.5, 0, 0, exactCenterY)
-            
-            if i == WIN_INDEX then
-                itemId = finalPrize
-            else
-                itemId = RollConfig.GetRandomPrize(currentTab)
-            end
-            
+        local WIN_INDEX = math.clamp(ADD_ITEMS, 1, math.max(1, slotCount - EXTRA_PADDING))
+
+        for i, slot in ipairs(slots) do
+            local itemId = i == WIN_INDEX and finalPrize or RollConfig.GetRandomPrize(currentTab)
             ConfigureSlot(slot, itemId)
-            slot.Parent = scrollList
         end
 
         local maskCenterY = maskFrame.AbsoluteSize.Y / 2
-        local winItemCenterY = (WIN_INDEX - 1) * (ITEM_HEIGHT + PADDING) + (ITEM_HEIGHT / 2)
+        local winSlot = slots[WIN_INDEX]
+        local winItemCenterY = GetSlotCenterY(winSlot)
         local targetY = maskCenterY - winItemCenterY
         
         targetY = targetY + math.random(-25, 25) 
@@ -641,6 +792,7 @@ function RollController.Init()
         if currentTab == tabIndex then return end 
         
         currentTab = tabIndex
+        RefreshCurrentPageRefs()
         print("切换抽奖池至：Tab_" .. currentTab)
         
         -- 🌟【关键修改】在这里加入主动调用，切换的一瞬间立刻换字�?延迟�?
@@ -650,12 +802,7 @@ function RollController.Init()
         AnimateTab(tab2Btn, currentTab == 2, tab2OriginalPos)
         
         -- 刷新文字 (Pull 数量)
-        local drawText = drawBtn:FindFirstChildWhichIsA("TextLabel")
-        if drawText then
-            drawText.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
-        else
-            drawBtn.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
-        end
+        RefreshDrawButtonText()
         RefreshCashUI()
         
         SetupLowestProbShowcase()
@@ -681,16 +828,12 @@ function RollController.Init()
         
         local targetTab = 1
         currentTab = targetTab
+        RefreshCurrentPageRefs()
         
         -- 🌟【关键修改】页面被玩家点开时，根据判定好的 targetTab 立刻刷一次文�?
         UpdateGetTimeText()
         
-        local drawText = drawBtn:FindFirstChildWhichIsA("TextLabel")
-        if drawText then
-            drawText.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
-        else
-            drawBtn.Text = "Pull (" .. (currentTickets[currentTab] or 0) .. ")"
-        end
+        RefreshDrawButtonText()
         RefreshCashUI()
         
         AnimateTab(tab1Btn, currentTab == 1, tab1OriginalPos)
@@ -715,9 +858,14 @@ function RollController.Init()
         end
     end)
 
-    drawBtn.MouseButton1Click:Connect(function()
-        StartDraw()
-    end)
+    for _, page in ipairs(pages) do
+        local pageDrawBtn = page and page:FindFirstChild("DrawBtn")
+        if pageDrawBtn and pageDrawBtn:IsA("GuiButton") then
+            pageDrawBtn.MouseButton1Click:Connect(function()
+                StartDraw()
+            end)
+        end
+    end
     print("客户端：RollController (真实扣费红点校验系统) 加载完毕�?)")
 end
 
