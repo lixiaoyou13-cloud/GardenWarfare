@@ -14,6 +14,8 @@ local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
 local sessionData = {}
 local X2_SUN_GAME_PASS_ID = 1856661235
 local x2SunOwnershipCache = {}
+local x2SunOwnershipCacheTime = {}
+local X2_SUN_CACHE_TTL = 60
 local ROLL_TAB1_CASH_COST = 200000
 local onlineRollTimerStarted = false
 
@@ -158,6 +160,8 @@ local function onPlayerRemoving(player)
     local dataToSave = sessionData[player.UserId]
     if dataToSave then
         sessionData[player.UserId] = nil 
+        x2SunOwnershipCache[player.UserId] = nil
+        x2SunOwnershipCacheTime[player.UserId] = nil
         if (dataToSave.TutorialStep or 0) < 8 then -- 🟢 改成 8
             return
         end
@@ -173,6 +177,17 @@ function PlayerDataManager.Init()
         task.spawn(function() onPlayerAdded(player) end)
     end
     Players.PlayerRemoving:Connect(onPlayerRemoving)
+    MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, wasPurchased)
+        if passId == X2_SUN_GAME_PASS_ID then
+            if wasPurchased then
+                x2SunOwnershipCache[player.UserId] = true
+                x2SunOwnershipCacheTime[player.UserId] = os.clock()
+            else
+                x2SunOwnershipCache[player.UserId] = nil
+                x2SunOwnershipCacheTime[player.UserId] = nil
+            end
+        end
+    end)
 
     game:BindToClose(function()
         for _, player in ipairs(Players:GetPlayers()) do
@@ -539,19 +554,21 @@ end
 
 function PlayerDataManager.IsX2SunActive(player)
     if not player then return false end
-    if x2SunOwnershipCache[player.UserId] == true then
-        return true
+    local userId = player.UserId
+    local cachedValue = x2SunOwnershipCache[userId]
+    local cachedAt = x2SunOwnershipCacheTime[userId]
+    if cachedValue ~= nil and (cachedValue == true or (cachedAt and os.clock() - cachedAt < X2_SUN_CACHE_TTL)) then
+        return cachedValue
     end
 
     local ownsPass = false
     local success, result = pcall(function()
-        return MarketplaceService:UserOwnsGamePassAsync(player.UserId, X2_SUN_GAME_PASS_ID)
+        return MarketplaceService:UserOwnsGamePassAsync(userId, X2_SUN_GAME_PASS_ID)
     end)
     if success then
         ownsPass = result == true
-        if ownsPass then
-            x2SunOwnershipCache[player.UserId] = true
-        end
+        x2SunOwnershipCache[userId] = ownsPass
+        x2SunOwnershipCacheTime[userId] = os.clock()
     else
         warn("[PlayerDataManager] Failed to check X2Sun game pass ownership for " .. player.Name .. ": " .. tostring(result))
     end
