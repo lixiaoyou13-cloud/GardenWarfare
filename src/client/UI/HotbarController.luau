@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService") 
+local Workspace = game:GetService("Workspace")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local BaseItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("BaseItemConfig"))
@@ -24,6 +25,44 @@ function HotbarController.Init()
     
     local currentEquippedId = nil
     local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+    local responsiveScale = hotbarFrame:FindFirstChild("ResponsiveScale")
+    if not responsiveScale or not responsiveScale:IsA("UIScale") then
+        responsiveScale = Instance.new("UIScale")
+        responsiveScale.Name = "ResponsiveScale"
+        responsiveScale.Parent = hotbarFrame
+    end
+
+    local function updateResponsiveScale()
+        local camera = Workspace.CurrentCamera
+        if not camera then return end
+
+        local viewportWidth = camera.ViewportSize.X
+        local scale = 1
+        if UserInputService.TouchEnabled then
+            scale = math.clamp(viewportWidth / 1280, 0.65, 0.8)
+        end
+
+        responsiveScale.Scale = scale
+    end
+
+    local viewportConnection = nil
+    local function bindCurrentCamera()
+        if viewportConnection then
+            viewportConnection:Disconnect()
+            viewportConnection = nil
+        end
+
+        local camera = Workspace.CurrentCamera
+        if camera then
+            viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateResponsiveScale)
+        end
+
+        updateResponsiveScale()
+    end
+
+    bindCurrentCamera()
+    Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(bindCurrentCamera)
 
     if not slotTemplate:FindFirstChild("UIScale") then Instance.new("UIScale", slotTemplate) end
 

@@ -72,23 +72,25 @@ function ToolController.Init()
     
     local shovelRE = ReplicatedStorage:WaitForChild("ShovelActionRE")
     local giftItemRE = ReplicatedStorage:WaitForChild("GiftItemRE")
-    local weaponAttackRE = ReplicatedStorage:WaitForChild("WeaponAttackRE", 5)
+    local weaponAttackRE = ReplicatedStorage:WaitForChild("WeaponAttackRE", 10)
     
     -- 🌟 注册交换植物的远程事件
-    local swapRE = ReplicatedStorage:WaitForChild("SwapCombatPlantRE", 5) 
-    if not swapRE then
-        -- 本地伪造一个防止报错，等待服务端真正创建
-        swapRE = Instance.new("RemoteEvent")
-        swapRE.Name = "SwapCombatPlantRE"
-        swapRE.Parent = ReplicatedStorage
-    end
+    local swapRE = ReplicatedStorage:WaitForChild("SwapCombatPlantRE", 10)
 
    --=====================================
     -- [🌟 樱桃炸弹：爆炸范围指示球设置]
     -- ==========================================
-   local throwBombRE = ReplicatedStorage:FindFirstChild("ThrowBombRE") or Instance.new("RemoteEvent")
-    throwBombRE.Name = "ThrowBombRE"
-    throwBombRE.Parent = ReplicatedStorage
+   local throwBombRE = ReplicatedStorage:WaitForChild("ThrowBombRE", 10)
+
+    if not weaponAttackRE then
+        warn("[ToolController] WeaponAttackRE 未由服务端创建，武器攻击功能将暂时不可用")
+    end
+    if not swapRE then
+        warn("[ToolController] SwapCombatPlantRE 未由服务端创建，交换植物功能将暂时不可用")
+    end
+    if not throwBombRE then
+        warn("[ToolController] ThrowBombRE 未由服务端创建，樱桃炸弹功能将暂时不可用")
+    end
 
     -- 恢复为红色的警示球，加深颜色
     local rangeSphere = Instance.new("Part")
@@ -207,7 +209,11 @@ function ToolController.Init()
                                 local shown = PopupUtil.ShowConfirm(detailText, function()
                                     -- 传入 true 代表这是战斗中的操作
                                     if actionName == "Swap Plant" then
-                                        swapRE:FireServer(plant, equippedItem, true)
+                                        if swapRE then
+                                            swapRE:FireServer(plant, equippedItem, true)
+                                        else
+                                            UIEffectUtil.ShowTip("Swap service is not ready")
+                                        end
                                     else
                                         shovelRE:FireServer(plant, true)
                                     end
@@ -227,7 +233,11 @@ function ToolController.Init()
 
                     -- [🌟 根据动作发送给不同的服务端接口 (非战斗状态走这里)]
                     if actionName == "Swap Plant" then
-                        swapRE:FireServer(plant, equippedItem, false)
+                        if swapRE then
+                            swapRE:FireServer(plant, equippedItem, false)
+                        else
+                            UIEffectUtil.ShowTip("Swap service is not ready")
+                        end
                     else
                         shovelRE:FireServer(plant, false)
                     end
@@ -470,7 +480,11 @@ function ToolController.Init()
                     isThrowingBomb = true
                     
                     -- 发送投掷请求给服务端
-                    throwBombRE:FireServer(equippedItem, rangeSphere.Position)
+                    if throwBombRE then
+                        throwBombRE:FireServer(equippedItem, rangeSphere.Position)
+                    else
+                        UIEffectUtil.ShowTip("Bomb service is not ready")
+                    end
                     
                     -- 🌟 赋予 0.5 秒的投掷冷却，冷却结束后可以无缝扔出下一个！
                     task.delay(0.5, function()

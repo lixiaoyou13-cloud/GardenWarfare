@@ -25,9 +25,7 @@ local localPlayer = game:GetService("Players").LocalPlayer
 local initialCameraMaxZoomDistance = localPlayer.CameraMaxZoomDistance
 localPlayer.CameraMaxZoomDistance = initialCameraMaxZoomDistance
 
-local function restoreInitialCameraMaxZoomDistance()
-    localPlayer.CameraMaxZoomDistance = initialCameraMaxZoomDistance
-end
+
 
 local function pullCameraUp()
     -- 必须稍微等待一下，确保 Roblox 的默认相机系统已经绑定到了玩家角色上
@@ -37,10 +35,8 @@ local function pullCameraUp()
     localPlayer.CameraMinZoomDistance = 45
     localPlayer.CameraMaxZoomDistance = 45
     
-    -- 给相机 0.1 秒的反应时间把镜头推出去，然后再解除最小距离限制；最大距离恢复到玩家进入游戏时的初始值
     task.wait(0.1)
     localPlayer.CameraMinZoomDistance = 0.5
-    restoreInitialCameraMaxZoomDistance()
 end
 
 -- 监听玩家角色生成（每次进入游戏或死亡重生时都会触发）
@@ -531,11 +527,6 @@ local UIEffectUtil = require(script.Utils.UIEffectUtil) -- 请确保路径匹配
 local showTipRE = ReplicatedStorage:WaitForChild("ShowTipRE")
 
 -- 监听服务端的提示请求，并调用封装好的 ShowTip
-showTipRE.OnClientEvent:Connect(function(message)
-    UIEffectUtil.ShowTip(message)
-end)
-
-
 showTipRE.OnClientEvent:Connect(function(message)
     UIEffectUtil.ShowTip(message)
 end)

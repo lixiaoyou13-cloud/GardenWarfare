@@ -82,7 +82,7 @@ function RollController.Init()
     local currentTickets = {0, 0} -- 本地缓存当前的抽奖次�?
     local hasSyncedRollTickets = false
 
-    local TAB_SELECTED_SCALE = 1.3 
+    local TAB_SELECTED_SCALE = 1
     local TAB_SELECTED_OFFSET_X = 35 
     local TAB_TWEEN_INFO = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     local scrollSlotsByPage = {}
