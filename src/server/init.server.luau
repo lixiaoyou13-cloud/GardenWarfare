@@ -128,6 +128,8 @@ local ToolService = require(script.Services.ToolService)
 ToolService.Init()
 local LuckyDropService = require(script.Services.LuckyDropService)
 LuckyDropService.Init()
+local ChatGiftService = require(script.Services.ChatGiftService)
+ChatGiftService.Init()
 -- 找到你原来 require 其他 Service 的地方，加上这一句：
 local RankingService = require(script.Services.RankingService)
 

@@ -11,6 +11,106 @@ local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 
 local playerPlots = {}
 local MAX_LEVEL_PART_NAME = "PlayerMaxLevelPart"
+local PLOTS_FOLDER_WAIT_TIME = 10
+local FALLBACK_KICK_DELAY = 3
+local FALLBACK_SPAWN_NAME = "PlotAssignmentFallbackSpawn"
+
+local function IsPlotInstance(plot)
+    return plot and string.match(plot.Name, "Plot") ~= nil
+end
+
+local function GetPlotsFolder()
+    local plotsFolder = Workspace:FindFirstChild("Plots")
+    if plotsFolder then
+        return plotsFolder
+    end
+
+    return Workspace:WaitForChild("Plots", PLOTS_FOLDER_WAIT_TIME)
+end
+
+local function GetPlotSpawnPart(plot)
+    local spawnPart = plot and (plot:FindFirstChild("SpawnPoint", true) or plot:FindFirstChild("SpawnLocation", true))
+    if spawnPart and spawnPart:IsA("BasePart") then
+        return spawnPart
+    end
+
+    return nil
+end
+
+local function GetFallbackSpawnPart()
+    local fallback = Workspace:FindFirstChild(FALLBACK_SPAWN_NAME)
+    if fallback and fallback:IsA("BasePart") then
+        return fallback
+    end
+
+    fallback = Instance.new("Part")
+    fallback.Name = FALLBACK_SPAWN_NAME
+    fallback.Anchored = true
+    fallback.CanCollide = true
+    fallback.Transparency = 0.35
+    fallback.Color = Color3.fromRGB(255, 220, 80)
+    fallback.Size = Vector3.new(36, 4, 36)
+    fallback.Position = Vector3.new(0, 30, 0)
+    fallback.Parent = Workspace
+
+    return fallback
+end
+
+local function MoveCharacterToCFrame(character, targetCFrame)
+    local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5))
+    if not rootPart then
+        return
+    end
+
+    rootPart.AssemblyLinearVelocity = Vector3.zero
+    rootPart.AssemblyAngularVelocity = Vector3.zero
+    character:PivotTo(targetCFrame)
+end
+
+local function ResetPlotRuntimeState(plot)
+    plot:SetAttribute("OwnerId", nil)
+    plot:SetAttribute("IsLevelActive", false)
+    plot:SetAttribute("IsGameOver", false)
+    plot:SetAttribute("CurrentLevel", 1)
+    plot:SetAttribute("ActiveZombies", 0)
+    plot:SetAttribute("ZombiesDefeated", 0)
+    plot:SetAttribute("TotalZombies", 0)
+    plot:SetAttribute("GameSpeed", 1)
+end
+
+local function HandlePlotAssignFailure(player, reason)
+    warn("[PlotService] Failed to assign plot for " .. player.Name .. ": " .. tostring(reason))
+
+    local fallbackPart = GetFallbackSpawnPart()
+    local fallbackCFrame = fallbackPart.CFrame * CFrame.new(0, (fallbackPart.Size.Y / 2) + 4, 0)
+
+    local function teleportToFallback(character)
+        task.wait(0.1)
+        MoveCharacterToCFrame(character, fallbackCFrame)
+    end
+
+    if player.Character then
+        teleportToFallback(player.Character)
+    end
+
+    local connection
+    connection = player.CharacterAdded:Connect(teleportToFallback)
+
+    local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+    if showNotifRE then
+        showNotifRE:FireClient(player, "Notice", "Server is full. Please rejoin another server.")
+    end
+
+    task.delay(FALLBACK_KICK_DELAY, function()
+        if connection then
+            connection:Disconnect()
+        end
+
+        if player and player.Parent then
+            player:Kick("Server is full or the map failed to load. Please rejoin another server.")
+        end
+    end)
+end
 
 local function ClearMaxLevelPart(plot)
     for _, obj in ipairs(plot:GetDescendants()) do
@@ -124,19 +224,28 @@ end
 function PlotService.AssignPlot(player)
     if playerPlots[player.UserId] then return playerPlots[player.UserId] end
 
-    local data = PlayerDataManager.WaitForPlayerData(player)
+    local data = PlayerDataManager.GetPlayerData(player)
 
-    local plotsFolder = Workspace:WaitForChild("Plots")
+    local plotsFolder = GetPlotsFolder()
+    if not plotsFolder then
+        HandlePlotAssignFailure(player, "Workspace.Plots is missing")
+        return nil
+    end
     local chosenPlot = nil
 
     -- 寻找空闲地块
     for _, plot in ipairs(plotsFolder:GetChildren()) do
-        if not plot:GetAttribute("OwnerId") and string.match(plot.Name, "Plot") then
+        if IsPlotInstance(plot) and not plot:GetAttribute("OwnerId") then
             plot:SetAttribute("OwnerId", player.UserId)
             chosenPlot = plot
             playerPlots[player.UserId] = plot
             break
         end
+    end
+
+    if not chosenPlot then
+        HandlePlotAssignFailure(player, "No free plot")
+        return nil
     end
 
     if chosenPlot then
@@ -154,6 +263,14 @@ function PlotService.AssignPlot(player)
 
         -- 初始化并刷新这块基地里的泥土状态
         PlotService.UpdateSoilVisuals(player, chosenPlot)
+
+        task.spawn(function()
+            local loadedData = PlayerDataManager.WaitForPlayerData(player)
+            if playerPlots[player.UserId] == chosenPlot then
+                SpawnMaxLevelPart(chosenPlot, loadedData)
+                PlotService.UpdateSoilVisuals(player, chosenPlot)
+            end
+        end)
 
         -- ==========================================
         -- [🌟 新增：生成玩家领地身份牌 (所有人可见)]
@@ -182,7 +299,7 @@ function PlotService.AssignPlot(player)
 
             -- 如果没有找到 NameTag，兜底使用原本的出生点
             if not targetPart then
-                targetPart = chosenPlot:FindFirstChild("SpawnPoint") or chosenPlot:FindFirstChild("SpawnLocation") or chosenPlot:FindFirstChildWhichIsA("BasePart", true)
+                targetPart = GetPlotSpawnPart(chosenPlot) or chosenPlot:FindFirstChildWhichIsA("BasePart", true)
             end
             
             if targetPart then
@@ -335,12 +452,12 @@ function PlotService.AssignPlot(player)
             local rootPart = character:WaitForChild("HumanoidRootPart", 5)
             if not rootPart then return end
 
-            local spawnPart = chosenPlot:FindFirstChild("SpawnPoint") or chosenPlot:FindFirstChild("SpawnLocation")
+            local spawnPart = GetPlotSpawnPart(chosenPlot)
             
-            if spawnPart and spawnPart:IsA("BasePart") then
-                character:PivotTo(spawnPart.CFrame * CFrame.new(0, 4, 0))
+            if spawnPart then
+                MoveCharacterToCFrame(character, spawnPart.CFrame * CFrame.new(0, 4, 0))
             else
-                character:PivotTo(chosenPlot:GetPivot() * CFrame.new(0, 5, 20))
+                MoveCharacterToCFrame(character, chosenPlot:GetPivot() * CFrame.new(0, 5, 20))
             end
         end
 
@@ -356,8 +473,23 @@ function PlotService.GetPlayerPlot(player)
 end
 
 function PlotService.Init()
+    local plotsFolder = GetPlotsFolder()
+    if plotsFolder then
+        for _, plot in ipairs(plotsFolder:GetChildren()) do
+            if IsPlotInstance(plot) then
+                ResetPlotRuntimeState(plot)
+                ClearMaxLevelPart(plot)
+                ResetPlotForNextOwner(plot)
+            end
+        end
+    else
+        warn("[PlotService] Workspace.Plots is missing. Players will be sent to fallback and kicked.")
+    end
+
     Players.PlayerAdded:Connect(function(player)
-        PlotService.AssignPlot(player)
+        task.spawn(function()
+            PlotService.AssignPlot(player)
+        end)
     end)
     Players.PlayerRemoving:Connect(function(player)
         PlotService.ReleasePlot(player)
@@ -583,7 +715,7 @@ function PlotService.ReleasePlot(player)
             end
         end
         -- 2.1 销毁悬浮牌 (OwnerBillboard)
-        local spawnPart = plot:FindFirstChild("SpawnPoint") or plot:FindFirstChild("SpawnLocation") or plot:FindFirstChildWhichIsA("BasePart", true)
+        local spawnPart = GetPlotSpawnPart(plot) or plot:FindFirstChildWhichIsA("BasePart", true)
         if spawnPart then
             local billboard = spawnPart:FindFirstChild("OwnerBillboard")
             if billboard then billboard:Destroy() end
@@ -636,6 +768,7 @@ function PlotService.ReleasePlot(player)
         plot:SetAttribute("CurrentLevel", 1)
         plot:SetAttribute("ActiveZombies", 0)
         plot:SetAttribute("ZombiesDefeated", 0)
+        plot:SetAttribute("TotalZombies", 0)
         plot:SetAttribute("GameSpeed", 1)
         
         -- 6. 从缓存中移除

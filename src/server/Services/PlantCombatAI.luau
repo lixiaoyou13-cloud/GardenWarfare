@@ -6,8 +6,23 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
--- 👇 [🌟 增加这一行，把特效工具箱拿过来]
-local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
+
+local plantAttackVisualRE = ReplicatedStorage:FindFirstChild("PlantAttackVisualRE")
+if not plantAttackVisualRE then
+    plantAttackVisualRE = Instance.new("RemoteEvent")
+    plantAttackVisualRE.Name = "PlantAttackVisualRE"
+    plantAttackVisualRE.Parent = ReplicatedStorage
+end
+
+local PROJECTILE_SPEED = 25
+local warnedProjectileIssues = {}
+
+local function warnProjectileOnce(projectileName, message)
+    local key = tostring(projectileName) .. ":" .. message
+    if warnedProjectileIssues[key] then return end
+    warnedProjectileIssues[key] = true
+    warn(("[PlantCombatAI] %s: %s"):format(tostring(projectileName), message))
+end
 
 local function GetSafeGameSpeed(plot)
     local speedMult = plot and tonumber(plot:GetAttribute("GameSpeed")) or 1
@@ -15,44 +30,6 @@ local function GetSafeGameSpeed(plot)
         return 1
     end
     return speedMult
-end
-
--- ==========================================
--- [🌟 新增：受击变红反馈逻辑]
--- ==========================================
-local function FlashZombieRed(zombieModel)
-    -- 如果僵尸已经处于变红状态，直接返回，不再记录颜色
-    if zombieModel:GetAttribute("IsFlashing") then return end
-    zombieModel:SetAttribute("IsFlashing", true)
-    
-    local originalColors = {}
-    
-    -- 记录并变红
-    for _, p in pairs(zombieModel:GetDescendants()) do
-        if p:IsA("BasePart") then
-            originalColors[p] = p.Color
-            p.Color = Color3.fromRGB(255, 80, 80) -- 明显的受击红
-        end
-    end
-    
-    -- 0.15秒后恢复原色
-    task.delay(0.15, function()
-        -- 核心防御：如果僵尸已被销毁，不再执行恢复逻辑
-        if not zombieModel or not zombieModel.Parent then return end
-        
-        -- 👇 [🌟 核心修复]：检查僵尸是否在此期间被炸弹炸成了焦黑状态
-        local isCharred = zombieModel:GetAttribute("IsCharred")
-        
-        for p, color in pairs(originalColors) do
-            if p and p.Parent then
-                -- 如果被炸黑了，强制保持焦黑色 (30,30,30)；否则正常恢复原色
-                p.Color = isCharred and Color3.fromRGB(30, 30, 30) or color
-            end
-        end
-        
-        -- 解除状态锁
-        zombieModel:SetAttribute("IsFlashing", false)
-    end)
 end
 
 -- ==========================================
@@ -97,87 +74,6 @@ function PlantCombatAI.ShowDamageText(zombieModel, damage)
 end
 
 -- ==========================================
--- [🌟 极简特效函数：直接复制，原汁原味]
--- ==========================================
-local function PlayHitEffect(hitPos, itemDetail)
-    local effectPart = Instance.new("Part")
-    effectPart.Size = Vector3.new(0.1, 0.1, 0.1)
-    effectPart.Transparency = 1
-    effectPart.Anchored = true
-    effectPart.CanCollide = false
-    effectPart.Position = hitPos
-    effectPart.Parent = Workspace
-
-    local hitEffectName = itemDetail and itemDetail.HitEffectTexture
-    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
-    local hitEffectPrefab = nil
-
-    if typeof(hitEffectName) == "string" and hitEffectName ~= "" and hitFolder then
-        local template = hitFolder:FindFirstChild(hitEffectName)
-        if template and template:IsA("BasePart") then
-            hitEffectPrefab = template
-        end
-    end
-
-    if hitEffectPrefab then
-        local clone = hitEffectPrefab:Clone()
-        clone.Anchored = true
-        clone.CanCollide = false
-        clone.CFrame = CFrame.new(hitPos)
-        clone.Parent = Workspace
-
-        -- 等一瞬间让客户端先渲染出克隆体，避免 Roblox 吞掉瞬发 Emit
-        task.wait(0.05)
-
-        for _, child in ipairs(clone:GetDescendants()) do
-            if child:IsA("ParticleEmitter") then
-                local emitCount = child:GetAttribute("EmitCount")
-                if not emitCount then
-                    local countValueNode = child:FindFirstChild("EmitCount")
-                    if countValueNode and (countValueNode:IsA("IntValue") or countValueNode:IsA("NumberValue")) then
-                        emitCount = countValueNode.Value
-                    end
-                end
-
-                emitCount = tonumber(emitCount)
-                if not emitCount or emitCount <= 0 then
-                    emitCount = 15
-                end
-
-                child.Enabled = true
-                child:Emit(emitCount)
-                task.delay(0.15, function()
-                    if child and child.Parent then
-                        child.Enabled = false
-                    end
-                end)
-            elseif child:IsA("Light") then
-                child.Enabled = true
-                task.delay(0.15, function()
-                    if child and child.Parent then
-                        child.Enabled = false
-                    end
-                end)
-            end
-        end
-
-        Debris:AddItem(clone, 1.5)
-    else
-        local attachment = Instance.new("Attachment", effectPart)
-        local particles = Instance.new("ParticleEmitter", attachment)
-        particles.Texture = (itemDetail and itemDetail.HitEffectTexture) or "rbxassetid://243098098"
-        particles.Color = ColorSequence.new((itemDetail and itemDetail.HitEffectColor) or Color3.fromRGB(255, 215, 0))
-        particles.Size = NumberSequence.new(1, 0)
-        particles.Rate = 0
-        particles.Speed = NumberRange.new(5, 10)
-        particles.Lifetime = NumberRange.new(0.1, 0.3)
-        particles:Emit(15)
-    end
-    
-    Debris:AddItem(effectPart, 1.5)
-end
-
--- ==========================================
 -- [2. 子弹开火与命中逻辑]
 -- ==========================================
 local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, attackDamage, plot)
@@ -186,13 +82,14 @@ local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, a
     if not rootPart or not targetRoot then return end
 
     local projName = itemDetail.ProjectileName
+    if type(projName) ~= "string" or projName == "" then return end
+
     local ammoFolder = ReplicatedStorage:FindFirstChild("Ammo")
     local projTemplate = ammoFolder and ammoFolder:FindFirstChild(projName)
-    if not projTemplate then return end
-
-    local projectile = projTemplate:Clone()
-    projectile.CanCollide = false 
-    projectile.Anchored = true
+    if not projTemplate then
+        warnProjectileOnce(projName, "ReplicatedStorage.Ammo template not found on server")
+        return
+    end
 
     local fireCFrame = rootPart.CFrame * CFrame.new(0, 1.5, -1.5) 
     local posNode = plant:FindFirstChild("pos", true) or plant:FindFirstChild("Pos", true)
@@ -200,84 +97,47 @@ local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, a
         if posNode:IsA("Attachment") then fireCFrame = posNode.WorldCFrame
         elseif posNode:IsA("BasePart") then fireCFrame = posNode.CFrame end
     end
-    
-    projectile.CFrame = fireCFrame
-    projectile.Parent = Workspace
-    Debris:AddItem(projectile, 10) 
 
-    task.spawn(function()
-        local baseSpeed = 25 
-        local hasHit = false
-        local startPos = projectile.Position
-        local initialTargetPos = targetRoot.Position + Vector3.new(0, 1, 0)
-        local initialDist = (initialTargetPos - startPos).Magnitude
-        local flightTime = initialDist / baseSpeed
-        local elapsedTime = 0
-        local arcHeight = itemDetail.ArcHeight or 0
-        
-        while projectile and projectile.Parent do
-            if not targetZombieModel.Parent or targetHum.Health <= 0 then
-                projectile:Destroy()
-                break
-            end
+    local speedMult = GetSafeGameSpeed(plot)
+    local initialTargetPos = targetRoot.Position + Vector3.new(0, 1, 0)
+    local initialDist = (initialTargetPos - fireCFrame.Position).Magnitude
+    local flightTime = math.max(0.05, initialDist / (PROJECTILE_SPEED * speedMult))
+    local arcHeight = itemDetail.ArcHeight or 0
 
-            local currentSpeedMult = plot:GetAttribute("GameSpeed") or 1
-            local dtLoop = task.wait() 
-            local targetPos = targetRoot.Position + Vector3.new(0, 1, 0)
-            
-            if arcHeight > 0 then
-                elapsedTime += dtLoop * currentSpeedMult
-                local t = math.clamp(elapsedTime / flightTime, 0, 1)
-                local p0 = startPos
-                local p2 = targetPos
-                local p1 = p0:Lerp(p2, 0.5) + Vector3.new(0, arcHeight, 0)
-                local currentPosUpdate = (1-t)^2 * p0 + 2*(1-t)*t * p1 + t^2 * p2
-                
-                if t < 1 then
-                    local nextT = math.clamp(t + 0.05, 0, 1)
-                    local nextPos = (1-nextT)^2 * p0 + 2*(1-nextT)*nextT * p1 + nextT^2 * p2
-                    if (nextPos - currentPosUpdate).Magnitude > 0.001 then
-                        projectile.CFrame = CFrame.lookAt(currentPosUpdate, nextPos)
-                    else
-                        projectile.Position = currentPosUpdate
-                    end
-                else
-                    hasHit = true
-                    break
-                end
-            else
-                local currentPosUpdate = projectile.Position
-                local direction = (targetPos - currentPosUpdate)
-                local distanceToTarget = direction.Magnitude
-                local moveStep = baseSpeed * currentSpeedMult * dtLoop
-                
-                if distanceToTarget <= moveStep then
-                    hasHit = true; break
-                else
-                    projectile.CFrame = CFrame.lookAt(currentPosUpdate + direction.Unit * moveStep, targetPos)
-                end
-            end
-        end
-        
-        if projectile and projectile.Parent then projectile:Destroy() end
-        
-        -- [子弹命中处理]
-        if hasHit and targetHum and targetHum.Health > 0 then
-            targetHum.Health = targetHum.Health - attackDamage
-            
-            -- [🌟 修复：呼叫变红反馈和伤害数字]
-            FlashZombieRed(targetZombieModel)
-            PlantCombatAI.ShowDamageText(targetZombieModel, attackDamage)
-            
-            local zombieChestPos = targetRoot.Position + Vector3.new(0, 1, 0) 
-            local toPlantDir = (rootPart.Position - targetRoot.Position) 
-            local flatDir = Vector3.new(toPlantDir.X, 0, toPlantDir.Z)
-            
-            if flatDir.Magnitude > 0.001 then flatDir = flatDir.Unit else flatDir = Vector3.new(1, 0, 0) end
-            local hitPos = zombieChestPos + flatDir * 1.2
-            
-            PlayHitEffect(hitPos, itemDetail)
-        end
+    plantAttackVisualRE:FireAllClients(
+        "Projectile",
+        projName,
+        fireCFrame,
+        initialTargetPos,
+        targetZombieModel,
+        arcHeight,
+        speedMult
+    )
+
+    task.delay(flightTime, function()
+        if not plant.Parent or (plant:GetAttribute("Health") or 0) <= 0 or plant:GetAttribute("IsDead") then return end
+        if not targetZombieModel.Parent or not targetHum.Parent or targetHum.Health <= 0 then return end
+
+        targetRoot = targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart
+        if not targetRoot then return end
+
+        targetHum.Health = targetHum.Health - attackDamage
+
+        local zombieChestPos = targetRoot.Position + Vector3.new(0, 1, 0)
+        local currentRootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+        local toPlantDir = currentRootPart and (currentRootPart.Position - targetRoot.Position) or Vector3.new(1, 0, 0)
+        local flatDir = Vector3.new(toPlantDir.X, 0, toPlantDir.Z)
+        if flatDir.Magnitude > 0.001 then flatDir = flatDir.Unit else flatDir = Vector3.new(1, 0, 0) end
+        local hitPos = zombieChestPos + flatDir * 1.2
+
+        plantAttackVisualRE:FireAllClients(
+            "Hit",
+            targetZombieModel,
+            attackDamage,
+            hitPos,
+            itemDetail.HitEffectTexture,
+            itemDetail.HitEffectColor
+        )
     end)
 end
 
@@ -333,25 +193,6 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
         
         local animController = plant:FindFirstChildOfClass("AnimationController") or plant:FindFirstChildOfClass("Humanoid")
         local animator = animController and animController:FindFirstChildOfClass("Animator")
-        
-        local attackAnimTrack = nil
-        if itemDetail.AttackAnimation and itemDetail.AttackAnimation ~= "" and animator then
-            local anim = Instance.new("Animation")
-            anim.AnimationId = itemDetail.AttackAnimation
-            attackAnimTrack = animator:LoadAnimation(anim)
-            attackAnimTrack.Priority = Enum.AnimationPriority.Action
-            attackAnimTrack.Looped = false
-            anim:Destroy()
-
-            -- ==========================================
-            -- 👇 [🌟 新增：在这里监听攻击动画打好的关键帧！]
-            -- ==========================================
-            attackAnimTrack:GetMarkerReachedSignal("VFX"):Connect(function()
-             
-                EffectUtil.PlayAttackVFX(plant)
-            end)
-            -- ==========================================
-        end
 
         local idleAnimTrack = nil
         if itemDetail.IdleAnimId and itemDetail.IdleAnimId ~= "" and animator then
@@ -413,11 +254,8 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             end
 
             if targetZombieModel and targetHum then
-                if attackAnimTrack then
-                    if idleAnimTrack then idleAnimTrack:Stop(0.1) end
-                    attackAnimTrack:Stop()
-                    attackAnimTrack:Play(0.1)
-                    attackAnimTrack:AdjustSpeed(speedMult)
+                if itemDetail.AttackAnimation and itemDetail.AttackAnimation ~= "" then
+                    plantAttackVisualRE:FireAllClients("Attack", plant, itemDetail.AttackAnimation, speedMult)
                 end
 
                 local windUpTime = math.min(0.3, attackInterval * 0.2) / speedMult
@@ -434,11 +272,6 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                     idleAnimTrack:Play(0.1)
                 end
             else
-                -- 【🌟修复2】：如果没有僵尸，立刻停止可能残留的攻击动作
-                if attackAnimTrack and attackAnimTrack.IsPlaying then
-                    attackAnimTrack:Stop(0.1)
-                end
-
                 if idleAnimTrack and not idleAnimTrack.IsPlaying then
                     idleAnimTrack:Play(0.1)
                 end
@@ -446,10 +279,6 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             end
         end
 
-        if attackAnimTrack then
-            attackAnimTrack:Stop(0.1)
-            attackAnimTrack:Destroy()
-        end
         if idleAnimTrack then
             idleAnimTrack:Stop(0.1)
             idleAnimTrack:Destroy()

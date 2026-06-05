@@ -12,6 +12,7 @@ local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):Wait
 
 local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
 local sessionData = {}
+local dataSaveAllowed = {}
 local X2_SUN_GAME_PASS_ID = 1856661235
 local x2SunOwnershipCache = {}
 local x2SunOwnershipCacheTime = {}
@@ -60,6 +61,7 @@ local function GetDefaultData()
         
         NewbieGiftStartTime = 0,     
         NewbieGiftPurchased = false, 
+        ChatGiftClaimed_V1 = false,
         OnlineRollTimer = 300 
     }
 end
@@ -109,7 +111,8 @@ local function onPlayerAdded(player)
         local success, savedData = pcall(function() return PlayerDataStore:GetAsync(player.UserId) end)
         if not isLoaded then
             isLoaded = true
-            if success and savedData  then
+            if success then
+                if savedData then
                 savedData.Hotbar = {"Tool_Shovel", "System_Backpack", "Tool_WeaponBlock"}
                 if not savedData.PlantedPlants then savedData.PlantedPlants = {} end 
                 if not savedData.CombatPlants then savedData.CombatPlants = {} end 
@@ -118,6 +121,7 @@ local function onPlayerAdded(player)
                 if type(savedData.ClaimedAchieve) ~= "table" then savedData.ClaimedAchieve = {} end
                 if type(savedData.NewbieGiftStartTime) ~= "number" then savedData.NewbieGiftStartTime = 0 end
                 if type(savedData.NewbieGiftPurchased) ~= "boolean" then savedData.NewbieGiftPurchased = false end
+                if type(savedData.ChatGiftClaimed_V1) ~= "boolean" then savedData.ChatGiftClaimed_V1 = false end
                 if type(savedData.RollTickets) ~= "table" then savedData.RollTickets = {0, 0} end 
                 
                 -- 🌟 兼容老玩家数据
@@ -134,6 +138,7 @@ local function onPlayerAdded(player)
                 -- ====================================================
 
                 sessionData[player.UserId] = savedData
+                dataSaveAllowed[player.UserId] = true
                 print("✅ [数据系统] 玩家 " .. player.Name .. " 数据拉取成功！")
                 
                 if (savedData.TutorialStep or 0) == 0 then
@@ -141,8 +146,14 @@ local function onPlayerAdded(player)
                 end
             else
                 sessionData[player.UserId] = GetDefaultData()
+                dataSaveAllowed[player.UserId] = true
                 print("🆕 [数据系统] 玩家 " .. player.Name .. " 无存档，发放初始数据。")
                 AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 1, "Step_1_Enter_Game")
+            end
+            else
+                sessionData[player.UserId] = GetDefaultData()
+                dataSaveAllowed[player.UserId] = false
+                warn("[Data] Failed to load data for " .. player.Name .. "; using unsaveable fallback data.")
             end
         end
     end)
@@ -152,6 +163,7 @@ local function onPlayerAdded(player)
             isLoaded = true
             warn("⚠️ [数据系统] Roblox数据请求超时！已下发初始数据，保护游戏进程不崩溃！")
             sessionData[player.UserId] = GetDefaultData()
+            dataSaveAllowed[player.UserId] = false
         end
     end)
 end
@@ -162,6 +174,11 @@ local function onPlayerRemoving(player)
         sessionData[player.UserId] = nil 
         x2SunOwnershipCache[player.UserId] = nil
         x2SunOwnershipCacheTime[player.UserId] = nil
+        local canSave = dataSaveAllowed[player.UserId] == true
+        dataSaveAllowed[player.UserId] = nil
+        if not canSave then
+            return
+        end
         if (dataToSave.TutorialStep or 0) < 8 then -- 🟢 改成 8
             return
         end
@@ -193,7 +210,7 @@ function PlayerDataManager.Init()
         for _, player in ipairs(Players:GetPlayers()) do
             local dataToSave = sessionData[player.UserId]
             if dataToSave then 
-                if (dataToSave.TutorialStep or 0) >= 8 then -- 8
+                if dataSaveAllowed[player.UserId] == true and (dataToSave.TutorialStep or 0) >= 8 then -- 8
                    task.spawn(function() saveWithRetry(player.UserId, dataToSave) end) 
                 end
             end
@@ -315,6 +332,115 @@ function PlayerDataManager.Init()
 end
 
 function PlayerDataManager.GetPlayerData(player) return sessionData[player.UserId] end
+
+function PlayerDataManager.ForceSave(player)
+    local dataToSave = player and sessionData[player.UserId]
+    if not dataToSave then
+        return false
+    end
+    if dataSaveAllowed[player.UserId] ~= true then
+        return false
+    end
+
+    return saveWithRetry(player.UserId, dataToSave)
+end
+
+function PlayerDataManager.IsDataSafeToSave(player)
+    return player ~= nil and dataSaveAllowed[player.UserId] == true
+end
+
+local function deepCopy(value)
+    if type(value) ~= "table" then
+        return value
+    end
+
+    local copy = {}
+    for k, v in pairs(value) do
+        copy[k] = deepCopy(v)
+    end
+    return copy
+end
+
+local function addPlantToData(data, plantId, amount, mutationLevel)
+    data.Inventory = data.Inventory or { Seeds = {}, Plants = {} }
+    data.Inventory.Seeds = data.Inventory.Seeds or {}
+    data.Inventory.Plants = data.Inventory.Plants or {}
+    mutationLevel = mutationLevel or 1
+
+    local found = false
+    for _, plantData in ipairs(data.Inventory.Plants) do
+        if plantData.ID == plantId and (plantData.Mutation or 1) == mutationLevel then
+            plantData.Quantity += amount
+            found = true
+            break
+        end
+    end
+
+    if not found then
+        table.insert(data.Inventory.Plants, { ID = plantId, Quantity = amount, Mutation = mutationLevel })
+    end
+
+    if data.Hotbar then
+        local itemKey = "Plant_" .. plantId .. "_" .. mutationLevel
+        local alreadyEquipped = false
+        for _, v in ipairs(data.Hotbar) do
+            if v == itemKey then
+                alreadyEquipped = true
+                break
+            end
+        end
+        if not alreadyEquipped and #data.Hotbar < 9 then
+            table.insert(data.Hotbar, itemKey)
+        end
+    end
+
+    data.UnlockedMutations = data.UnlockedMutations or {}
+    data.UnlockedMutations[plantId] = data.UnlockedMutations[plantId] or {}
+    data.UnlockedMutations[plantId][mutationLevel] = true
+end
+
+function PlayerDataManager.GrantSavedChatGift(player, claimFlag, plantId, plantAmount, mutationLevel, coins)
+    local userId = player and player.UserId
+    local data = userId and sessionData[userId]
+    if not data then
+        return false, "Gift failed: data is still loading."
+    end
+    if dataSaveAllowed[userId] ~= true then
+        return false, "Gift failed: data is still loading. Please try again later."
+    end
+    if data[claimFlag] then
+        return false, "You have already claimed this gift."
+    end
+
+    mutationLevel = mutationLevel or 1
+    local wasFirstUnlock = not (data.UnlockedMutations and data.UnlockedMutations[plantId] and data.UnlockedMutations[plantId][mutationLevel])
+
+    local dataForGiftSave = deepCopy(data)
+    dataForGiftSave[claimFlag] = true
+    addPlantToData(dataForGiftSave, plantId, plantAmount, mutationLevel)
+    dataForGiftSave.Coins = (tonumber(dataForGiftSave.Coins) or 0) + coins
+
+    local saved = saveWithRetry(userId, dataForGiftSave)
+    if not saved then
+        return false, "Gift failed: please try again later."
+    end
+
+    data[claimFlag] = true
+    addPlantToData(data, plantId, plantAmount, mutationLevel)
+    data.Coins = (tonumber(data.Coins) or 0) + coins
+
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+
+    if wasFirstUnlock then
+        local playUnlockAnimRE = ReplicatedStorage:FindFirstChild("PlayUnlockAnimRE")
+        if playUnlockAnimRE then
+            playUnlockAnimRE:FireClient(player, plantId, mutationLevel)
+        end
+    end
+
+    return true
+end
 
 function PlayerDataManager.WaitForPlayerData(player, timeout)
     timeout = timeout or 10

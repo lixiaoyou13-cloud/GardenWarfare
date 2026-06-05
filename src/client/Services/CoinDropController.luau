@@ -53,6 +53,40 @@ local function playSunPickupSound()
     Debris:AddItem(pickupSound, 3)
 end
 
+local function getLocalRoot()
+    local char = Players.LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function createLocalSunIcon(position)
+    local sunPart = Instance.new("Part")
+    sunPart.Name = "LocalHarvestSun"
+    sunPart.Anchored = true
+    sunPart.CanCollide = false
+    sunPart.CanQuery = false
+    sunPart.CanTouch = false
+    sunPart.Transparency = 1
+    sunPart.Size = Vector3.new(0.2, 0.2, 0.2)
+    sunPart.Position = position
+
+    local gui = Instance.new("BillboardGui")
+    gui.Size = UDim2.new(2.4, 0, 2.4, 0)
+    gui.AlwaysOnTop = true
+    gui.Parent = sunPart
+
+    local img = Instance.new("ImageLabel")
+    img.Size = UDim2.new(1, 0, 1, 0)
+    img.BackgroundTransparency = 1
+    img.Image = COIN_IMAGE_ID
+    img.ScaleType = Enum.ScaleType.Fit
+    img.Parent = gui
+
+    sunPart.Parent = workspace
+    Debris:AddItem(sunPart, 4)
+
+    return sunPart, gui, img
+end
+
 function CoinDropController.Init()
     local playDropRE = ReplicatedStorage:WaitForChild("PlayCoinDropRE")
     local pickupRE = ReplicatedStorage:WaitForChild("PickupCoinRE")
@@ -61,48 +95,61 @@ function CoinDropController.Init()
     if harvestRE then
         harvestRE.OnClientEvent:Connect(function(amount, startPos, isX2Sun)
             local displayText = getSunPickupDisplayText(amount, isX2Sun == true)
-            -- 如果服务端传来了起点坐标，就播放 3D 飞行特效
-            if startPos then
-                local char = Players.LocalPlayer.Character
-                local root = char and char:FindFirstChild("HumanoidRootPart")
-                
-                if root then
-                    -- 1. 创建一个用于飞行的视觉阳光
-                    local sunPart = Instance.new("Part")
-                    sunPart.Anchored = true
-                    sunPart.CanCollide = false
-                    sunPart.Transparency = 1
-                    -- 让阳光从底座稍微偏上的位置冒出来
-                    sunPart.Position = startPos + Vector3.new(0, 4, 0) 
-                    
-                    local gui = Instance.new("BillboardGui")
-                    gui.Size = UDim2.new(3, 0, 3, 0)
-                    gui.AlwaysOnTop = true
-                    gui.Parent = sunPart
-                    
-                    local img = Instance.new("ImageLabel")
-                    img.Size = UDim2.new(1, 0, 1, 0)
-                    img.BackgroundTransparency = 1
-                    img.Image = COIN_IMAGE_ID -- 使用模块顶部的统一阳光/金币图标
-                    img.Parent = gui
-                    
-                    sunPart.Parent = workspace
-                    
-                    -- 2. 让阳光飞向玩家的身体
-                    local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-                    local tween = TweenService:Create(sunPart, tweenInfo, {Position = root.Position})
-                    tween:Play()
-                    
-                    -- 3. 飞行结束（击中玩家）后销毁实体，再呼出 UI 动画
-                    tween.Completed:Connect(function()
+            if startPos and getLocalRoot() then
+                local origin = startPos + Vector3.new(0, 4, 0)
+                local sunCount = math.random(4, 7)
+                local finished = 0
+                local rewardShown = false
+
+                local function finishOne()
+                    finished += 1
+                    if not rewardShown and finished >= sunCount then
+                        rewardShown = true
                         playSunPickupSound()
-                        sunPart:Destroy()
-                        UIEffectUtil.Play2DCollectEffect(amount, nil, displayText) 
-                    end)
-                    return
+                        UIEffectUtil.Play2DCollectEffect(amount, nil, displayText)
+                    end
                 end
+
+                for i = 1, sunCount do
+                    local sunPart, gui, img = createLocalSunIcon(origin)
+                    local burstOffset = Vector3.new(
+                        math.random(-320, 320) / 100,
+                        math.random(160, 420) / 100,
+                        math.random(-320, 320) / 100
+                    )
+                    local burstTween = TweenService:Create(
+                        sunPart,
+                        TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                        {Position = origin + burstOffset}
+                    )
+
+                    burstTween.Completed:Connect(function()
+                        task.delay((i - 1) * 0.06, function()
+                            local root = getLocalRoot()
+                            if not root or not sunPart.Parent then
+                                if sunPart then sunPart:Destroy() end
+                                finishOne()
+                                return
+                            end
+
+                            local flyTween = TweenService:Create(
+                                sunPart,
+                                TweenInfo.new(0.38, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
+                                {Position = root.Position + Vector3.new(0, 1, 0)}
+                            )
+                            TweenService:Create(img, TweenInfo.new(0.38), {ImageTransparency = 1}):Play()
+                            TweenService:Create(gui, TweenInfo.new(0.38), {Size = UDim2.new(1.1, 0, 1.1, 0)}):Play()
+                            flyTween:Play()
+                            flyTween.Completed:Connect(function()
+                                if sunPart then sunPart:Destroy() end
+                                finishOne()
+                            end)
+                        end)
+                    end)
+                    burstTween:Play()
+                end
+                return
             end
-            
             -- 如果没有获取到位置，作为兜底直接播放 UI 动画
             UIEffectUtil.Play2DCollectEffect(amount, nil, displayText) 
         end)
