@@ -131,7 +131,7 @@ function AirdropUIController.Init()
         end
     end)
     
-    print("客户端：AirdropUIController 加载完毕！带 'CLAIM' 提示的呼吸箭头已激活。")
+    print("Client: AirdropUIController loaded. CLAIM breathing arrow active.")
 end
 
 return AirdropUIController

@@ -264,7 +264,7 @@ function ToolService.Init()
                 end
 
             -- ==========================================
-            -- [玩家 PVP 受击击飞判定]
+            -- [Player PVP 受击击飞判定]
             -- ==========================================
             elseif targetModel ~= character then
                 local enemyPlayer = Players:GetPlayerFromCharacter(targetModel)
@@ -485,10 +485,10 @@ function ToolService.Init()
                     
                     game:GetService("Debris"):AddItem(newEffect, 2)
                 else
-                    warn("❌【樱桃炸弹】找不到特效：在 ReplicatedStorage -> Hit 里面没有找到名字叫 [" .. tostring(effectName) .. "] 的东西！")
+                    warn("Cherry Bomb effect missing: ReplicatedStorage -> Hit has no object named [" .. tostring(effectName) .. "]!")
                 end
             else
-                warn("❌【樱桃炸弹】配置错误：找不到 ReplicatedStorage.Hit 文件夹，或者 ItemConfig 里没写 ExplosionEffect！")
+                warn("Cherry Bomb config error: ReplicatedStorage.Hit folder missing or ItemConfig.ExplosionEffect not set!")
             end
 
             -- 4. 落地瞬间：群体范围扣血
@@ -520,7 +520,7 @@ function ToolService.Init()
         end)
     end)
     
-    print("服务端：ToolService 加载完毕！回收提示强制静默功能已上线！")
+    print("Server: ToolService loaded; recycle prompts are force-silent.")
 end
 
 return ToolService

@@ -44,7 +44,7 @@ function PlantService.Init()
         end
         
         if not data then 
-            warn("【植物还原】等待玩家数据超时，终止还原！")
+            warn("[PlantRestore] Timed out waiting for player data; restore aborted.")
             return 
         end
 
@@ -208,7 +208,8 @@ function PlantService.Init()
                             if playObtainEffectRE then 
                                 -- 把多段文字合并成一句
                                 local msg = "Gain: " .. currentYield .. "x " .. mutPrefix .. plantName
-                                playObtainEffectRE:FireClient(player, msg)
+                                local playFullEffect = (tonumber(plantConfig and plantConfig.Quality) or 0) >= 4
+                                playObtainEffectRE:FireClient(player, msg, playFullEffect)
                             end
                         else
                             -- 2. 小偷按下E，开始死死按住15秒！

@@ -28,7 +28,7 @@ local function CreateViewportForModel(plantId, parentFrame)
     local modelTemplate = itemModelsFolder:FindFirstChild(plantId .. "_Plant") or itemModelsFolder:FindFirstChild(plantId)
     
     if not modelTemplate then 
-        warn("⚠️ 找不到用于 ViewportFrame 展示的 3D 模型: " .. tostring(plantId))
+        warn("ViewportFrame display model not found: " .. tostring(plantId))
         return viewport 
     end
 

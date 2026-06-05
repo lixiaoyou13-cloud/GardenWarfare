@@ -431,7 +431,7 @@ function HotbarController.Init()
     if player.Character then bindCharacter(player.Character) end
     player.CharacterAdded:Connect(bindCharacter)
 
-    print("客户端：HotbarController 已修复！彻底兼容所有爆破类物品图标。")
+    print("Client: HotbarController fixed; fully supports icons for all explosive items.")
 end
 
 return HotbarController

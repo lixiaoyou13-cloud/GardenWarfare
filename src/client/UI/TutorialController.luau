@@ -100,7 +100,7 @@ function TutorialController.Init()
     -- 【第 8 步】：战斗结束后引导去商店 (原第 9 步)
     -- ==========================================
     local function startStepEight()
-        print("进入教程第 8 步：引导前往商店")
+        print("Tutorial step 8: guide player to the shop")
         local removeTip = showTutorialTip("You are not strong enough. Buy more seeds!")
         
         -- 寻找玩家自己的地块，并在里面寻找 CrazyDave
@@ -120,7 +120,7 @@ function TutorialController.Init()
         local targetPart = shopNPC and (shopNPC.PrimaryPart or shopNPC:FindFirstChildWhichIsA("BasePart"))
         
         if not targetPart then
-            warn("未找到商店 NPC (CrazyDave)，直接结束教程。")
+            warn("Shop NPC (CrazyDave) not found; ending tutorial.")
             ReplicatedStorage.UpdateTutorialRE:FireServer(8)
             removeTip()
             return
@@ -139,7 +139,7 @@ function TutorialController.Init()
                 stopGuide()
                 removeTip()
                 ReplicatedStorage.UpdateTutorialRE:FireServer(8)
-                print("🎉 玩家打开了商店，全套新手教程圆满结束！")
+                print("Player opened the shop; full newbie tutorial completed.")
             end)
         else
             -- 备用方案：距离检测（靠近 CrazyDave 10格内即可完成）
@@ -152,7 +152,7 @@ function TutorialController.Init()
                         stopGuide()
                         removeTip()
                         ReplicatedStorage.UpdateTutorialRE:FireServer(8)
-                        print("🎉 玩家抵达商店，新手教程结束！")
+                        print("Player reached the shop; newbie tutorial completed.")
                     end
                     task.wait(0.5)
                 end
@@ -206,7 +206,7 @@ function TutorialController.Init()
     -- 【第 7 步】：引导开始战斗 (原第 8 步)
     -- ==========================================
     local function startStepSeven()
-      print("进入教程第 7 步：点击战斗按钮")
+      print("Tutorial step 7: click the battle button")
         local removeTip = showTutorialTip("Here are some Peashooters! Click BATTLE to start!")
         
         local stopFlash = TutorialEffect.AddFlash(battleBtn)
@@ -231,7 +231,7 @@ function TutorialController.Init()
     -- 【第 6 步】：引导种植到草坪 Lawn1_1 并自动铺满一列 (原第 7 步)
     -- ==========================================
     local function startStepSix()
-        print("进入教程第 6 步：引导战斗部署")
+        print("Tutorial step 6: guide combat deployment")
         local removeTip = showTutorialTip("Deploy the Peashooter on the lawn.")
 
         local plotsFolder = Workspace:WaitForChild("Plots", 10)
@@ -270,7 +270,7 @@ function TutorialController.Init()
                     task.wait(0.15) 
                 end
             else
-                warn("教程错误：找不到服务端的 TutorialDeployRE 事件")
+                warn("Tutorial error: TutorialDeployRE server event not found")
             end
             
             task.wait(0.5)

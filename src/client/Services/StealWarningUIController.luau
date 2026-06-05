@@ -135,7 +135,7 @@ function StealWarningUIController.Init()
         end
     end)
     
-    print("客户端：StealWarningUIController 加载完毕！防偷菜雷达启动。")
+    print("Client: StealWarningUIController loaded; anti-steal radar active.")
 end
 
 return StealWarningUIController

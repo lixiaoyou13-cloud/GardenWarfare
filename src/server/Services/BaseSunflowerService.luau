@@ -282,7 +282,7 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
             
             -- 加入追踪列表
             activeSunflowers[player.UserId] = sunflower
-            print("【向日葵系统】✅ 生成成功！自动收割功能已实装！")
+            print("[BaseSunflower] Spawn successful; auto-harvest enabled.")
         end
     end
 end
@@ -311,7 +311,7 @@ function BaseSunflowerService.Init()
             end
         end
     end)
-    print("服务端：BaseSunflowerService 独立模块加载完毕！")
+    print("Server: BaseSunflowerService module loaded.")
 end
 
 return BaseSunflowerService

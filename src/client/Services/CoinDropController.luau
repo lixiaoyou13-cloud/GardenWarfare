@@ -96,8 +96,8 @@ function CoinDropController.Init()
         harvestRE.OnClientEvent:Connect(function(amount, startPos, isX2Sun)
             local displayText = getSunPickupDisplayText(amount, isX2Sun == true)
             if startPos and getLocalRoot() then
-                local origin = startPos + Vector3.new(0, 4, 0)
-                local sunCount = math.random(4, 7)
+                local origin = startPos + Vector3.new(0, 3, 0)
+                local sunCount = math.clamp(math.floor((tonumber(amount) or 0) / 50), 5, 20)
                 local finished = 0
                 local rewardShown = false
 
@@ -113,18 +113,18 @@ function CoinDropController.Init()
                 for i = 1, sunCount do
                     local sunPart, gui, img = createLocalSunIcon(origin)
                     local burstOffset = Vector3.new(
-                        math.random(-320, 320) / 100,
-                        math.random(160, 420) / 100,
-                        math.random(-320, 320) / 100
+                        math.random(-500, 500) / 100,
+                        math.random(250, 600) / 100,
+                        math.random(-500, 500) / 100
                     )
                     local burstTween = TweenService:Create(
                         sunPart,
-                        TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                        TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
                         {Position = origin + burstOffset}
                     )
 
                     burstTween.Completed:Connect(function()
-                        task.delay((i - 1) * 0.06, function()
+                        task.delay(2 + ((i - 1) * 0.08), function()
                             local root = getLocalRoot()
                             if not root or not sunPart.Parent then
                                 if sunPart then sunPart:Destroy() end
@@ -134,11 +134,11 @@ function CoinDropController.Init()
 
                             local flyTween = TweenService:Create(
                                 sunPart,
-                                TweenInfo.new(0.38, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
+                                TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
                                 {Position = root.Position + Vector3.new(0, 1, 0)}
                             )
-                            TweenService:Create(img, TweenInfo.new(0.38), {ImageTransparency = 1}):Play()
-                            TweenService:Create(gui, TweenInfo.new(0.38), {Size = UDim2.new(1.1, 0, 1.1, 0)}):Play()
+                            TweenService:Create(img, TweenInfo.new(0.35), {ImageTransparency = 1}):Play()
+                            TweenService:Create(gui, TweenInfo.new(0.35), {Size = UDim2.new(1.1, 0, 1.1, 0)}):Play()
                             flyTween:Play()
                             flyTween.Completed:Connect(function()
                                 if sunPart then sunPart:Destroy() end
@@ -283,7 +283,7 @@ function CoinDropController.Init()
             Debris:AddItem(coin, 300) 
         end
     end)
-    print("客户端：CoinDropController 精简版已实装，不再调用向日葵动画！")
+    print("Client: CoinDropController streamlined version loaded; sunflower animation calls disabled.")
 end
 
 return CoinDropController

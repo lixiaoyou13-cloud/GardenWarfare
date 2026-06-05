@@ -83,7 +83,7 @@ function PlantUIController.Init()
         end
     end)
 
-    print("客户端：PlantUIController (植物状态显示) 加载完毕！偷菜视角已分配！")
+    print("Client: PlantUIController (plant status display) loaded; steal-view assigned.")
 end
 
 return PlantUIController

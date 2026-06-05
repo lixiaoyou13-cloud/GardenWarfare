@@ -40,7 +40,7 @@ function CoinDropService.Init()
         end
     end)
 
-    print("服务端：CoinDropService 加载完毕！阳光吸纳与金币区分已实装！")
+    print("Server: CoinDropService loaded; sun absorption and coin distinction enabled.")
 end
 
 function CoinDropService.DropCoins(player, dropPosition, coinCount, totalValue)

@@ -137,7 +137,7 @@ function RankingService.Init()
         end
     end)
 
-    print("服务端：排行榜系统 (带头像版) 已激活！")
+    print("Server: ranking system (avatar version) active.")
 end
 
 return RankingService

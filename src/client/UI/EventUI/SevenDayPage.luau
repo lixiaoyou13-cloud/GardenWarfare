@@ -168,7 +168,7 @@ local function RenderUI(sevenDayFrame, playerData)
                     if currentReward and currentReward.Tip then
                         UIEffectUtil.ShowTip(currentReward.Tip)
                     else
-                        UIEffectUtil.ShowTip("领取成功！")
+                        UIEffectUtil.ShowTip("Claimed!")
                     end
                 end
             end)

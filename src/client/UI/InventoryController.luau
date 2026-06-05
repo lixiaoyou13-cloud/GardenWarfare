@@ -194,7 +194,7 @@ function InventoryController.Init()
     tabButtons:WaitForChild("SeedTabBtn").MouseButton1Click:Connect(function() switchTab("SeedPage") end)
     tabButtons:WaitForChild("PlantTabBtn").MouseButton1Click:Connect(function() switchTab("PlantPage") end)
 
-    print("客户端：InventoryController 精简版加载完毕！带有炸弹专属角标！")
+    print("Client: InventoryController streamlined version loaded with bomb badges.")
 end
 
 return InventoryController

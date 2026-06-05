@@ -37,7 +37,7 @@ end
 local function getPopupRefs()
 	local player = Players.LocalPlayer
 	if not player then
-		warn("PopupUtil: LocalPlayer 不存在")
+		warn("PopupUtil: LocalPlayer not found")
 		return nil
 	end
 
@@ -50,7 +50,7 @@ local function getPopupRefs()
 	local btnCancel = popupFrame and popupFrame:FindFirstChild("Cancel")
 
 	if not (popup and popupFrame and detail and btnOk and btnCancel) then
-		warn("PopupUtil: 找不到完整的 Popup UI 结构")
+		warn("PopupUtil: complete Popup UI structure not found")
 		return nil
 	end
 

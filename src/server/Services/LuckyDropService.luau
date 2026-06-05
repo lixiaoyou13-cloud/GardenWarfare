@@ -15,7 +15,7 @@ local QUALITY_WEIGHTS = { [1] = 45, [2] = 30, [3] = 15, [4] = 8, [5] = 2 }
 local AIRDROP_DROP_DURATION = 20
 
 function LuckyDropService.OnAirdropDelivered(player, dropPosition, luckyBox)
-    print("【空投】" .. player.Name .. " 成功将空投运回基地！")
+    print("[Airdrop] " .. player.Name .. " successfully delivered the airdrop to base!")
     
     -- 👇 [🌟 恢复 100% 正常移速]
     local char = player.Character

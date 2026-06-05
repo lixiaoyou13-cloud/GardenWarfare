@@ -125,14 +125,14 @@ local function SpawnMaxLevelPart(plot, data)
 
     local maxPos = plot:FindFirstChild("MAXPos", true)
     if not maxPos or not maxPos:IsA("BasePart") then
-        warn("服务端：地块 " .. plot.Name .. " 中未找到 MAXPos，无法生成 Max Level 展示牌！")
+        warn("Server: plot " .. plot.Name .. " is missing MAXPos; cannot spawn Max Level display sign!")
         return
     end
 
     local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
     local template = itemModels and itemModels:FindFirstChild("ShowLevelPart")
     if not template then
-        warn("服务端：ReplicatedStorage.ItemModels.ShowLevelPart 不存在，无法生成 Max Level 展示牌！")
+        warn("Server: ReplicatedStorage.ItemModels.ShowLevelPart is missing; cannot spawn Max Level display sign!")
         return
     end
 
@@ -285,7 +285,7 @@ function PlotService.AssignPlot(player)
             -- 🚀 1. 改为查找基地内名为 "NameTag" 的模型或零件
             local nameTagObj = chosenPlot:FindFirstChild("NameTag", true)
 
-            print("【排错】系统分配给玩家的地块是: " .. chosenPlot.Name .. " | 是否找到 NameTag: " .. tostring(nameTagObj ~= nil))
+            print("[Debug] Assigned plot for player: " .. chosenPlot.Name .. " | NameTag found: " .. tostring(nameTagObj ~= nil))
             local targetPart = nil
             
             if nameTagObj then
@@ -367,7 +367,7 @@ function PlotService.AssignPlot(player)
                 billboard.Parent = targetPart
                 
                 -- 顺便打印一下到底挂在了哪个零件上，方便排错
-                print("【UI生成】成功！已挂载至目标: " .. tostring(targetPart.Name))
+                print("[UI] Created successfully. Mounted to target: " .. tostring(targetPart.Name))
             end
 
             -- ---------- 功能 B：额外功能 - 木牌上的表面显示 (SurfaceGui) ----------
@@ -410,7 +410,7 @@ function PlotService.AssignPlot(player)
                 sText.Parent = surfaceGui
 
                 surfaceGui.Parent = targetPart
-                print("【UI生成】头像获取完毕，开始创建牌子...2222222222222222222222222222")
+                print("[UI] Avatar loaded; creating sign...")
             end
         end)
         local dave = chosenPlot:FindFirstChild("CrazyDave")
@@ -440,10 +440,10 @@ function PlotService.AssignPlot(player)
                     clicker.Parent = targetPart
                 end
             else
-                warn("服务端：CrazyDave 模型内找不到任何 BasePart，无法挂载交互组件！")
+                warn("Server: CrazyDave model has no BasePart; cannot attach interaction components!")
             end
         else
-            warn("服务端：在地块 " .. chosenPlot.Name .. " 中未找到 CrazyDave！")
+            warn("Server: plot " .. chosenPlot.Name .. " is missing CrazyDave!")
         end
 
         -- 设置玩家位置逻辑 (保持不变)
@@ -519,7 +519,7 @@ function PlotService.Init()
                 
                 -- 如果服务端查明该玩家没付过钱，直接 return 拦截请求！
                 if not hasPass then
-                    warn("玩家 " .. player.Name .. " 未购买通行证，尝试非法开启 4 倍速！")
+                    warn("Player " .. player.Name .. " does not own the pass and tried to enable 4x speed!")
                     return
                 end
             end
@@ -529,7 +529,7 @@ function PlotService.Init()
         end
     end)
     
-    print("服务端：PlotService 戴夫交互组件配置完毕！")
+    print("Server: PlotService Dave interaction components configured.")
 end
 
 -- [🌟 核心逻辑：刷新泥土状态与视觉效果]
@@ -680,7 +680,7 @@ function PlotService.ReleasePlot(player)
     local plot = playerPlots[userId]
     
     if plot then
-        print("【地块系统】玩家 " .. player.Name .. " 已退出，正在回收地块: " .. plot.Name)
+        print("[PlotService] Player " .. player.Name .. " left; recycling plot: " .. plot.Name)
         
         -- 0. 先停止战斗状态，避免后台刷怪协程继续运行
         plot:SetAttribute("IsGameOver", true)
@@ -745,7 +745,7 @@ function PlotService.ReleasePlot(player)
         -- 2.5 销毁 Max Level 展示牌
         ClearMaxLevelPart(plot)
 
-        -- 3. 兜底销毁场上的 OwnerId 关联对象（僵尸、基地向日葵、其他专属模型）
+        -- 3. 兜底销毁场上的 OwnerId联对象（僵尸、基地向日葵、其他专属模型）
         for _, obj in pairs(game.Workspace:GetChildren()) do
             if obj:IsA("Model") and obj:GetAttribute("OwnerId") == userId then
                 obj:Destroy()

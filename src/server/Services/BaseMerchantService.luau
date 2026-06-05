@@ -326,7 +326,7 @@ function BaseMerchantService.Init()
         end
     end)
     
-    print("服务端：BaseMerchantService (延迟刷新版) 加载完毕！")
+    print("Server: BaseMerchantService (delayed refresh version) loaded.")
 end
 
 return BaseMerchantService

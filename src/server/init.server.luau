@@ -1,7 +1,7 @@
 
 
 -- src/server/init.server.luau
-print("服务端启动！准备加载核心模块...")
+print("Server starting; loading core modules...")
 
 -- ==========================================
 -- [🌟 新增：全局碰撞组设定]
@@ -160,4 +160,4 @@ require(script.Services.ZombieBoxService)
     end)
 end)]]
 
-print("所有服务端模块加载完毕！")
+print("All server modules loaded!")

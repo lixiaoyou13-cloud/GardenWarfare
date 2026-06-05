@@ -1,7 +1,7 @@
 -- src/shared/LevelConfig.luau
 local LevelConfig = {}
 
--- 自动生成 20 关平滑进度
+-- 自动生成 20平滑进度
 for i = 1, 20 do
     local zombies = {}
     
@@ -35,7 +35,7 @@ for i = 1, 20 do
 end
 
 -- ==========================================
--- [🌟 无尽模式配置]：配合 20 关调整解锁等级
+-- [🌟 无尽模式配置]：配合 20调整解锁等级
 -- ==========================================
 LevelConfig.InfiniteZombiePool = {
     { Type = "Zombie",          UnlockLevel = 1,  Weight = 100 }, 

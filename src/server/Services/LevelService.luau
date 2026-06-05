@@ -43,7 +43,7 @@ function LevelService.Init()
         CombatService.ReloadSavedPlants(player)
 
         local levelId = targetLevel or 1 
-        print("【关卡系统】玩家 " .. player.Name .. " 战斗刷新：第 " .. levelId .. " 关")
+        print("[LevelService] Player " .. player.Name .. " battle refreshed: Level " .. levelId .. "")
 
         ZombieService.StartLevel(plot, levelId, player)
     end)
@@ -57,7 +57,7 @@ function LevelService.Init()
         local currentLevel = plot:GetAttribute("CurrentLevel") or 1
         AnalyticsService:LogCustomEvent(player, "Manual_Retreat_Level_" .. tostring(currentLevel), 1)
 
-        print("【关卡系统】玩家 " .. player.Name .. " 选择了手动撤退")
+        print("[LevelService] Player " .. player.Name .. " chose manual retreat")
 
         -- 1. 标记游戏结束
         plot:SetAttribute("IsGameOver", true)

@@ -611,11 +611,11 @@ local ItemConfig = {
 	},
 	
 	MutationProb = { [1] = 90, [2] = 7, [3] = 3, [4] = 1 },
-	MutationName = { 
-		[1] = "普通", 
-		[2] = "闪光", 
-		[3] = "雷电", 
-		[4] = "神圣" 
+	MutationName = {
+		[1] = "Normal",
+		[2] = "Shiny",
+		[3] = "Lightning",
+		[4] = "Divine"
 	},
 	
 	QualityColor = {

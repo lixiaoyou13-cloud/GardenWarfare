@@ -134,7 +134,7 @@ function StealablePointerUIController.Init()
         end
     end)
     
-    print("客户端：StealablePointerUIController 加载完毕！寻宝雷达启动。")
+    print("Client: StealablePointerUIController loaded; treasure radar active.")
 end
 
 return StealablePointerUIController

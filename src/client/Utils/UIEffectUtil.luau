@@ -197,7 +197,7 @@ function UIEffectUtil.ShowTip(message: string)
             tipInfo.Parent = topMsgGui
         else
             -- 兜底：如果找不到原始节点，警告并返回
-            warn("UIEffectUtil: 找不到原始 TipInfo 节点")
+            warn("UIEffectUtil: original TipInfo node not found")
             return
         end
     end
@@ -332,7 +332,12 @@ end
 task.spawn(function()
     local playObtainEffectRE = ReplicatedStorage:WaitForChild("PlayObtainEffectRE")
     
-    playObtainEffectRE.OnClientEvent:Connect(function(message)
+    playObtainEffectRE.OnClientEvent:Connect(function(message, playFullEffect)
+        if playFullEffect == nil then
+            playFullEffect = true
+        end
+
+        if playFullEffect then
         -- 1. 播放屏幕礼花特效
         UIEffectUtil.PlayConfettiEffect()
         
@@ -360,6 +365,8 @@ task.spawn(function()
         end
         
         -- 3. 调用内部的 ShowTip 显示文字
+        end
+
         UIEffectUtil.ShowTip(message)
     end)
 end)

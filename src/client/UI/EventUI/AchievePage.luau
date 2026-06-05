@@ -59,7 +59,7 @@ function AchievePage.Init(achieveFrame)
         local btnText = claimBtn and claimBtn:FindFirstChild("TextLabel", true)
 
         if progressBar and not fillBar then
-            warn("【UI警告】关卡 " .. level .. " 的进度条中找不到名为 'Fill' 的组件，进度条将无法变长！")
+            warn("[UI Warning] Level " .. level .. " progress bar is missing a 'Fill' component; the bar cannot expand!")
         end
         
         -- 记录模板的默认颜色

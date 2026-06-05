@@ -171,7 +171,7 @@ function EncyclopediaController.Init()
             slot.Name = plantId
             slot.Visible = true
             
-            -- 🌟 关键点：利用 LayoutOrder 决定在 UI 网格/列表中的实际显示顺序
+            -- 🌟键点：利用 LayoutOrder 决定在 UI 网格/列表中的实际显示顺序
             slot.LayoutOrder = index 
             
             -- [下方保持你原有的渲染逻辑不变]
@@ -315,7 +315,7 @@ function EncyclopediaController.Init()
         if closeBtn:IsA("GuiButton") then closeBtn.Activated:Connect(handleCloseCodex)
         else closeBtn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then handleCloseCodex() end end) end
     end 
-    print("图典模块：已适配统一后的层级结构（不再寻找 Plant，改找 mainFrame）！")
+    print("Encyclopedia module: adapted to unified hierarchy; using mainFrame instead of Plant.")
 end
 
 return EncyclopediaController

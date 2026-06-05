@@ -683,7 +683,7 @@ function RollController.Init()
 
         drawTween.Completed:Connect(function()
             drawVisualConnection:Disconnect()
-            print("🎊 抽奖结束！玩家抽到了: " .. finalPrize .. " 🎊")
+            print("Roll finished! Player got: " .. finalPrize .. " 🎊")
 
             local getFrameTemp = uiTemplates:FindFirstChild("GetFrame")
             if getFrameTemp then
@@ -723,7 +723,9 @@ function RollController.Init()
                 -- 👇 [🌟 核心联动：在收起动画时播放客户端满屏的礼花和通知！]
                 local itemDetail = ItemConfig.Plants[finalPrize] or ItemConfig.Seeds[finalPrize]
                 local itemName = itemDetail and itemDetail.Name or finalPrize
-                UIEffectUtil.PlayConfettiEffect()
+                if (tonumber(itemDetail and itemDetail.Quality) or 0) >= 4 then
+                    UIEffectUtil.PlayConfettiEffect()
+                end
                 UIEffectUtil.ShowTip("Congratulations, you obtained 1x " .. itemName)
                 -- 👆 =========================================================
 
@@ -793,7 +795,7 @@ function RollController.Init()
         
         currentTab = tabIndex
         RefreshCurrentPageRefs()
-        print("切换抽奖池至：Tab_" .. currentTab)
+        print("Switched roll pool to: Tab_" .. currentTab)
         
         -- 🌟【关键修改】在这里加入主动调用，切换的一瞬间立刻换字�?延迟�?
         UpdateGetTimeText()
@@ -866,7 +868,7 @@ function RollController.Init()
             end)
         end
     end
-    print("客户端：RollController (真实扣费红点校验系统) 加载完毕�?)")
+    print("Client: RollController (real-cost red-dot validation system) loaded.")
 end
 
 return RollController

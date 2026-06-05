@@ -107,7 +107,7 @@ function ZombieService.TriggerGameOver(plot, player)
     plot:SetAttribute("IsGameOver", true)
     plot:SetAttribute("IsLevelActive", false)
 
-    print("【关卡系统】防守失败！僵尸进入了房间！")
+    print("[LevelService] Defense failed; zombies reached the room!")
 
     ZombieService.RestorePlotPlants(plot, player)
     ZombieService.FinalSettlement(player, plot, false)
@@ -719,7 +719,7 @@ function ZombieService.StartLevel(plot, levelId, player)
     -- 👆 =============================================================== 👆
 
     local nextLevelId = levelId + 1
-    print("【关卡连战】第 "..levelId.." 关清理完毕，2秒后开始下一关...")
+    print("[Level chain] Level " .. tostring(levelId) .. " cleared; starting next level in 2 seconds...")
     task.wait(2)
     ZombieService.StartLevel(plot, nextLevelId, player)
 end
@@ -823,7 +823,7 @@ function ZombieService.Init()
     end
 end
 function ZombieService.GenerateInfiniteLevel(levelId)
-    -- [🌟 修改：无尽模式固定阵容] 直接复制第 20 关的配置，数量和种类不再随机
+    -- [🌟 修改：无尽模式固定阵容] 直接复制第 20的配置，数量和种类不再随机
     local baseLevelConfig = LevelConfig[20]
 
     return { 

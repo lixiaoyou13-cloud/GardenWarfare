@@ -12,6 +12,48 @@ local zombieBoxRE = ReplicatedStorage:WaitForChild("ZombieBoxRE")
 
 -- 用于假抽奖滚动动画的模型库
 local fakeItemPool = {}
+local OWNED_BOX_HIGHLIGHT_NAME = "OwnedZombieBoxHighlight"
+
+local function refreshOwnedBoxHighlight(box)
+    if not box or not box.Parent then return end
+    if not (box:IsA("Model") or box:IsA("BasePart")) then return end
+
+    local highlight = box:FindFirstChild(OWNED_BOX_HIGHLIGHT_NAME)
+    local isOwnedZombieBox = box:GetAttribute("IsZombieRewardBox") == true
+        and box:GetAttribute("OwnerId") == localPlayer.UserId
+
+    if not isOwnedZombieBox then
+        if highlight then highlight:Destroy() end
+        return
+    end
+
+    if highlight then return end
+
+    highlight = Instance.new("Highlight")
+    highlight.Name = OWNED_BOX_HIGHLIGHT_NAME
+    highlight.Adornee = box
+    highlight.FillColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.82
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = box
+end
+
+local function watchPotentialRewardBox(box)
+    if not (box:IsA("Model") or box:IsA("BasePart")) then return end
+    if box:GetAttribute("IsZombieRewardBox") ~= true and not string.find(box.Name, "ZombieRewardBox") then return end
+
+    refreshOwnedBoxHighlight(box)
+
+    box:GetAttributeChangedSignal("OwnerId"):Connect(function()
+        refreshOwnedBoxHighlight(box)
+    end)
+
+    box:GetAttributeChangedSignal("IsZombieRewardBox"):Connect(function()
+        refreshOwnedBoxHighlight(box)
+    end)
+end
 
 function ZombieBoxController.Init()
     -- 初始化假抽奖池
@@ -27,6 +69,12 @@ function ZombieBoxController.Init()
             ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
         end
     end)
+
+    for _, child in ipairs(Workspace:GetChildren()) do
+        watchPotentialRewardBox(child)
+    end
+
+    Workspace.ChildAdded:Connect(watchPotentialRewardBox)
 end
 function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
     local luckyTemplate = itemModels:FindFirstChild("Box")

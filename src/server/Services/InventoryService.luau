@@ -378,7 +378,7 @@ function InventoryService.Init()
         end
     end)
 
-    print("服务端：InventoryService 加载完毕！无缝静默交换系统(SwapPlant)已上线！")
+    print("Server: InventoryService loaded; seamless silent SwapPlant system online.")
 end
 
 return InventoryService

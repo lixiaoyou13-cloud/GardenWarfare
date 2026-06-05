@@ -40,7 +40,7 @@ function FreeRewardClientController.Init()
         local modelTemplate = plantsFolder and plantsFolder:FindFirstChild(modelName)
         
         if not modelTemplate then
-            warn("【FreeReward】找不到奖励模型: " .. tostring(modelName))
+            warn("[FreeReward] Reward model not found: " .. tostring(modelName))
             return
         end
 

@@ -133,13 +133,13 @@ local function onPlayerAdded(player)
                     savedData.SignInDays = 0       -- 签到天数归零
                     savedData.LastSignInTime = 0   -- 签到时间归零
                     savedData.SignInReset_V1 = true -- 打上标记，防止下次登录再次被重置
-                    print("🔄 [数据系统] 玩家 " .. player.Name .. " 的七日签到已强制重置！")
+                    print("[Data] Player " .. player.Name .. " seven-day sign-in progress forcibly reset!")
                 end
                 -- ====================================================
 
                 sessionData[player.UserId] = savedData
                 dataSaveAllowed[player.UserId] = true
-                print("✅ [数据系统] 玩家 " .. player.Name .. " 数据拉取成功！")
+                print("[Data] Player " .. player.Name .. " data loaded successfully!")
                 
                 if (savedData.TutorialStep or 0) == 0 then
                     AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 1, "Step_1_Enter_Game")
@@ -147,7 +147,7 @@ local function onPlayerAdded(player)
             else
                 sessionData[player.UserId] = GetDefaultData()
                 dataSaveAllowed[player.UserId] = true
-                print("🆕 [数据系统] 玩家 " .. player.Name .. " 无存档，发放初始数据。")
+                print("[Data] Player " .. player.Name .. " has no save; default data granted.")
                 AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 1, "Step_1_Enter_Game")
             end
             else
@@ -161,7 +161,7 @@ local function onPlayerAdded(player)
     task.delay(5, function()
         if not isLoaded then
             isLoaded = true
-            warn("⚠️ [数据系统] Roblox数据请求超时！已下发初始数据，保护游戏进程不崩溃！")
+            warn("[Data] Roblox data request timed out; default data granted to keep the game running.")
             sessionData[player.UserId] = GetDefaultData()
             dataSaveAllowed[player.UserId] = false
         end
@@ -275,7 +275,7 @@ function PlayerDataManager.Init()
         end
 
         local data = sessionData[player.UserId]
-        if not data then return false, "数据仍在加载中..." end
+        if not data then return false, "Data is still loading..." end
         if not data.RollTickets then data.RollTickets = {0, 0} end
         
         -- 兼容旧数据/异常数据里 RollTickets 使用字符串键的情况，避免误判为 0 后先扣阳光。
@@ -293,7 +293,7 @@ function PlayerDataManager.Init()
             end
             data.Coins -= ROLL_TAB1_CASH_COST
         else
-            return false, "抽奖次数不足！"
+            return false, "Not enough roll attempts!"
         end
         
         -- 2. 获取真正的随机奖励
@@ -553,7 +553,8 @@ function PlayerDataManager.GiveSeed(player, seedId, amount, suppressEffect)
         if effectRE then
             local itemDetail = ItemConfig.Seeds[seedId]
             local itemName = itemDetail and itemDetail.Name or seedId
-            effectRE:FireClient(player, "Congratulations, you obtained " .. amount .. "x " .. itemName)
+            local playFullEffect = (tonumber(itemDetail and itemDetail.Quality) or 0) >= 4
+            effectRE:FireClient(player, "Congratulations, you obtained " .. amount .. "x " .. itemName, playFullEffect)
         end
     end
 end

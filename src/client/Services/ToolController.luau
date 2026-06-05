@@ -83,13 +83,13 @@ function ToolController.Init()
    local throwBombRE = ReplicatedStorage:WaitForChild("ThrowBombRE", 10)
 
     if not weaponAttackRE then
-        warn("[ToolController] WeaponAttackRE 未由服务端创建，武器攻击功能将暂时不可用")
+        warn("[ToolController] WeaponAttackRE was not created by the server; weapon attacks are temporarily unavailable")
     end
     if not swapRE then
-        warn("[ToolController] SwapCombatPlantRE 未由服务端创建，交换植物功能将暂时不可用")
+        warn("[ToolController] SwapCombatPlantRE was not created by the server; plant swapping is temporarily unavailable")
     end
     if not throwBombRE then
-        warn("[ToolController] ThrowBombRE 未由服务端创建，樱桃炸弹功能将暂时不可用")
+        warn("[ToolController] ThrowBombRE was not created by the server; Cherry Bomb is temporarily unavailable")
     end
 
     -- 恢复为红色的警示球，加深颜色
@@ -97,7 +97,7 @@ function ToolController.Init()
     rangeSphere.Shape = Enum.PartType.Ball -- 保持球体
     rangeSphere.Material = Enum.Material.ForceField
     rangeSphere.Color = Color3.fromRGB(255, 20, 20)
-    rangeSphere.Transparency = 0.4 -- 🌟 关键修改：透明度从0.8降到0.4，颜色会变得非常深且明显
+    rangeSphere.Transparency = 0.4 -- 🌟键修改：透明度从0.8降到0.4，颜色会变得非常深且明显
     rangeSphere.Anchored = true
     rangeSphere.CanCollide = false
     rangeSphere.CastShadow = false
@@ -559,7 +559,7 @@ function ToolController.Init()
         end
     end)
    
-    print("客户端：ToolController (抛物线/交互/战斗武器联动) 加载完毕！")
+    print("Client: ToolController (arc/interactions/combat weapon integration) loaded.")
 end
 
 return ToolController

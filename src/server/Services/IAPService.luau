@@ -30,6 +30,7 @@ local function FindShopRewardByProductId(productId)
                 ItemId = seedId,
                 Amount = seedDetail.IAPAmount or seedDetail.Amount or 1,
                 Name = seedDetail.Name or seedId,
+                Quality = seedDetail.Quality,
             }
         end
     end
@@ -43,6 +44,7 @@ local function FindShopRewardByProductId(productId)
                 Amount = plantDetail.IAPAmount or plantDetail.Amount or 1,
                 Mutation = plantDetail.IAPMutation or plantDetail.Mutation or 1,
                 Name = plantDetail.Name or plantId,
+                Quality = plantDetail.Quality,
             }
         end
     end
@@ -105,7 +107,9 @@ function IAPService.Init()
                 
                 local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
                 if playObtainEffectRE then
-                    playObtainEffectRE:FireClient(player, "Purchase Successful!\nObtained 6x CoconutTree!") 
+                    local itemDetail = ItemConfig.Seeds["CoconutTree"]
+                    local playFullEffect = (tonumber(itemDetail and itemDetail.Quality) or 0) >= 4
+                    playObtainEffectRE:FireClient(player, "Purchase Successful!\nObtained 6x CoconutTree!", playFullEffect)
                 end
             end
             return Enum.ProductPurchaseDecision.PurchaseGranted
@@ -142,14 +146,14 @@ function IAPService.Init()
                         if popupRE then
                             popupRE:FireClient(player, "A bug occurred with the 7-Day Sign-In rewards.\nPlease accept this Cob Cannon as compensation.\nWe sincerely apologize for the inconvenience!")
                         end
-                        print("【系统】玩家 " .. player.Name .. " 历史七天签到订单补发完成，已发加农炮补偿。")
+                        print("[System] Player " .. player.Name .. " historical seven-day sign-in order reissued; CobCannon compensation granted.")
                     else
                         -- 【情况 B：今天的新订单】(玩家刚刚自己点了购买按钮)
                         local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
                         if playObtainEffectRE then
                             playObtainEffectRE:FireClient(player, "7-Day Rewards Unlocked!\nAll items sent to inventory.") 
                         end
-                        print("【系统】玩家 " .. player.Name .. " 正常购买七天签到，无额外补偿。")
+                        print("[System] Player " .. player.Name .. " purchased seven-day sign-in normally; no extra compensation.")
                         
                         -- 清除意向，防止重复判定
                         activePurchaseIntents[player.UserId] = nil
@@ -204,9 +208,11 @@ function IAPService.Init()
 
             local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
             if playObtainEffectRE then
+                local playFullEffect = (tonumber(shopReward.Quality) or 0) >= 4
                 playObtainEffectRE:FireClient(
                     player,
-                    "Purchase Successful!\nObtained " .. tostring(shopReward.Amount) .. "x " .. tostring(shopReward.Name) .. "!"
+                    "Purchase Successful!\nObtained " .. tostring(shopReward.Amount) .. "x " .. tostring(shopReward.Name) .. "!",
+                    playFullEffect
                 )
             end
 

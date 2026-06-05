@@ -125,7 +125,7 @@ function HighlightController.Init()
         end)
     end)
 
-    print("客户端：HighlightController (智能焦点高亮 + 本地专属草坪领地色) 加载完毕！")
+    print("Client: HighlightController (smart focus highlight + local lawn territory color) loaded.")
 end
 
 return HighlightController

@@ -3,7 +3,6 @@ local ZombieBoxService = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local Debris = game:GetService("Debris")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local itemModels = ReplicatedStorage:WaitForChild("ItemModels")
@@ -17,7 +16,6 @@ if not zombieBoxRE then
 end
 
 local pendingBoxes = {}
-local ACTIVE_BOX_LIFETIME = 60
 local AUTO_OPEN_DISTANCE = 8
 local PICKUP_ENABLE_DELAY = 0.9
 
@@ -144,7 +142,7 @@ function ZombieBoxService.SpawnBox(player, dropPos)
 
     local boxTemplate = itemModels:FindFirstChild("Box")
     if not boxTemplate then
-        warn("【ZombieBoxService】ReplicatedStorage.ItemModels.Box 不存在，无法生成场景盲盒")
+        warn("[ZombieBoxService] ReplicatedStorage.ItemModels.Box is missing; cannot spawn scene box")
         return
     end
 
@@ -166,7 +164,7 @@ function ZombieBoxService.SpawnBox(player, dropPos)
     end
 
     if not promptPart then
-        warn("【ZombieBoxService】Box 模型内没有 BasePart，无法生成可交互盲盒")
+        warn("[ZombieBoxService] Box model has no BasePart; cannot create interactive box")
         box:Destroy()
         return
     end
@@ -243,8 +241,7 @@ function ZombieBoxService.SpawnBox(player, dropPos)
     end)
 
     task.spawn(function()
-        local expireAt = os.clock() + ACTIVE_BOX_LIFETIME
-        while not opened and box and box.Parent and os.clock() < expireAt do
+        while not opened and box and box.Parent do
             if canOpen then
                 local character = player.Character
                 local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -262,8 +259,6 @@ function ZombieBoxService.SpawnBox(player, dropPos)
             task.wait(0.15)
         end
     end)
-
-    Debris:AddItem(box, ACTIVE_BOX_LIFETIME)
 end
 
 -- ✅ return 必须在最底部

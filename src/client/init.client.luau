@@ -1,5 +1,5 @@
 -- src/client/init.client.luau
-print("客户端启动：沉浸式 UI 系统（层级适配修复版）激活...")
+print("Client started: immersive UI system (layer adaptation fix) active...")
 
 local InventoryController = require(script.UI.InventoryController)
 local HotbarController = require(script.UI.HotbarController) 
@@ -16,6 +16,7 @@ local TutorialController = require(script.UI.TutorialController)
 local EventUIManager = require(script.UI.EventUI.EventUIManager)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage") 
+local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
@@ -25,6 +26,23 @@ local X2_SUN_GAME_PASS_ID = 1856661235
 local localPlayer = game:GetService("Players").LocalPlayer
 local initialCameraMaxZoomDistance = localPlayer.CameraMaxZoomDistance
 localPlayer.CameraMaxZoomDistance = initialCameraMaxZoomDistance
+
+local function disableDefaultBackpack()
+    local success, err = pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+    end)
+
+    if not success then
+        warn("[Client] Failed to disable default Roblox backpack: " .. tostring(err))
+    end
+end
+
+task.spawn(function()
+    for _ = 1, 10 do
+        disableDefaultBackpack()
+        task.wait(1)
+    end
+end)
 
 
 
@@ -42,11 +60,13 @@ end
 
 -- 监听玩家角色生成（每次进入游戏或死亡重生时都会触发）
 localPlayer.CharacterAdded:Connect(function()
+    disableDefaultBackpack()
     pullCameraUp()
 end)
 
 -- 如果脚本运行的瞬间角色已经存在，直接执行一次
 if localPlayer.Character then
+    disableDefaultBackpack()
     pullCameraUp()
 end
 
@@ -59,7 +79,7 @@ task.spawn(function()
     for _, gui in pairs(basicGui:GetChildren()) do
         if gui:IsA("ScreenGui") then
             gui.ResetOnSpawn = false
-            print("已为 UI 锁定防重置保护: " .. gui.Name)
+            print("Locked UI reset protection for: " .. gui.Name)
         end
     end
 
