@@ -48,8 +48,9 @@ local function SyncBattleProgress(player, plot, isActive, levelId)
     )
 end
 
-local function IsBattleCancelled(plot, player)
+local function IsBattleCancelled(plot, player, battleToken)
     if not plot then return true end
+    if battleToken and plot:GetAttribute("BattleToken") ~= battleToken then return true end
     if plot:GetAttribute("IsGameOver") then return true end
     if not player or not player.Parent then return true end
     if plot:GetAttribute("OwnerId") ~= player.UserId then return true end
@@ -595,6 +596,8 @@ function ZombieService.StartLevel(plot, levelId, player)
         activeSessions[player.UserId] = { TotalCoins = 0, TotalSeeds = 0, TotalKills = 0 }
     end
     local session = activeSessions[player.UserId]
+    local battleToken = (plot:GetAttribute("BattleToken") or 0) + 1
+    plot:SetAttribute("BattleToken", battleToken)
 
     plot:SetAttribute("IsLevelActive", true)
     plot:SetAttribute("IsGameOver", false)
@@ -609,20 +612,20 @@ function ZombieService.StartLevel(plot, levelId, player)
     if levelData and levelData.Waves then
         for waveIndex, wave in ipairs(levelData.Waves) do
             -- [🌟 修复]：如果手动点击了撤退，立即跳出波次生成循环
-            if IsBattleCancelled(plot, player) then break end
+            if IsBattleCancelled(plot, player, battleToken) then break end
             
             task.spawn(function()
                 if wave.Zombies then
                     for _, zombieGroup in ipairs(wave.Zombies) do
                         for i = 1, zombieGroup.Count do
-                            if IsBattleCancelled(plot, player) then break end
+                            if IsBattleCancelled(plot, player, battleToken) then break end
                             
                             while (plot:GetAttribute("ActiveZombies") or 0) >= MAX_ACTIVE_ZOMBIES do
-                                if IsBattleCancelled(plot, player) then return end
+                                if IsBattleCancelled(plot, player, battleToken) then return end
                                 task.wait(0.5) 
                             end
 
-                            if IsBattleCancelled(plot, player) then return end
+                            if IsBattleCancelled(plot, player, battleToken) then return end
                             
                             local randomRow = math.random(1, 6)
                             ZombieService.SpawnZombie(plot, randomRow, zombieGroup.Type, player)
@@ -637,7 +640,7 @@ function ZombieService.StartLevel(plot, levelId, player)
             if wave.NextWaveTime and wave.NextWaveTime > 0 then
                 local currentWait = 0
                 while currentWait < wave.NextWaveTime do
-                    if IsBattleCancelled(plot, player) then break end
+                    if IsBattleCancelled(plot, player, battleToken) then break end
                     local speedMult = plot:GetAttribute("GameSpeed") or 1
                     currentWait += task.wait(0.5) * speedMult
                 end
@@ -647,10 +650,10 @@ function ZombieService.StartLevel(plot, levelId, player)
 
     repeat
         task.wait(1)
-    until (plot:GetAttribute("ActiveZombies") <= 0) or IsBattleCancelled(plot, player)
+    until (plot:GetAttribute("ActiveZombies") <= 0) or IsBattleCancelled(plot, player, battleToken)
 
     -- [🌟 修复核心逻辑]：确保无论是手动结束还是正常递归，状态都能被正确清理
-    if IsBattleCancelled(plot, player) then
+    if IsBattleCancelled(plot, player, battleToken) then
         -- 这里不需要重复调用 FinalSettlement，因为 LevelService 已经调过了
         -- 但我们需要确保 activeSessions 即使在手动结束时也能被清理
         return 

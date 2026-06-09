@@ -345,10 +345,24 @@ task.spawn(function()
     end
     local btnSpeed1_5 = inBattleFrame and inBattleFrame:WaitForChild("SpeedButton*1.5", 5)
     local btnSpeed4 = inBattleFrame and inBattleFrame:WaitForChild("SpeedButton*4", 5)
-    local btnAutoBattle = inBattleFrame and inBattleFrame:WaitForChild("AutoBattle", 5)
+    local btnLevelSelect = inBattleFrame and inBattleFrame:WaitForChild("AutoBattle", 5)
+    local levelInputBox = inBattleFrame and inBattleFrame:FindFirstChild("InputBox", true)
+    local levelTextBox = levelInputBox and (levelInputBox:IsA("TextBox") and levelInputBox or levelInputBox:FindFirstChildWhichIsA("TextBox", true))
     local homeBtn = playProperty:WaitForChild("Home", 5)
+    local UIEffectUtilForHome = require(script.Utils.UIEffectUtil)
+
+    local function isCarryingAirdrop()
+        local character = player.Character
+        return character and character:FindFirstChild("AirdropWeld", true) ~= nil
+    end
+
     if homeBtn then
         homeBtn.MouseButton1Click:Connect(function()
+            if isCarryingAirdrop() then
+                UIEffectUtilForHome.ShowTip("You cannot use Home while carrying an airdrop.")
+                return
+            end
+
             local character = player.Character
             if not character then return end
             
@@ -384,11 +398,64 @@ task.spawn(function()
         local autoRed = ColorSequence.new(Color3.fromRGB(249, 0, 0), Color3.fromRGB(180, 0, 0))
         local autoGreen = ColorSequence.new(Color3.fromRGB(90, 255, 90), Color3.fromRGB(0, 180, 0))
 
-        local autoLabel = btnAutoBattle:FindFirstChild("TextLabel")
-        local autoGrad = btnAutoBattle:FindFirstChild("UIGradient")
-        
-        player:SetAttribute("AutoBattle", false)
-        if autoGrad then autoGrad.Color = autoRed end
+        local autoLabel = btnLevelSelect:FindFirstChild("TextLabel")
+        local autoGrad = btnLevelSelect:FindFirstChild("UIGradient")
+        local UIEffectUtilForBattle = require(script.Utils.UIEffectUtil)
+        local isLevelSelectConfirming = false
+        local maxSelectableLevel = 1
+        local hasMaxSelectableLevel = false
+
+        local function setLevelSelectText(text)
+            if autoLabel then autoLabel.Text = text end
+            if btnLevelSelect:IsA("TextButton") then btnLevelSelect.Text = text end
+        end
+
+        local function setLevelSelectState(isConfirming)
+            isLevelSelectConfirming = isConfirming
+            setLevelSelectText(isConfirming and "Click Confirm" or "Level Select")
+            if autoGrad then autoGrad.Color = isConfirming and autoGreen or autoRed end
+            if levelInputBox then
+                levelInputBox.Visible = isConfirming
+                if isConfirming and levelTextBox then
+                    levelTextBox.Text = ""
+                    levelTextBox:CaptureFocus()
+                elseif levelTextBox then
+                    levelTextBox:ReleaseFocus()
+                end
+            end
+        end
+
+        local function refreshMaxSelectableLevel(data)
+            if data and data.UnlockedLevel then
+                maxSelectableLevel = math.max(1, tonumber(data.UnlockedLevel) or maxSelectableLevel)
+                hasMaxSelectableLevel = true
+            end
+        end
+
+        local function getLevelInputText()
+            if levelTextBox then
+                return levelTextBox.Text or ""
+            end
+            if levelInputBox and (levelInputBox:IsA("TextLabel") or levelInputBox:IsA("TextButton")) then
+                return levelInputBox.Text or ""
+            end
+            return ""
+        end
+
+        local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF", 5)
+        if getPlayerDataRF then
+            local ok, data = pcall(function()
+                return getPlayerDataRF:InvokeServer()
+            end)
+            if ok then refreshMaxSelectableLevel(data) end
+        end
+
+        local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE", 5)
+        if updateInventoryRE then
+            updateInventoryRE.OnClientEvent:Connect(refreshMaxSelectableLevel)
+        end
+
+        setLevelSelectState(false)
 
         startBattleBtn.MouseButton1Click:Connect(function()
             ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer()
@@ -397,31 +464,35 @@ task.spawn(function()
 
         if endBattleBtn then
             endBattleBtn.MouseButton1Click:Connect(function()
-                -- 【修复1】：玩家手动点击停止战斗时，强制OffAuto Battle状态
-                if player:GetAttribute("AutoBattle") then
-                    player:SetAttribute("AutoBattle", false)
-                    
-                    local autoLabel = btnAutoBattle:FindFirstChild("TextLabel")
-                    local autoGrad = btnAutoBattle:FindFirstChild("UIGradient")
-                    
-                    if autoLabel then autoLabel.Text = "Auto Battle(Off)" end
-                    if autoGrad then autoGrad.Color = ColorSequence.new(Color3.fromRGB(249, 0, 0), Color3.fromRGB(180, 0, 0)) end
-                end
+                setLevelSelectState(false)
 
                 ReplicatedStorage:WaitForChild("EndBattleRE"):FireServer()
             end)
         end
 
-        btnAutoBattle.MouseButton1Click:Connect(function()
-            local isAuto = not player:GetAttribute("AutoBattle")
-            -- 👇 【新增埋点】
-            if isAuto then
-                AnalyticsRE:FireServer("Custom", "UI_Click_AutoBattle_On")
+        btnLevelSelect.MouseButton1Click:Connect(function()
+            if not isLevelSelectConfirming then
+                AnalyticsRE:FireServer("Custom", "UI_Click_LevelSelect_Open")
+                setLevelSelectState(true)
+                return
             end
-            player:SetAttribute("AutoBattle", isAuto)
-            if autoLabel then autoLabel.Text = isAuto and "Auto Battle(On)" or "Auto Battle(Off)" end
-            if autoGrad then autoGrad.Color = isAuto and autoGreen or autoRed end
-            if isAuto and startBattleBtn.Visible then ReplicatedStorage.StartBattleRE:FireServer() end
+
+            local rawText = getLevelInputText()
+            local selectedLevel = tonumber(rawText)
+            if not selectedLevel then
+                UIEffectUtilForBattle.ShowTip("Please enter a level number.")
+                return
+            end
+
+            selectedLevel = math.max(1, math.floor(selectedLevel))
+            if hasMaxSelectableLevel and selectedLevel > maxSelectableLevel then
+                selectedLevel = maxSelectableLevel
+                UIEffectUtilForBattle.ShowTip("Your max unlocked level is Level " .. tostring(maxSelectableLevel) .. ". Starting Level " .. tostring(maxSelectableLevel) .. ".")
+            end
+
+            AnalyticsRE:FireServer("Custom", "UI_Click_LevelSelect_Confirm")
+            setLevelSelectState(false)
+            ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer(selectedLevel)
         end)
 
         local setSpeedRE = ReplicatedStorage:WaitForChild("SetSpeedRE")
@@ -522,22 +593,9 @@ task.spawn(function()
                     updateBattleProgress(0, 0)
                 end
 
-                -- 战斗结束逻辑保持不变...
-                if player:GetAttribute("AutoBattle") then
-                    levelText.Text = "Restarting..."
-                    
-                    -- 【修复2】：延迟 1 秒后真正触发下一场战斗，防止卡死
-                    task.delay(1, function()
-                        -- 再次检查确认玩家没有在此期间取消Auto Battle
-                        if player:GetAttribute("AutoBattle") then
-                            ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer()
-                        end
-                    end)
-                else
-                    -- 如果没有OnAuto Battle（或者已被手动停止Off），则正常返回非战斗 UI
-                    startBattleBtn.Visible = true
-                    inBattleFrame.Visible = false
-                end
+                setLevelSelectState(false)
+                startBattleBtn.Visible = true
+                inBattleFrame.Visible = false
             end
         end)
     end

@@ -61,16 +61,17 @@ end
 local function createLocalSunIcon(position)
     local sunPart = Instance.new("Part")
     sunPart.Name = "LocalHarvestSun"
-    sunPart.Anchored = true
-    sunPart.CanCollide = false
+    sunPart.Anchored = false
+    sunPart.CanCollide = true
     sunPart.CanQuery = false
     sunPart.CanTouch = false
     sunPart.Transparency = 1
-    sunPart.Size = Vector3.new(0.2, 0.2, 0.2)
+    sunPart.Size = Vector3.new(1.3, 1.3, 1.3)
+    sunPart.Shape = Enum.PartType.Ball
     sunPart.Position = position
 
     local gui = Instance.new("BillboardGui")
-    gui.Size = UDim2.new(2.4, 0, 2.4, 0)
+    gui.Size = UDim2.new(2.5, 0, 2.5, 0)
     gui.AlwaysOnTop = true
     gui.Parent = sunPart
 
@@ -82,7 +83,7 @@ local function createLocalSunIcon(position)
     img.Parent = gui
 
     sunPart.Parent = workspace
-    Debris:AddItem(sunPart, 4)
+    Debris:AddItem(sunPart, 8)
 
     return sunPart, gui, img
 end
@@ -96,57 +97,67 @@ function CoinDropController.Init()
         harvestRE.OnClientEvent:Connect(function(amount, startPos, isX2Sun)
             local displayText = getSunPickupDisplayText(amount, isX2Sun == true)
             if startPos and getLocalRoot() then
+                local amountNumber = tonumber(amount) or 0
                 local origin = startPos + Vector3.new(0, 3, 0)
-                local sunCount = math.clamp(math.floor((tonumber(amount) or 0) / 50), 5, 20)
-                local finished = 0
-                local rewardShown = false
-
-                local function finishOne()
-                    finished += 1
-                    if not rewardShown and finished >= sunCount then
-                        rewardShown = true
-                        playSunPickupSound()
-                        UIEffectUtil.Play2DCollectEffect(amount, nil, displayText)
-                    end
-                end
+                local sunCount = math.clamp(math.floor(amountNumber / 50), 5, 20)
+                local rewardPerSun = math.floor(amountNumber / sunCount)
+                local remainder = amountNumber % sunCount
+                local sunParts = {}
 
                 for i = 1, sunCount do
                     local sunPart, gui, img = createLocalSunIcon(origin)
-                    local burstOffset = Vector3.new(
-                        math.random(-500, 500) / 100,
-                        math.random(250, 600) / 100,
-                        math.random(-500, 500) / 100
-                    )
-                    local burstTween = TweenService:Create(
-                        sunPart,
-                        TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-                        {Position = origin + burstOffset}
+                    sunPart.AssemblyLinearVelocity = Vector3.new(
+                        (math.random() - 0.5) * 35,
+                        math.random(25, 55),
+                        (math.random() - 0.5) * 35
                     )
 
-                    burstTween.Completed:Connect(function()
-                        task.delay(2 + ((i - 1) * 0.08), function()
-                            local root = getLocalRoot()
-                            if not root or not sunPart.Parent then
-                                if sunPart then sunPart:Destroy() end
-                                finishOne()
-                                return
-                            end
+                    local currentReward = rewardPerSun
+                    if i == sunCount then
+                        currentReward = rewardPerSun + remainder
+                    end
+
+                    table.insert(sunParts, {
+                        Part = sunPart,
+                        Gui = gui,
+                        Image = img,
+                        Reward = currentReward,
+                    })
+
+                    task.wait(0.06)
+                end
+
+                task.wait(2)
+
+                for _, sunInfo in ipairs(sunParts) do
+                    local sunPart = sunInfo.Part
+                    if sunPart and sunPart.Parent then
+                        local root = getLocalRoot()
+                        if root then
+                            sunPart.CanCollide = false
+                            sunPart.Anchored = true
 
                             local flyTween = TweenService:Create(
                                 sunPart,
                                 TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
-                                {Position = root.Position + Vector3.new(0, 1, 0)}
+                                {Position = root.Position}
                             )
-                            TweenService:Create(img, TweenInfo.new(0.35), {ImageTransparency = 1}):Play()
-                            TweenService:Create(gui, TweenInfo.new(0.35), {Size = UDim2.new(1.1, 0, 1.1, 0)}):Play()
                             flyTween:Play()
                             flyTween.Completed:Connect(function()
                                 if sunPart then sunPart:Destroy() end
-                                finishOne()
+                                playSunPickupSound()
+                                UIEffectUtil.Play2DCollectEffect(
+                                    sunInfo.Reward,
+                                    nil,
+                                    getSunPickupDisplayText(sunInfo.Reward, isX2Sun == true)
+                                )
                             end)
-                        end)
-                    end)
-                    burstTween:Play()
+                        else
+                            sunPart:Destroy()
+                        end
+                    end
+
+                    task.wait(0.08)
                 end
                 return
             end

@@ -8,6 +8,30 @@ local AnalyticsService = game:GetService("AnalyticsService")
 
 local PlotService = require(script.Parent.PlotService)
 local ZombieService = require(script.Parent.ZombieService)
+local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
+
+local function fireTip(player, message)
+    local showTipRE = ReplicatedStorage:FindFirstChild("ShowTipRE")
+    if showTipRE then
+        showTipRE:FireClient(player, message)
+    end
+end
+
+local function getMaxSelectableLevel(player)
+    local data = PlayerDataManager.GetPlayerData(player)
+    return math.max(1, tonumber(data and data.UnlockedLevel) or 1)
+end
+
+local function cancelCurrentBattle(player, plot)
+    plot:SetAttribute("BattleToken", (plot:GetAttribute("BattleToken") or 0) + 1)
+    plot:SetAttribute("IsGameOver", true)
+    plot:SetAttribute("IsLevelActive", false)
+    plot:SetAttribute("ActiveZombies", 0)
+    plot:SetAttribute("TotalZombies", 0)
+    plot:SetAttribute("ZombiesDefeated", 0)
+
+    ZombieService.CleanupPlayerBattle(player)
+end
 
 
 
@@ -28,7 +52,23 @@ function LevelService.Init()
     -- 修改：增加对 targetLevel 的支持，并在开始前刷新植物
     startBattleRE.OnServerEvent:Connect(function(player, targetLevel)
         local plot = PlotService.GetPlayerPlot(player)
-        if not plot or plot:GetAttribute("IsLevelActive") then return end
+        if not plot then return end
+
+        local requestedLevel = tonumber(targetLevel)
+        local isLevelSelect = requestedLevel ~= nil
+        if plot:GetAttribute("IsLevelActive") and not isLevelSelect then return end
+
+        if isLevelSelect then
+            requestedLevel = math.max(1, math.floor(requestedLevel))
+            local maxLevel = getMaxSelectableLevel(player)
+            if requestedLevel > maxLevel then
+                requestedLevel = maxLevel
+                fireTip(player, "Your max unlocked level is Level " .. tostring(maxLevel) .. ". Starting Level " .. tostring(maxLevel) .. ".")
+            end
+
+            cancelCurrentBattle(player, plot)
+            task.wait(0.1)
+        end
 
         -- 👇 【新增这一行核心修复代码】：强行清除上一局残留的撤退/结束标记
         plot:SetAttribute("IsGameOver", false)
@@ -42,7 +82,7 @@ function LevelService.Init()
         -- 2. 同步存档中的新植物（如果有的话）
         CombatService.ReloadSavedPlants(player)
 
-        local levelId = targetLevel or 1 
+        local levelId = requestedLevel or 1
         print("[LevelService] Player " .. player.Name .. " battle refreshed: Level " .. levelId .. "")
 
         ZombieService.StartLevel(plot, levelId, player)

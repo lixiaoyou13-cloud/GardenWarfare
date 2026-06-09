@@ -32,6 +32,26 @@ local function GetSafeGameSpeed(plot)
     return speedMult
 end
 
+local function getPlantAnimator(plant)
+    if not plant or not plant.Parent then
+        return nil
+    end
+
+    local animController = plant:FindFirstChildOfClass("AnimationController") or plant:FindFirstChildOfClass("Humanoid")
+    if not animController then
+        animController = Instance.new("AnimationController")
+        animController.Parent = plant
+    end
+
+    local animator = animController:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = animController
+    end
+
+    return animator
+end
+
 -- ==========================================
 -- [1. 伤害文字与受击特效通用函数]
 -- ==========================================
@@ -152,8 +172,7 @@ function PlantCombatAI.StartIdleAnimation(plant, itemDetail)
 
     task.spawn(function()
         local idleAnimTrack = nil
-        local animController = plant:FindFirstChildOfClass("AnimationController") or plant:FindFirstChildOfClass("Humanoid")
-        local animator = animController and (animController:FindFirstChildOfClass("Animator") or Instance.new("Animator", animController))
+        local animator = getPlantAnimator(plant)
 
         if itemDetail.IdleAnimId and itemDetail.IdleAnimId ~= "" and animator then
             local anim = Instance.new("Animation")
@@ -191,8 +210,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
         local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
         local attackDamage = math.floor(baseAttackDamage * stats.DamageMul)
         
-        local animController = plant:FindFirstChildOfClass("AnimationController") or plant:FindFirstChildOfClass("Humanoid")
-        local animator = animController and animController:FindFirstChildOfClass("Animator")
+        local animator = getPlantAnimator(plant)
 
         local idleAnimTrack = nil
         if itemDetail.IdleAnimId and itemDetail.IdleAnimId ~= "" and animator then
@@ -201,6 +219,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             idleAnimTrack = animator:LoadAnimation(anim)
             idleAnimTrack.Priority = Enum.AnimationPriority.Idle
             idleAnimTrack.Looped = true
+            idleAnimTrack:Play(0.1)
             anim:Destroy()
         end
 
