@@ -57,6 +57,14 @@ local function IsBattleCancelled(plot, player, battleToken)
     return false
 end
 
+local function GetZombieSlowMultiplier(zombie)
+    local slowMultiplier = tonumber(zombie and zombie:GetAttribute("SlowMultiplier")) or 1
+    if slowMultiplier <= 0 or slowMultiplier > 1 then
+        return 1
+    end
+    return slowMultiplier
+end
+
 -- ==========================================
 -- [战斗结束，复活所有隐藏的植物]
 -- ==========================================
@@ -314,8 +322,9 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
         if animTracks[newState] then 
             animTracks[newState]:Play() 
             local speedMult = plot:GetAttribute("GameSpeed") or 1
+            local slowMultiplier = GetZombieSlowMultiplier(zombie)
             if newState == "Walk" then
-                animTracks[newState]:AdjustSpeed(1.5 * speedMult) 
+                animTracks[newState]:AdjustSpeed(1.5 * speedMult * slowMultiplier)
             else
                 animTracks[newState]:AdjustSpeed(1.0 * speedMult)
             end
@@ -377,7 +386,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             end
         end
 
-        humanoid.WalkSpeed = config.Speed
+        humanoid.WalkSpeed = config.Speed * GetZombieSlowMultiplier(zombie)
 
         local overlapParams = OverlapParams.new()
         overlapParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -398,10 +407,11 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
             local speedMult = plot:GetAttribute("GameSpeed") or 1
             local dt = task.wait(0.1 / speedMult)
             timeAccumulated += (dt * speedMult)
+            local slowMultiplier = GetZombieSlowMultiplier(zombie)
 
             if currentState == "Walk" then
-                if animTracks["Walk"] then animTracks["Walk"]:AdjustSpeed(1.5 * speedMult) end
-                humanoid.WalkSpeed = config.Speed * speedMult 
+                if animTracks["Walk"] then animTracks["Walk"]:AdjustSpeed(1.5 * speedMult * slowMultiplier) end
+                humanoid.WalkSpeed = config.Speed * speedMult * slowMultiplier
             elseif currentState == "Eat" then
                 if animTracks["Eat"] then animTracks["Eat"]:AdjustSpeed(1.0 * speedMult) end
                 humanoid.WalkSpeed = 0
@@ -501,7 +511,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player)
                     end
                 end
             else
-                humanoid.WalkSpeed = config.Speed * speedMult 
+                humanoid.WalkSpeed = config.Speed * speedMult * slowMultiplier
                 humanoid:MoveTo(currentTargetPos) 
                 switchState("Walk")
             end

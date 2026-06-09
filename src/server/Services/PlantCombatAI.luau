@@ -52,6 +52,65 @@ local function getPlantAnimator(plant)
     return animator
 end
 
+local function applySlowOnHit(zombieModel, humanoid, itemDetail, speedMult)
+    local slowConfig = itemDetail.SlowOnHit
+    if type(slowConfig) ~= "table" then
+        return
+    end
+    if not zombieModel or not zombieModel.Parent or not humanoid or humanoid.Health <= 0 then
+        return
+    end
+
+    local moveMultiplier = math.clamp(tonumber(slowConfig.MoveMultiplier) or 0.7, 0, 1)
+    local duration = tonumber(slowConfig.Duration) or 2
+    local adjustedDuration = duration / math.max(tonumber(speedMult) or 1, 0.01)
+    local tintColor = slowConfig.Color or Color3.fromRGB(80, 180, 255)
+    local token = (zombieModel:GetAttribute("IceSlowToken") or 0) + 1
+
+    zombieModel:SetAttribute("IceSlowToken", token)
+    zombieModel:SetAttribute("SlowMultiplier", moveMultiplier)
+
+    for _, part in ipairs(zombieModel:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if part:GetAttribute("IceSlowOriginalColor") == nil then
+                part:SetAttribute("IceSlowOriginalColor", part.Color)
+            end
+            part.Color = tintColor
+        end
+    end
+
+    if humanoid.WalkSpeed > 0 then
+        humanoid.WalkSpeed *= moveMultiplier
+    end
+
+    task.delay(adjustedDuration, function()
+        if not zombieModel or not zombieModel.Parent then
+            return
+        end
+        if zombieModel:GetAttribute("IceSlowToken") ~= token then
+            return
+        end
+
+        zombieModel:SetAttribute("SlowMultiplier", nil)
+        zombieModel:SetAttribute("IceSlowToken", nil)
+
+        local currentHumanoid = zombieModel:FindFirstChildOfClass("Humanoid")
+        if not currentHumanoid or currentHumanoid.Health <= 0 or zombieModel:GetAttribute("IsCharred") then
+            return
+        end
+
+        for _, part in ipairs(zombieModel:GetDescendants()) do
+            if part:IsA("BasePart") then
+                local originalColor = part:GetAttribute("IceSlowOriginalColor")
+                if originalColor then
+                    part.Color = originalColor
+                end
+                part:SetAttribute("IceSlowOriginalColor", nil)
+            end
+        end
+    end)
+end
+
 -- ==========================================
 -- [1. 伤害文字与受击特效通用函数]
 -- ==========================================
@@ -142,6 +201,7 @@ local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, a
         if not targetRoot then return end
 
         targetHum.Health = targetHum.Health - attackDamage
+        applySlowOnHit(targetZombieModel, targetHum, itemDetail, speedMult)
 
         local zombieChestPos = targetRoot.Position + Vector3.new(0, 1, 0)
         local currentRootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")

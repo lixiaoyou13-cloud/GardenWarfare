@@ -141,12 +141,12 @@ require(script.Services.IAPService).Init()
 require(script.Services.BaseSunflowerService).Init()
 
 require(script.Services.ZombieBoxService)
---[[Players.PlayerAdded:Connect(function(player)
+Players.PlayerAdded:Connect(function(player)
     player.Chatted:Connect(function(msg)
         if msg == "/testbomb" then
             -- 给发消息的玩家直接塞 20 个樱桃炸弹
             local PDManager = require(script.PlayerDataManager)
-            PDManager.GivePlant(player, "CobCannon", 20, 1)
+            PDManager.GivePlant(player, "MusicIcePeashooter", 20, 1)
             
             -- 在控制台打印提示
             print("【开发者测试】已发放 20 个樱桃炸弹给: " .. player.Name)
@@ -158,6 +158,6 @@ require(script.Services.ZombieBoxService)
             end
         end
     end)
-end)]]
+end)
 
 print("All server modules loaded!")

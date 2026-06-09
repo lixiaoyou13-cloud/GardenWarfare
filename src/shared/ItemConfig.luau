@@ -19,7 +19,8 @@ local ItemConfig = {
         "Melonpult",
         "Threepeater",
         "IceMelonpult",
-        "CobCannon"
+        "CobCannon",
+        "MusicIcePeashooter",
     },
 	
 	BaseLimitedSaleKey = {
@@ -273,6 +274,17 @@ local ItemConfig = {
 			IAPProductId = 3599528978, -- Roblox Developer Product ID
 			IAPPrice = 499,
 		},
+		["MusicIcePeashooter"] = {
+			Id = 20,
+			Name = "Music Ice Peashooter Seed",
+			Quality = 5,           
+			GrowthTime = 1800,     
+			YieldPlant = "MusicIcePeashooter",
+			UnlockLevel = 120, -- ✅ 0级解锁
+			BuyPrice = 100000000,
+			IAPProductId = 3603543683, -- Roblox Developer Product ID
+			IAPPrice = 499,
+		},
 	},
 	
 	Plants = {
@@ -380,6 +392,7 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
 			ProjectileName = "IcePea", 
+			SlowOnHit = { MoveMultiplier = 0.7, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
 			Description = "Details: Fires frost peas, inflicts damage and applies slow!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -586,6 +599,7 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
 			ProjectileName = "IceMelon", 
+			SlowOnHit = { MoveMultiplier = 0.7, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
 			Description = "Details: Hurls ice melon to deal extreme damage and slow targets!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -605,6 +619,23 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Corn", 
 			Description = "Description: The ultimate weapon. Lobs giant cobs for devastating damage.",
+			IAPProductId = 0, -- Roblox Developer Product ID
+			IAPPrice = 0,
+		},
+		["MusicIcePeashooter"] = {
+			Id = "MusicIcePeashooter",
+			Name = "Music Ice Peashooter",
+			HP = 1500,
+			Quality = 5,
+			CanAttack = true,
+			Attack = 4000,
+			AttackInterval = 2, 
+			IdleAnimId = "rbxassetid://77070181691364",
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(0, 255, 255),
+			ProjectileName = "MusicIcePea", 
+			SlowOnHit = { MoveMultiplier = 0.7, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
+			Description = "Details: Fires frost peas, inflicts damage and applies slow!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
 		},

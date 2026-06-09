@@ -41,12 +41,12 @@ RollConfig.Pools = {
         { Id = "RadishShooter",Weight = 100, DisplayRate = "10%" },   -- 🎁 非商城
         
         -- ⭐⭐⭐⭐ 4星 
-        { Id = "FumeShroom",   Weight = 100,  DisplayRate = "10%" },    -- 商城
+        { Id = "FumeShroom",   Weight = 100,  DisplayRate = "11%" },    -- 商城
         { Id = "Magnetshroom", Weight = 100,  DisplayRate = "10%" },    -- 🎁 非商城
         { Id = "Cactus",       Weight = 130,  DisplayRate = "13%" },    -- 商城
         
         -- ⭐⭐⭐⭐⭐ 5星 (共 3 个，加农炮压轴)
-        { Id = "TwinSunflower",Weight = 80,  DisplayRate = "8%" },    -- 🎁 非商城
+        { Id = "MusicIcePeashooter",Weight = 80,  DisplayRate = "7%" },    -- 🎁 非商城
         { Id = "IceMelonpult", Weight = 90,  DisplayRate = "9%" },    -- 🎁 非商城
         { Id = "CobCannon",    Weight = 70,  DisplayRate = "7%" },    -- 🎁 非商城 (💣终极大奖，全场最低 2%)
     }
