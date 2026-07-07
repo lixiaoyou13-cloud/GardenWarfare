@@ -1,11 +1,12 @@
 -- src/client/Services/StealWarningUIController.luau
 local StealWarningUIController = {}
 
-local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+
+local POINTER_UPDATE_INTERVAL = 0.2
 
 function StealWarningUIController.Init()
     local player = Players.LocalPlayer
@@ -25,18 +26,18 @@ function StealWarningUIController.Init()
     container.Visible = false
     container.Parent = pointerGui
 
-    -- 2. 红色指向箭头
+    -- 2. 红点色指向箭头
     local arrow = Instance.new("ImageLabel")
     arrow.Name = "Arrow"
     arrow.Size = UDim2.new(0, 50, 0, 50)
     arrow.Position = UDim2.new(0.5, 0, 0.5, 0)
     arrow.AnchorPoint = Vector2.new(0.5, 0.5)
     arrow.BackgroundTransparency = 1
-    arrow.Image = "rbxassetid://3145534143" -- 复用空投的箭头形状
-    arrow.ImageColor3 = Color3.fromRGB(255, 0, 0) -- 纯红色
+    arrow.Image = "rbxassetid://3145534143" -- 复用空投的箭头形状态
+    arrow.ImageColor3 = Color3.fromRGB(255, 0, 0) -- 纯红点色
     arrow.Parent = container
 
-    -- 3. 红色醒目叹号
+    -- 3. 红点色醒目叹号
     local label = Instance.new("TextLabel")
     label.Name = "Exclamation"
     label.Size = UDim2.new(1, 0, 1, 0)
@@ -55,9 +56,7 @@ function StealWarningUIController.Init()
     textStroke.Thickness = 4
     textStroke.Parent = label
 
-    -- ==========================================
-    -- [🌟 核心]：急促的闪烁警告动画
-    -- ==========================================
+    -- 急促的闪烁警告动画
     local uiScale = Instance.new("UIScale")
     uiScale.Scale = 1
     uiScale.Parent = container
@@ -67,12 +66,14 @@ function StealWarningUIController.Init()
     local scaleTween = TweenService:Create(uiScale, scaleTweenInfo, {Scale = 1.5})
     scaleTween:Play()
 
-    -- ==========================================
-    -- [🌟 雷达追踪算法]
-    -- ==========================================
-    RunService.RenderStepped:Connect(function()
+    -- 雷达追踪算法
+    task.spawn(function()
+        while pointerGui.Parent do
         local camera = Workspace.CurrentCamera
-        if not camera then return end
+            if not camera then
+                task.wait(POINTER_UPDATE_INTERVAL)
+                continue
+            end
 
         -- 寻找场景中被打上 "被偷" 标签的植物
         local stolenPlants = CollectionService:GetTagged("BeingStolen")
@@ -89,7 +90,8 @@ function StealWarningUIController.Init()
         -- 如果没有我的植物正在被偷，立刻隐藏 UI
         if not targetPlant or not targetPlant.PrimaryPart then
             container.Visible = false
-            return
+                task.wait(POINTER_UPDATE_INTERVAL)
+                continue
         end
 
         local targetPos = targetPlant.PrimaryPart.Position + Vector3.new(0, 5, 0)
@@ -99,18 +101,18 @@ function StealWarningUIController.Init()
         container.Visible = true
 
         if onScreen then
-            -- 【情况 A：植物已经在屏幕视野内】
+            -- 情况 A：植物已经在屏幕视野内
             container.Position = UDim2.new(0, vector.X, 0, vector.Y)
             arrow.Visible = false -- 在屏幕内不需要箭头指引，只留一个巨大的闪烁叹号在植物头上
             label.Position = UDim2.new(0.5, 0, 0.5, 0)
         else
-            -- 【情况 B：植物在视野外，开启屏幕边缘贴边算法】
+            -- 情况 B：植物在视野外，开启屏幕边缘贴边算法
             arrow.Visible = true
             local offset = Vector2.new(vector.X - center.X, vector.Y - center.Y)
-            if vector.Z < 0 then offset = -offset end 
+            if vector.Z < 0 then offset = -offset end
 
             local angle = math.atan2(offset.Y, offset.X)
-            
+
             local paddingX, paddingY = 80, 80
             local edgeX = center.X - paddingX
             local edgeY = center.Y - paddingY
@@ -129,12 +131,15 @@ function StealWarningUIController.Init()
 
             container.Position = UDim2.new(0, center.X + screenX, 0, center.Y + screenY)
             arrow.Rotation = math.deg(angle)
-            
-            -- 将叹号稍微偏移一点，别挡住箭头本身
+
+            -- 将叹号稍微偏移一点击，别挡住箭头本身
             label.Position = UDim2.new(0.5, 0, 0.5, -20)
         end
+
+            task.wait(POINTER_UPDATE_INTERVAL)
+        end
     end)
-    
+
     print("Client: StealWarningUIController loaded; anti-steal radar active.")
 end
 

@@ -21,42 +21,38 @@ local ItemConfig = {
         "IceMelonpult",
         "CobCannon",
         "MusicIcePeashooter",
-    },
-	
-	BaseLimitedSaleKey = {
-		-- ==========================================
-		-- 🛒 【4 个商城中出现的植物】(按解锁等级排序)
-		-- ==========================================
-		"Peashooter",   -- 商城: 0级解锁
-		"Wall",         -- 商城: 3级解锁
-		"KernelPult",   -- 商城: 8级解锁
-		"Melonpult",    -- 商城: 50级解锁 (大杀器代表)
+        "AppleMortar",
 
-		-- ==========================================
-		-- 🎁 【6 个商城中未出现的植物】(不可出售 / 抽奖 / 活动专属)
-		-- ==========================================
-		"SnowPea",      -- 寒冰射手 (3星)
-		"CherryBomb",   -- 樱桃炸弹 (3星)
+    },
+
+	BaseLimitedSaleKey = {
+		-- 4 个商城中出现的植物(按解锁等级排序)
+		"Peashooter", -- 商城: 0级解锁
+		"Wall", -- 商城: 3级解锁
+		"KernelPult", -- 商城: 8级解锁
+		"Melonpult", -- 商城: 50级解锁 (大杀器代表)
+
+		-- 6 个商城中未出现的植物(不可出售 / 抽奖 / 活动专属)
+		"SnowPea", -- 寒冰射手 (3星)
+		"CherryBomb", -- 樱桃炸弹 (3星)
 		"Magnetshroom", -- 磁力菇 (4星)
-		"TwinSunflower",-- 双子向日葵 (5星)
+		"TwinSunflower", -- 双子向日葵 (5星)
 		"IceMelonpult", -- 冰西瓜投手 (5星)
 	},
-	
+
 
 	Seeds = {
-		-- ==========================================
-		-- ⭐ 1星种子 (15秒 | 200金币)
-		-- ==========================================
+		-- 1星种子 (15秒 | 200金币)
 
-		--  IsSellable = false,
+		-- IsSellable = false
 		["Peashooter"] = {
 			Id = 1,
 			Name = "Peashooter Seed",
 			Quality = 1,
 			GrowthTime = 5,
 			YieldPlant = "Peashooter",
-			BuyPrice = 200,       
-			UnlockLevel = 0, -- ✅ 0级解锁
+			BuyPrice = 200,
+			UnlockLevel = 0, -- 0级解锁
 			IAPProductId = 3599509881, -- Roblox Developer Product ID
 			IAPPrice = 2,
 		},
@@ -66,23 +62,21 @@ local ItemConfig = {
 			Quality = 1,
 			GrowthTime = 15,
 			YieldPlant = "Wall",
-			BuyPrice = 400,       
-			UnlockLevel = 2, -- ✅ 3级解锁
+			BuyPrice = 400,
+			UnlockLevel = 2, -- 3级解锁
 			IAPProductId = 3599513941, -- Roblox Developer Product ID
 			IAPPrice = 4,
 		},
 
-		-- ==========================================
-		-- ⭐⭐ 2星种子 (180秒 | 3,000金币)
-		-- ==========================================
+		-- 2星种子 (180秒 | 3,000金币)
 		["KernelPult"] = {
 			Id = 3,
 			Name = "Kernel-pult Seed",
 			Quality = 2,
 			GrowthTime = 30,
 			YieldPlant = "KernelPult",
-			BuyPrice = 1000,      
-			UnlockLevel = 7, -- ✅ 8级解锁
+			BuyPrice = 1000,
+			UnlockLevel = 7, -- 8级解锁
 			IAPProductId = 3599525245, -- Roblox Developer Product ID
 			IAPPrice = 12,
 		},
@@ -92,8 +86,8 @@ local ItemConfig = {
 			Quality = 2,
 			GrowthTime = 100,
 			YieldPlant = "CarrotShooter",
-			BuyPrice = 3000,       
-			UnlockLevel = 10, -- ✅ 0级解锁
+			BuyPrice = 3000,
+			UnlockLevel = 10, -- 0级解锁
 			IAPProductId = 3599525415, -- Roblox Developer Product ID
 			IAPPrice = 18,
 		},
@@ -103,22 +97,20 @@ local ItemConfig = {
 			Quality = 2,
 			GrowthTime = 120,
 			YieldPlant = "CoconutTree",
-			BuyPrice = 9000,     
-			UnlockLevel = 14, -- ✅ 12级解锁
+			BuyPrice = 9000,
+			UnlockLevel = 14, -- 12级解锁
 			IAPProductId = 3599525663, -- Roblox Developer Product ID
 			IAPPrice = 28,
 		},
 
-		-- ==========================================
-		-- ⭐⭐⭐ 3星种子 (900秒 | 35,000金币)
-		-- ==========================================
+		-- 3星种子 (900秒 | 35,000金币)
 		["SnowPea"] = {
 			Id = 6,
 			Name = "SnowPea Seed",
-			Quality = 3,           
-			GrowthTime = 200,      
+			Quality = 3,
+			GrowthTime = 200,
 			YieldPlant = "SnowPea",
-			UnlockLevel = 17, -- ✅ 0级解锁
+			UnlockLevel = 17, -- 0级解锁
 			BuyPrice = 50000,
 			IAPProductId = 3599525941, -- Roblox Developer Product ID
 			IAPPrice = 45,
@@ -126,10 +118,10 @@ local ItemConfig = {
 		["CherryBomb"] = {
 			Id = 7,
 			Name = "Cherry Bomb Seed",
-			Quality = 3,           
-			GrowthTime = 210,     
+			Quality = 3,
+			GrowthTime = 210,
 			YieldPlant = "CherryBomb",
-			UnlockLevel = 4, -- ✅ 0级解锁
+			UnlockLevel = 4, -- 0级解锁
 			BuyPrice = 500,
 			IAPProductId = 3599516921, -- Roblox Developer Product ID
 			IAPPrice = 2,
@@ -137,26 +129,24 @@ local ItemConfig = {
 		["RadishShooter"] = {
 			Id = 8,
 			Name = "Radish Shooter Seed",
-			Quality = 3,           
-			GrowthTime = 300,     
+			Quality = 3,
+			GrowthTime = 300,
 			YieldPlant = "RadishShooter",
-			UnlockLevel = 23, -- ✅ 0级解锁
+			UnlockLevel = 23, -- 0级解锁
 			BuyPrice = 100000,
 			IAPProductId =3599526232, -- Roblox Developer Product ID
 			IAPPrice = 65,
 		},
 
-		-- ==========================================
-		-- ⭐⭐⭐⭐ 4星种子 (1800秒 | 150,000金币)
-		-- ==========================================
+		-- 4星种子 (1800秒 | 150,000金币)
 		["PotatoMine"] = {
 			Id = 9,
 			Name = "Potato Mine Seed",
 			Quality = 4,
 			GrowthTime = 400,
 			YieldPlant = "PotatoMine",
-			BuyPrice = 320000,    
-			UnlockLevel = 29, -- ✅ 18级解锁
+			BuyPrice = 320000,
+			UnlockLevel = 29, -- 18级解锁
 			IAPProductId = 3599526403, -- Roblox Developer Product ID
 			IAPPrice = 90,
 		},
@@ -166,8 +156,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 400,
 			YieldPlant = "FumeShroom",
-			BuyPrice = 150000,    
-			UnlockLevel = 36, -- ✅ 23级解锁
+			BuyPrice = 500000,
+			UnlockLevel = 36, -- 23级解锁
 			IAPProductId = 3599526628, -- Roblox Developer Product ID
 			IAPPrice = 120,
 		},
@@ -177,8 +167,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 400,
 			YieldPlant = "Magnetshroom",
-			BuyPrice = 850000,       
-			UnlockLevel = 44, -- ✅ 0级解锁
+			BuyPrice = 850000,
+			UnlockLevel = 44, -- 0级解锁
 			IAPProductId = 3599526993, -- Roblox Developer Product ID
 			IAPPrice = 155,
 		},
@@ -188,8 +178,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 400,
 			YieldPlant = "Jalapeno",
-			BuyPrice = 1500000,     
-			UnlockLevel = 53, -- ✅ 27级解锁
+			BuyPrice = 1500000,
+			UnlockLevel = 53, -- 27级解锁
 			IAPProductId = 3599527190, -- Roblox Developer Product ID
 			IAPPrice = 190,
 		},
@@ -199,8 +189,8 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 420,
 			YieldPlant = "Cactus",
-			BuyPrice = 2700000,    
-			UnlockLevel = 63, -- ✅ 32级解锁
+			BuyPrice = 2700000,
+			UnlockLevel = 63, -- 32级解锁
 			IAPProductId = 3599527499, -- Roblox Developer Product ID
 			IAPPrice = 230,
 		},
@@ -210,22 +200,20 @@ local ItemConfig = {
 			Quality = 4,
 			GrowthTime = 500,
 			YieldPlant = "Sunflower",
-			BuyPrice = 5000000,    
-			UnlockLevel = 72, -- ✅ 40级解锁
+			BuyPrice = 5000000,
+			UnlockLevel = 72, -- 40级解锁
 			IAPProductId = 3599527640, -- Roblox Developer Product ID
 			IAPPrice = 270,
 		},
 
-		-- ==========================================
-		-- ⭐⭐⭐⭐⭐ 5星种子 (3600秒 | 500,000金币)
-		-- ==========================================
+		-- 5星种子 (3600秒 | 500,000金币)
 		["TwinSunflower"] = {
 			Id = 15,
 			Name = "Twin Sunflower Seed",
-			Quality = 5,           
-			GrowthTime = 3600,     
+			Quality = 5,
+			GrowthTime = 3600,
 			YieldPlant = "TwinSunflower",
-			UnlockLevel = 80, -- ✅ 0级解锁
+			UnlockLevel = 80, -- 0级解锁
 			BuyPrice = 8000000,
 			IAPProductId = 3599527917, -- Roblox Developer Product ID
 			IAPPrice = 320,
@@ -233,21 +221,21 @@ local ItemConfig = {
 		["Melonpult"] = {
 			Id = 16,
 			Name = "Melon-pult Seed",
-			Quality = 5,           
-			GrowthTime = 1800,     
+			Quality = 5,
+			GrowthTime = 1800,
 			YieldPlant = "Melonpult",
-			BuyPrice = 10000000,    
-			UnlockLevel = 86, -- ✅ 50级解锁
+			BuyPrice = 10000000,
+			UnlockLevel = 86, -- 50级解锁
 			IAPProductId = 3599528132, -- Roblox Developer Product ID
 			IAPPrice = 370,
 		},
 		["Threepeater"] = {
 			Id = 17,
 			Name = "Threepeater Seed",
-			Quality = 5,           
-			GrowthTime = 1800,     
+			Quality = 5,
+			GrowthTime = 1800,
 			YieldPlant = "Threepeater",
-			UnlockLevel = 91, -- ✅ 0级解锁
+			UnlockLevel = 91, -- 0级解锁
 			BuyPrice = 24000000,
 			IAPProductId = 3599528340, -- Roblox Developer Product ID
 			IAPPrice = 420,
@@ -255,10 +243,10 @@ local ItemConfig = {
 		["IceMelonpult"] = {
 			Id = 18,
 			Name = "Ice Melon-pult Seed",
-			Quality = 5,           
-			GrowthTime = 1800,     
+			Quality = 5,
+			GrowthTime = 1800,
 			YieldPlant = "IceMelonpult",
-			UnlockLevel = 96, -- ✅ 0级解锁
+			UnlockLevel = 96, -- 0级解锁
 			BuyPrice = 55000000,
 			IAPProductId = 3599528561, -- Roblox Developer Product ID
 			IAPPrice = 460,
@@ -269,31 +257,62 @@ local ItemConfig = {
 			Quality = 5,
 			GrowthTime = 1800,
 			YieldPlant = "CobCannon",
-			BuyPrice = 100000000,       
-			UnlockLevel = 100, -- ✅ 0级解锁
+			BuyPrice = 100000000,
+			UnlockLevel = 100, -- 0级解锁
 			IAPProductId = 3599528978, -- Roblox Developer Product ID
 			IAPPrice = 499,
 		},
 		["MusicIcePeashooter"] = {
 			Id = 20,
 			Name = "Music Ice Peashooter Seed",
-			Quality = 5,           
-			GrowthTime = 1800,     
+			Quality = 5,
+			GrowthTime = 1800,
 			YieldPlant = "MusicIcePeashooter",
-			UnlockLevel = 120, -- ✅ 0级解锁
+			UnlockLevel = 120, -- 0级解锁
 			BuyPrice = 100000000,
 			IAPProductId = 3603543683, -- Roblox Developer Product ID
 			IAPPrice = 499,
 		},
+		["AppleMortar"] = {
+			Id = 21,
+			Name = "Apple Mortar Seed",
+			Quality = 5,
+			GrowthTime = 2400,
+			YieldPlant = "AppleMortar",
+			UnlockLevel = 125,
+			BuyPrice = 150000000,
+			IAPProductId = 3606320465,
+			IAPPrice = 599,
+		},
+		["TallWall"] = {
+			Id = 22,
+			Name = "Tall Wall-nut Seed",
+			Quality = 5,
+			GrowthTime = 10,
+			YieldPlant = "TallWall",
+
+			BuyPrice = 200000000,
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["Chomper"] = {
+			Id = 23,
+			Name = "Chomper Seed",
+			Quality = 5,
+			GrowthTime = 600,
+			YieldPlant = "Chomper",
+			BuyPrice = 250000000,
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
 	},
-	
+
 	Plants = {
-		-- ==========================================
-		-- ⭐ 1星植物 (基础级)
-		-- ==========================================
+		-- 1星植物 (基础级)
 		["Peashooter"] = {
 			Id = "Peashooter",
 			Name = "Peashooter",
+			IconId = "rbxassetid://71143798063782",
 			HP = 300,
 			Quality = 1,
 			IdleAnimId = "rbxassetid://78336317659894",
@@ -302,7 +321,7 @@ local ItemConfig = {
 			AttackInterval = 2,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 127),
-			ProjectileName = "Pea", 
+			ProjectileName = "Pea",
 			Description = "Description: Shoots peas to deal basic damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -310,6 +329,7 @@ local ItemConfig = {
 		["Wall"] = {
 			Id = "Wall",
 			Name = "Wall-nut",
+			IconId = "rbxassetid://121783051376976",
 			HP = 10000,
 			Quality = 1,
 			IdleAnimId = "rbxassetid://130556607788926",
@@ -319,23 +339,22 @@ local ItemConfig = {
 			IAPPrice = 0,
 		},
 
-		-- ==========================================
-		-- ⭐⭐ 2星植物 (进阶级)
-		-- ==========================================
+		-- 2星植物 (进阶级)
 		["KernelPult"] = {
 			Id = "KernelPult",
 			Name = "Kernel-pult",
+			IconId = "rbxassetid://71266450837088",
 			HP = 500,
 			Quality = 2,
 			IdleAnimId = "rbxassetid://135320524253878",
 			AttackAnimation = "rbxassetid://125434851620830",
-			ArcHeight = 40, -- 🏀 投手专属
+			ArcHeight = 40, -- 投手专属
 			CanAttack = true,
 			Attack = 100,
 			AttackInterval = 2,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
-			ProjectileName = "Kernel", 
+			ProjectileName = "Kernel",
 			Description = "Description: Lobs kernels to deal basic damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -343,17 +362,18 @@ local ItemConfig = {
 		["CarrotShooter"] = {
 			Id = "CarrotShooter",
 			Name = "CarrotShooter",
+			IconId = "rbxassetid://76231084529607",
 			HP = 500,
 			Quality = 2,
 			IdleAnimId = "rbxassetid://125291231495047",
 			AttackAnimation = "rbxassetid://135622253127156",
-			-- 🔫 射手：已移除 ArcHeight
+			-- 射手：已移除 ArcHeight
 			CanAttack = true,
 			Attack = 150,
 			AttackInterval = 2,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
-			ProjectileName = "Carrot", 
+			ProjectileName = "Carrot",
 			Description = "Description: Shoots carrots to deal basic damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -361,38 +381,38 @@ local ItemConfig = {
 		["CoconutTree"] = {
 			Id = "CoconutTree",
 			Name = "Coconut Tree",
+			IconId = "rbxassetid://70525233151466",
 			HP = 500,
 			Quality = 2,
 			CanAttack = true,
-			ArcHeight = 20, -- 🏀 投手专属：已修复补上
-			Attack = 250, 
+			ArcHeight = 20, -- 投手专属：已补上
+			Attack = 250,
 			IdleAnimId = "rbxassetid://82072725732014",
 			AttackAnimation = "rbxassetid://140311761151184",
-			AttackInterval = 3, 
+			AttackInterval = 3,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 170, 0),
-			ProjectileName = "Coconut", 
+			ProjectileName = "Coconut",
 			Description = "Description: Lobs a heavy coconut, dealing single-target damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
 		},
 
-		-- ==========================================
-		-- ⭐⭐⭐ 3星植物 (主力级)
-		-- ==========================================
+		-- 3星植物 (主力级)
 		["SnowPea"] = {
 			Id = "SnowPea",
 			Name = "Snow Pea",
+			IconId = "rbxassetid://112031217635780",
 			HP = 800,
 			Quality = 3,
 			CanAttack = true,
 			Attack = 500,
-			AttackInterval = 2, 
+			AttackInterval = 2,
 			IdleAnimId = "rbxassetid://78336317659894",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
-			ProjectileName = "IcePea", 
-			SlowOnHit = { MoveMultiplier = 0.7, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
+			ProjectileName = "IcePea",
+			SlowOnHit = { MoveMultiplier = 0.5, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
 			Description = "Details: Fires frost peas, inflicts damage and applies slow!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -400,13 +420,14 @@ local ItemConfig = {
 		["CherryBomb"] = {
 			Id = "CherryBomb",
 			Name = "Cherry Bomb",
+			IconId = "rbxassetid://86234409558738",
 			HP = 800,
 			Quality = 3,
-			CanAttack = false, 
-			IsThrowable = true, -- 💣 投掷爆炸类
-			ExplosionRadius = 10, 
-			ExplosionDamage = 3000, 
-			ExplosionEffect = "CherryBombHit", 
+			CanAttack = false,
+			IsThrowable = true, -- 投掷爆炸类
+			ExplosionRadius = 10,
+			ExplosionDamage = 3000,
+			ExplosionEffect = "CherryBombHit",
 			Description = "Details: Explodes instantly in a large area!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -414,35 +435,35 @@ local ItemConfig = {
 		["RadishShooter"] = {
 			Id = "RadishShooter",
 			Name = "RadishShooter",
+			IconId = "rbxassetid://106121221312181",
 			HP = 800,
 			Quality = 3,
 			IdleAnimId = "rbxassetid://86333907257335",
 			AttackAnimation = "rbxassetid://85325901506430",
-			-- 🔫 射手：无 ArcHeight
+			-- 射手：无 ArcHeight
 			CanAttack = true,
 			Attack = 600,
 			AttackInterval = 2,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
-			ProjectileName = "WhiteRadish", 
+			ProjectileName = "WhiteRadish",
 			Description = "Description: Shoots heavy radishes to deal high damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
 		},
 
-		-- ==========================================
-		-- ⭐⭐⭐⭐ 4星植物 (精英级)
-		-- ==========================================
+		-- 4星植物 (精英级)
 		["PotatoMine"] = {
 			Id = "PotatoMine",
 			Name = "Potato Mine",
+			IconId = "rbxassetid://132301099035468",
 			HP = 1500,
-			Attack = 999999,
+			Attack = 20000,
 			Quality = 4,
 			IdleAnimId = "rbxassetid://90962037485623",
 			CanAttack = false,
-			ExplosionType = "Single", -- 💥 接触爆炸
-			ExplosionDamage = 999999,
+			ExplosionType = "Single", -- 接触爆炸
+			ExplosionDamage = 20000,
 			Description = "Description: Explodes on contact, dealing massive single-target damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -450,6 +471,7 @@ local ItemConfig = {
 		["FumeShroom"] = {
 			Id = "FumeShroom",
 			Name = "Fume-shroom",
+			IconId = "rbxassetid://111582428953831",
 			HP = 1500,
 			Quality = 4,
 			CanAttack = true,
@@ -458,8 +480,9 @@ local ItemConfig = {
 			IdleAnimId = "rbxassetid://137165648071153",
 			AttackAnimation = "rbxassetid://106856862873566",
 			HitEffectTexture = "rbxassetid://243098098",
-			HitEffectColor = Color3.fromRGB(170, 85, 255), 
-			ProjectileName = "Spore", 
+			HitEffectColor = Color3.fromRGB(170, 85, 255),
+			ProjectileName = "Spore",
+			Piercing = true,
 			Description = "Description: Sprays high-damage spores to suppress zombies ahead.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -467,17 +490,18 @@ local ItemConfig = {
 		["Magnetshroom"] = {
 			Id = "Magnetshroom",
 			Name = "Magnetshroom",
+			IconId = "rbxassetid://108524168044389",
 			HP = 1500,
 			Quality = 4,
 			IdleAnimId = "rbxassetid://102236070169653",
 			AttackAnimation = "rbxassetid://108055644403303",
-			-- 🔫 射手：已移除 ArcHeight
+			-- 射手：已移除 ArcHeight
 			CanAttack = true,
 			Attack = 800,
 			AttackInterval = 2,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
-			ProjectileName = "Lightning", 
+			ProjectileName = "Lightning",
 			Description = "Description: Fires lightning to deal heavy electric damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -485,12 +509,13 @@ local ItemConfig = {
 		["Jalapeno"] = {
 			Id = "Jalapeno",
 			Name = "Jalapeno",
+			IconId = "rbxassetid://72546773609598",
 			HP = 3000,
-			Attack = 999999,
+			Attack = 20000,
 			Quality = 4,
 			CanAttack = false,
-			ExplosionType = "Row", -- 💥 接触爆炸（清行）
-			ExplosionDamage =999999,
+			ExplosionType = "Row", -- 接触爆炸（清晰行）
+			ExplosionDamage = 20000,
 			Description = "Description: Explodes instantly, destroying all zombies in a lane.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -498,16 +523,18 @@ local ItemConfig = {
 		["Cactus"] = {
 			Id = "Cactus",
 			Name = "Cactus",
+			IconId = "rbxassetid://74908812230797",
 			HP = 1500,
 			Quality = 4,
 			CanAttack = true,
 			Attack = 1000,
 			AttackInterval = 1.5,
 			IdleAnimId = "rbxassetid://132507907086232",
-			AttackAnimation ="rbxassetid://87531231080785", 
+			AttackAnimation ="rbxassetid://87531231080785",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
-			ProjectileName = "Spike", 
+			ProjectileName = "Spike",
+			Piercing = true,
 			Description = "Description: Fires sharp spikes with strong piercing power.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -515,6 +542,7 @@ local ItemConfig = {
 		["Sunflower"] = {
 			Id = "Sunflower",
 			Name = "Sunflower",
+			IconId = "rbxassetid://86938552465859",
 			HP = 1500,
 			Quality = 4,
 			CanAttack = true,
@@ -524,28 +552,27 @@ local ItemConfig = {
 			AttackAnimation = "rbxassetid://100300439397971",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(85, 255, 0),
-			ProjectileName = "Sunflower",  
+			ProjectileName = "Sunflower",
 			Description = "Description: Generates value and assists in combat.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
 		},
 
-		-- ==========================================
-		-- ⭐⭐⭐⭐⭐ 5星植物 (传说级)
-		-- ==========================================
+		-- 5星植物 (传说级)
 		["TwinSunflower"] = {
 			Id = "TwinSunflower",
 			Name = "Twin Sunflower",
+			IconId = "rbxassetid://122574600110470",
 			HP = 3000,
 			Quality = 5,
 			CanAttack = true,
 			Attack = 2000,
-			AttackInterval = 2, 
+			AttackInterval = 2,
 			IdleAnimId = "rbxassetid://93822718710198",
 			AttackAnimation = "rbxassetid://109061928244787",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(217, 255, 0),
-			ProjectileName = "Sunbeam", 
+			ProjectileName = "Sunbeam",
 			Description = "Details: Fires laser to deal massive damage!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -553,17 +580,20 @@ local ItemConfig = {
 		["Melonpult"] = {
 			Id = "Melonpult",
 			Name = "Melon-pult",
+			IconId = "rbxassetid://84463799904562",
 			HP = 3000,
 			Quality = 5,
 			CanAttack = true,
-			ArcHeight = 20, -- 🏀 投手专属
+			ArcHeight = 20, -- 投手专属
 			Attack = 3000,
-			AttackInterval = 2, 
+			AttackInterval = 2,
 			IdleAnimId = "rbxassetid://117331055474996",
 			AttackAnimation = "rbxassetid://125434851620830",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
-			ProjectileName = "Melon", 
+			ProjectileName = "Melon",
+			SplashDamageScale = 0.7,
+			SplashRadius = 14,
 			Description = "Details: Lobs watermelons to deal massive damage!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -571,6 +601,7 @@ local ItemConfig = {
 		["Threepeater"] = {
 			Id = "Threepeater",
 			Name = "Threepeater",
+			IconId = "rbxassetid://96853882236956",
 			HP = 3000,
 			Quality = 5,
 			IdleAnimId = "rbxassetid://133167269306731",
@@ -580,7 +611,7 @@ local ItemConfig = {
 			AttackInterval = 2,
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
-			ProjectileName = "Pea", 
+			ProjectileName = "Pea",
 			Description = "Description: Fires multiple peas to deal insane damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -588,18 +619,22 @@ local ItemConfig = {
 		["IceMelonpult"] = {
 			Id = "IceMelonpult",
 			Name = "Ice Melon-pult",
+			IconId = "rbxassetid://138388431733147",
 			HP = 3000,
 			Quality = 5,
 			CanAttack = true,
-			ArcHeight = 20, -- 🏀 投手专属：已修复补上
+			ArcHeight = 20, -- 投手专属：已补上
 			Attack = 4000,
-			AttackInterval = 2, 
+			AttackInterval = 2,
 			IdleAnimId = "rbxassetid://117331055474996",
 			AttackAnimation = "rbxassetid://125434851620830",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
-			ProjectileName = "IceMelon", 
-			SlowOnHit = { MoveMultiplier = 0.7, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
+			ProjectileName = "IceMelon",
+			SplashDamageScale = 0.7,
+			SplashRadius = 14,
+			SplashAppliesSlow = true,
+			SlowOnHit = { MoveMultiplier = 0.5, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
 			Description = "Details: Hurls ice melon to deal extreme damage and slow targets!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -607,17 +642,20 @@ local ItemConfig = {
 		["CobCannon"] = {
 			Id = "CobCannon",
 			Name = "CobCannon",
+			IconId = "rbxassetid://108711542034516",
 			HP = 3000,
 			Quality = 5,
 			IdleAnimId = "rbxassetid://140048491047365",
 			AttackAnimation = "rbxassetid://121193564169167",
-			ArcHeight = 20, -- 🏀 投手专属
+			ArcHeight = 20, -- 投手专属
 			CanAttack = true,
-			Attack = 6000, 
+			Attack = 6000,
 			AttackInterval = 2,
 			HitEffectTexture = "CornMP",
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
-			ProjectileName = "Corn", 
+			ProjectileName = "Corn",
+			SplashDamageScale = 0.7,
+			SplashRadius = 14,
 			Description = "Description: The ultimate weapon. Lobs giant cobs for devastating damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -625,22 +663,167 @@ local ItemConfig = {
 		["MusicIcePeashooter"] = {
 			Id = "MusicIcePeashooter",
 			Name = "Music Ice Peashooter",
+			IconId = "rbxassetid://126682185215888",
 			HP = 1500,
 			Quality = 5,
 			CanAttack = true,
-			Attack = 4000,
-			AttackInterval = 2, 
+			Attack = 6000,
+			AttackInterval = 2,
 			IdleAnimId = "rbxassetid://77070181691364",
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
-			ProjectileName = "MusicIcePea", 
-			SlowOnHit = { MoveMultiplier = 0.7, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
+			ProjectileName = "MusicIcePea",
+			Piercing = true,
+			SlowOnHit = { MoveMultiplier = 0.5, Duration = 2, Color = Color3.fromRGB(80, 180, 255) },
 			Description = "Details: Fires frost peas, inflicts damage and applies slow!",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
 		},
+		["AppleMortar"] = {
+			Id = "AppleMortar",
+			Name = "Apple Mortar",
+			IconId = "rbxassetid://102109364051173",
+			HP = 3500,
+			Quality = 5,
+			CanAttack = true,
+			Attack = 7000,
+			AttackInterval = 2,
+			IdleAnimId = "rbxassetid://111661411477584",
+			AttackAnimation = "rbxassetid://133161846876069",
+			ArcHeight = 24,
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(255, 80, 80),
+			ProjectileName = "Apple",
+			GroundEffect = {
+				EffectName = "AppleMP",
+				Duration = 2,
+				DamagePerSecondScale = 0.1,
+				TickInterval = 1,
+				MaxOnePerGrid = true,
+			},
+			Description = "Description: Lobs heavy apples in a high arc, dealing huge burst damage.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["Rotobaga"] = {
+			Id = "Rotobaga",
+			Name = "Rotobaga",
+			IconId = "rbxassetid://127561636844108",
+			HP = 3000,
+			Quality = 5,
+			CanAttack = true,
+			Attack = 12000,
+			AttackInterval = 6,
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(255, 255, 127),
+			ProjectileName = "Rotobaga",
+			IsIAPOnly = true,
+			Piercing = true,
+			IdleAnimId = "rbxassetid://90459622226121",
+			AttackAnimation = "rbxassetid://137485157321511",
+			KnockbackOnHit = {
+				GridDistance = 0.5,
+				OnlyWhenTargetOnLawn = true,
+			},
+			Description = "Description: A premium shooter whose piercing shots knock zombies back by one lawn tile.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["TallWall"] = {
+			Id = "TallWall",
+			Name = "Tall Wall-nut",
+			IconId = "rbxassetid://120854555693910",
+			HP = 30000,
+			Quality = 5,
+			IdleAnimId = "rbxassetid://105592611320984",
+			CanAttack = false,
+			Description = "Description: Massive HP defensive plant. Blocks zombies without attacking.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["Chomper"] = {
+			Id = "Chomper",
+			Name = "Chomper",
+			IconId = "rbxassetid://112334447628556",
+			HP = 15000,
+			Quality = 5,
+			IdleAnimId = "rbxassetid://110255266467419",
+			AttackAnimation = "rbxassetid://108938637840415",
+			CanAttack = true,
+			Attack = 1500,
+			AttackInterval = 1,
+			AttackMode = "FrontArea",
+			FrontArea = {
+				GridRange = 1,
+				Height = 8,
+			},
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(170, 255, 85),
+			Description = "Description: Bites the front lawn tile, dealing area damage without a projectile.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["MutantChomper"] = {
+			Id = "MutantChomper",
+			Name = "Mutant Chomper",
+			IconId = "rbxassetid://107497950746490",
+			HP = 45000,
+			Quality = 6,
+			IdleAnimId = "rbxassetid://110255266467419",
+			AttackAnimation = "rbxassetid://108938637840415",
+			CanAttack = true,
+			Attack = 3000,
+			AttackInterval = 1,
+			AttackMode = "FrontArea",
+			FrontArea = {
+				GridRange = 1,
+				Height = 8,
+			},
+			NoSeed = true,
+			HideFromStandardCodex = true,
+			CodexCategory = 5,
+			CodexLabel = "Mutant",
+			ExcludeFromRandomPlantRewards = true,
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(255, 85, 255),
+			Source = "Special",
+			Description = "Description: A mutated Chomper that bites the front lawn tile, dealing heavy area damage without a projectile.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["EnergyMangosteen"] = {
+			Id = "EnergyMangosteen",
+			Name = "Energy Mangosteen",
+			IconId = "rbxassetid://85135746264532",
+			HP = 20000,
+			Quality = 6,
+			IdleAnimId = "rbxassetid://116519154276440",
+			AttackAnimation = "rbxassetid://136391260231730",
+			CanAttack = false,
+			Attack = 2000,
+			AttackInterval = 2,
+			NoSeed = true,
+			HideFromStandardCodex = true,
+			CodexCategory = 5,
+			CodexLabel = "Mutant",
+			ExcludeFromRandomPlantRewards = true,
+			Source = "Special",
+			ReactiveOnDamaged = {
+				Damage = 2000,
+				Radius = 14,
+				Cooldown = 2,
+				EffectFolder = "Hit",
+				EffectName = "Lightning",
+				EffectLifetime = 1.25,
+			},
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(0, 255, 255),
+			Description = "Description: Releases stored energy when attacked, damaging nearby zombies with lightning.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
 	},
-	
+
 	MutationProb = { [1] = 90, [2] = 7, [3] = 3, [4] = 1 },
 	MutationName = {
 		[1] = "Normal",
@@ -648,22 +831,65 @@ local ItemConfig = {
 		[3] = "Lightning",
 		[4] = "Divine"
 	},
-	
+
+	MutationIconIds = {
+		[1] = "rbxassetid://79698788250686",
+		[2] = "rbxassetid://85231855825621",
+		[3] = "rbxassetid://99500984192285",
+		[4] = "rbxassetid://102788508707196",
+		Normal = "rbxassetid://79698788250686",
+		Mutant = "rbxassetid://79698788250686",
+		Shiny = "rbxassetid://85231855825621",
+		Lightning = "rbxassetid://99500984192285",
+		Thunder = "rbxassetid://99500984192285",
+		Divine = "rbxassetid://102788508707196",
+	},
+
 	QualityColor = {
-		[1] = Color3.fromRGB(255, 255, 255), 
-		[2] = Color3.fromRGB(85, 255, 127),  
-		[3] = Color3.fromRGB(85, 170, 255),  
-		[4] = Color3.fromRGB(170, 85, 255),  
-		[5] = Color3.fromRGB(255, 170, 0),   
-		[6] = Color3.fromRGB(255, 85, 85),   
-		[7] = Color3.fromRGB(255, 85, 255),  
-		[8] = Color3.fromRGB(0, 255, 255),   
+		[1] = Color3.fromRGB(255, 255, 255),
+		[2] = Color3.fromRGB(85, 255, 127),
+		[3] = Color3.fromRGB(85, 170, 255),
+		[4] = Color3.fromRGB(170, 85, 255),
+		[5] = Color3.fromRGB(255, 170, 0),
+		[6] = Color3.fromRGB(255, 85, 85),
+		[7] = Color3.fromRGB(255, 85, 255),
+		[8] = Color3.fromRGB(0, 255, 255),
 	},
 }
+ItemConfig.Chests = {
+    ["Chest1"] = {
+        Id = "Chest1",
+        Name = "Chest I",
+        Quality = 2,
+        Description = "A reward chest from cleared levels 1-30.",
+        IconId = "",
+    },
+    ["Chest2"] = {
+        Id = "Chest2",
+        Name = "Chest II",
+        Quality = 3,
+        Description = "A reward chest from cleared levels 31-70.",
+        IconId = "",
+    },
+    ["Chest3"] = {
+        Id = "Chest3",
+        Name = "Chest III",
+        Quality = 4,
+        Description = "A reward chest from cleared levels 71-120.",
+        IconId = "",
+    },
+    ["Chest4"] = {
+        Id = "Chest4",
+        Name = "Chest IV",
+        Quality = 5,
+        Description = "A reward chest from cleared levels 121+.",
+        IconId = "",
+    },
+}
 ItemConfig.MutationStats = {
-    [1] = { DamageMul = 1.0, HealthMul = 1.0 },   -- 普通
-    [2] = { DamageMul = 1.5, HealthMul = 1.5 },   -- 闪光 (+50% 攻击, +50% 血量)
-    [3] = { DamageMul = 2, HealthMul = 3 },       -- 雷电 (+100% 攻击, +200% 血量)
-    [4] = { DamageMul = 2.5, HealthMul = 4 },     -- 神圣 (+150% 攻击, +300% 血量)
+    [1] = { DamageMul = 1.0, HealthMul = 1.0 }, -- 普通
+    [2] = { DamageMul = 1.5, HealthMul = 1.5 }, -- 闪光 (+50% 攻击, +50% 血量)
+    [3] = { DamageMul = 2, HealthMul = 3 }, -- 雷电 (+100% 攻击, +200% 血量)
+    [4] = { DamageMul = 2.5, HealthMul = 4 }, -- 神圣 (+150% 攻击, +300% 血量)
 }
 return ItemConfig

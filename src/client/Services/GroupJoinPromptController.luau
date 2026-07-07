@@ -1,5 +1,5 @@
 -- src/client/Services/GroupJoinPromptController.luau
--- 进入游戏一段时间后，使用 Roblox 官方原生群组加入弹窗提示未入群玩家。
+-- 进入游戏一段时间后，使用 Roblox 官方原生群组加入弹窗提示未入群玩家
 
 local GroupJoinPromptController = {}
 

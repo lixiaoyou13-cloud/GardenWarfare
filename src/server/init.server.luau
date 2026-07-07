@@ -3,9 +3,7 @@
 -- src/server/init.server.luau
 print("Server starting; loading core modules...")
 
--- ==========================================
--- [🌟 新增：全局碰撞组设定]
--- ==========================================
+-- 全局碰撞组设定
 local PhysicsService = game:GetService("PhysicsService")
 local Players = game:GetService("Players")
 
@@ -22,31 +20,27 @@ PhysicsService:CollisionGroupSetCollidable("Zombies", "Zombies", false)
 -- 3. 玩家一出生，就把他的身体扔进 "Players" 组里，并挂载头衔
 Players.PlayerAdded:Connect(function(player)
     player.CharacterAdded:Connect(function(character)
-        -- ==========================================
-        -- [🌟 新增：设置玩家初始移动速度]
-        -- ==========================================
+        -- 设置玩家初始移动速度
         local humanoid = character:WaitForChild("Humanoid")
-        humanoid.WalkSpeed = 30 -- 👈 将 24 修改为你想要的移动速度 (默认是16)
-        
+        humanoid.WalkSpeed = 30 -- 将 24 为你想要的移动速度 (默认是16)
+
         -- 给身体所有的手脚、躯干打上玩家组标签
         for _, part in pairs(character:GetDescendants()) do
             if part:IsA("BasePart") then part.CollisionGroup = "Players" end
         end
-        -- 如果玩家中途穿了新装备，也立刻打上标签
+        -- 如果玩家中途穿透了新装备，也立刻打上标签
         character.DescendantAdded:Connect(function(desc)
             if desc:IsA("BasePart") then desc.CollisionGroup = "Players" end
         end)
 
-        -- ==========================================
-        -- [🌟 新增：玩家头顶最高通关层数头衔 (英文)]
-        -- ==========================================
+        -- 玩家头顶最高通关层数头衔 (英文)
         task.spawn(function()
             local head = character:WaitForChild("Head", 5)
             if not head then return end
-            
+
             -- 获取数据管理器 (动态 require 确保安全)
             local PDManager = require(script.PlayerDataManager)
-            
+
             -- 等待玩家真实数据从 DataStore 中加载完毕
             local data = nil
             while not data do
@@ -56,15 +50,15 @@ Players.PlayerAdded:Connect(function(player)
 
             -- 直接显示当前解锁层数
             local maxCleared = data.UnlockedLevel or 1
-            
-            -- 清理旧头衔（防止角色重置时重复生成）
+
+            -- 清理旧头衔（防止角色重置时间重复生成）
             local oldTitle = head:FindFirstChild("PlayerTitleGui")
             if oldTitle then oldTitle:Destroy() end
 
             -- 创建一个悬浮 GUI (BillboardGui)
             local titleGui = Instance.new("BillboardGui")
             titleGui.Name = "PlayerTitleGui"
-            titleGui.Size = UDim2.new(0, 140, 0, 30)
+            titleGui.Size = UDim2.fromScale(3.2, 0.7)
             titleGui.StudsOffset = Vector3.new(0, 2.5, 0) -- 悬浮在头顶上方 2.5 格
             titleGui.AlwaysOnTop = true
             titleGui.MaxDistance = 80 -- 超过 80 米不可见
@@ -74,7 +68,7 @@ Players.PlayerAdded:Connect(function(player)
             textLabel.Size = UDim2.new(1, 0, 1, 0)
             textLabel.BackgroundTransparency = 1
             textLabel.Text = "MAX  " .. tostring(maxCleared)
-            
+
             textLabel.TextColor3 = Color3.fromRGB(255, 215, 0) -- 亮金色文字
             textLabel.TextStrokeTransparency = 0.2
             textLabel.TextStrokeColor3 = Color3.fromRGB(60, 30, 0) -- 深棕色描边，提升质感
@@ -87,10 +81,18 @@ Players.PlayerAdded:Connect(function(player)
         end)
     end)
 end)
--- =========================================
+
+local PlayerToolGuardService = require(script.Services.PlayerToolGuardService)
+PlayerToolGuardService.Init()
 
 local PlayerDataManager = require(script.PlayerDataManager)
 PlayerDataManager.Init()
+
+local TitleService = require(script.Services.TitleService)
+TitleService.Init()
+
+local FriendSunBoostService = require(script.Services.FriendSunBoostService)
+FriendSunBoostService.Init()
 
 local InventoryService = require(script.Services.InventoryService)
 InventoryService.Init()
@@ -130,34 +132,28 @@ local LuckyDropService = require(script.Services.LuckyDropService)
 LuckyDropService.Init()
 local ChatGiftService = require(script.Services.ChatGiftService)
 ChatGiftService.Init()
--- 找到你原来 require 其他 Service 的地方，加上这一句：
+
+local GiftingService = require(script.Services.GiftingService)
+GiftingService.Init()
+
+local LeaderboardSettlementService = require(script.Services.LeaderboardSettlementService)
+LeaderboardSettlementService.Init()
+-- 找到你原来 require 其他 Service 的地方，加上这一句
 local RankingService = require(script.Services.RankingService)
 
--- 然后在下方的执行区域，加上初始化：
+-- 然后在下方的执行区域，加上初始化
 RankingService.Init()
 
+local OnlineRewardService = require(script.Services.OnlineRewardService)
+OnlineRewardService.Init()
+
 require(script.Services.IAPService).Init()
+
+local ExclusiveRollCompensationService = require(script.Services.ExclusiveRollCompensationService)
+ExclusiveRollCompensationService.Init()
 
 require(script.Services.BaseSunflowerService).Init()
 
 require(script.Services.ZombieBoxService)
-Players.PlayerAdded:Connect(function(player)
-    player.Chatted:Connect(function(msg)
-        if msg == "/testbomb" then
-            -- 给发消息的玩家直接塞 20 个樱桃炸弹
-            local PDManager = require(script.PlayerDataManager)
-            PDManager.GivePlant(player, "MusicIcePeashooter", 20, 1)
-            
-            -- 在控制台打印提示
-            print("【开发者测试】已发放 20 个樱桃炸弹给: " .. player.Name)
-            
-            -- 给客户端弹个提示框
-            local showTipRE = game:GetService("ReplicatedStorage"):FindFirstChild("ShowTipRE")
-            if showTipRE then
-                showTipRE:FireClient(player, "获得测试道具：樱桃炸弹 x20！")
-            end
-        end
-    end)
-end)
 
 print("All server modules loaded!")

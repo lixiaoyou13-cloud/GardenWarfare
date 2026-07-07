@@ -1,11 +1,12 @@
 -- src/client/Services/StealablePointerUIController.luau
 local StealablePointerUIController = {}
 
-local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+
+local POINTER_UPDATE_INTERVAL = 0.2
 
 function StealablePointerUIController.Init()
     local player = Players.LocalPlayer
@@ -20,23 +21,27 @@ function StealablePointerUIController.Init()
     -- 用于存储当前屏幕上所有高品质植物的 UI 状态
     local activeUIs = {}
 
-    -- 2. 核心雷达追踪算法
-    RunService.RenderStepped:Connect(function()
+    -- 2. 雷达追踪算法
+    task.spawn(function()
+        while pointerGui.Parent do
         local camera = Workspace.CurrentCamera
-        if not camera then return end
+            if not camera then
+                task.wait(POINTER_UPDATE_INTERVAL)
+                continue
+            end
 
         -- 寻找场景中被打上 "可偷取" 标签的高级植物
         local stealablePlants = CollectionService:GetTagged("StealableHighQuality")
-        
-        -- 标记本帧是否被处理
+
+        -- 标签记本帧是否被处理
         for _, uiData in pairs(activeUIs) do
             uiData.updated = false
         end
 
         for _, plant in ipairs(stealablePlants) do
-            -- 【核心判断】：必须是别人的植物，才能显示"可偷取"
+            -- 判断：必须是别人的植物，才能显示"可偷取"
             if plant:GetAttribute("OwnerId") ~= player.UserId and plant.PrimaryPart then
-                
+
                 -- 如果还没有为这颗植物生成 UI，则动态生成
                 local uiData = activeUIs[plant]
                 if not uiData then
@@ -52,7 +57,7 @@ function StealablePointerUIController.Init()
                     arrow.Position = UDim2.new(0.5, 0, 0.5, 0)
                     arrow.AnchorPoint = Vector2.new(0.5, 0.5)
                     arrow.BackgroundTransparency = 1
-                    arrow.Image = "rbxassetid://3145534143" 
+                    arrow.Image = "rbxassetid://3145534143"
                     arrow.ImageColor3 = Color3.fromRGB(255, 215, 0) -- 金色
                     arrow.Parent = container
 
@@ -85,7 +90,7 @@ function StealablePointerUIController.Init()
 
                 uiData.updated = true
 
-                -- 【贴边雷达运算】
+                -- 贴边雷达运算
                 local targetPos = plant.PrimaryPart.Position + Vector3.new(0, 5, 0)
                 local vector, onScreen = camera:WorldToViewportPoint(targetPos)
                 local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
@@ -99,7 +104,7 @@ function StealablePointerUIController.Init()
                     -- 在屏幕外：开启边缘贴边计算
                     uiData.arrow.Visible = true
                     local offset = Vector2.new(vector.X - center.X, vector.Y - center.Y)
-                    if vector.Z < 0 then offset = -offset end 
+                    if vector.Z < 0 then offset = -offset end
 
                     local angle = math.atan2(offset.Y, offset.X)
                     local paddingX, paddingY = 80, 80
@@ -132,8 +137,10 @@ function StealablePointerUIController.Init()
                 activeUIs[plant] = nil
             end
         end
+            task.wait(POINTER_UPDATE_INTERVAL)
+        end
     end)
-    
+
     print("Client: StealablePointerUIController loaded; treasure radar active.")
 end
 

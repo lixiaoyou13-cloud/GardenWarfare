@@ -1,5 +1,5 @@
 -- src/shared/NumberFormatUtil.luau
--- 客户端/服务端通用数字显示格式化工具。
+-- 客户端/服务端通用数字显示格式化工具
 local NumberFormatUtil = {}
 
 function NumberFormatUtil.FormatNumber(num)

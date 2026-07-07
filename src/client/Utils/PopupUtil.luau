@@ -8,6 +8,8 @@ local PopupUtil = {
 	_detail = nil,
 	_btnOk = nil,
 	_btnCancel = nil,
+	_currentOptions = nil,
+	_currentHandle = nil,
 }
 
 local function disconnectConnection(connection)
@@ -92,6 +94,8 @@ function PopupUtil.Hide()
 	disconnectConnection(PopupUtil._cancelConn)
 	PopupUtil._okConn = nil
 	PopupUtil._cancelConn = nil
+	PopupUtil._currentOptions = nil
+	PopupUtil._currentHandle = nil
 
 	local popup = PopupUtil._popup
 	if not popup then
@@ -126,8 +130,10 @@ function PopupUtil.ShowManaged(detailText: string, options)
 	popup.Enabled = true
 
 	local handle = {}
+	PopupUtil._currentOptions = options
+	PopupUtil._currentHandle = handle
 
-	PopupUtil._okConn = btnOk.MouseButton1Click:Connect(function()
+	PopupUtil._okConn = btnOk.Activated:Connect(function()
 		if options.closeOnConfirm ~= false then
 			PopupUtil.Hide()
 		end
@@ -136,14 +142,18 @@ function PopupUtil.ShowManaged(detailText: string, options)
 		end
 	end)
 
-	PopupUtil._cancelConn = btnCancel.MouseButton1Click:Connect(function()
-		if options.closeOnCancel ~= false then
+	local function runCancel()
+		local activeOptions = PopupUtil._currentOptions or options
+		local activeHandle = PopupUtil._currentHandle or handle
+		if activeOptions.closeOnCancel ~= false then
 			PopupUtil.Hide()
 		end
-		if options.onCancel then
-			options.onCancel(handle)
+		if activeOptions.onCancel then
+			activeOptions.onCancel(activeHandle)
 		end
-	end)
+	end
+
+	PopupUtil._cancelConn = btnCancel.Activated:Connect(runCancel)
 
 	function handle.Update(newDetailText: string)
 		if PopupUtil._detail then
@@ -189,6 +199,35 @@ function PopupUtil.ShowManaged(detailText: string, options)
 	end
 
 	return handle
+end
+
+function PopupUtil.Cancel()
+	local popup = PopupUtil._popup
+	if not popup then
+		popup = getPopupRefs()
+	end
+
+	if not popup or not popup.Enabled then
+		return false
+	end
+
+	local cancelButton = PopupUtil._btnCancel
+	if cancelButton and cancelButton:IsA("GuiObject") and not cancelButton.Visible then
+		return false
+	end
+	if cancelButton and cancelButton:IsA("GuiButton") and not cancelButton.Active then
+		return false
+	end
+
+	local activeOptions = PopupUtil._currentOptions
+	local activeHandle = PopupUtil._currentHandle
+	if not activeOptions or activeOptions.closeOnCancel ~= false then
+		PopupUtil.Hide()
+	end
+	if activeOptions and activeOptions.onCancel then
+		activeOptions.onCancel(activeHandle)
+	end
+	return true
 end
 
 function PopupUtil.ShowConfirm(detailText: string, onConfirm: () -> ())

@@ -9,40 +9,38 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 -- 专门用来追踪所有玩家的基地向日葵，方便实时更新
 local activeSunflowers = {}
 
--- ==========================================
--- [核心算法] 计算缩放并更新悬浮 UI
--- ==========================================
+-- 算法 计算缩放并更新悬浮 UI
 local function UpdateSunflowerScale(sunflower, totalSun)
     if not sunflower or not sunflower:IsA("Model") then return end
     local minScale = 1
     local maxScale = 50
     local threshold = 1000000
-    
-    -- 太阳数量为0时，自动缩回1倍
+
+    -- 太阳数量为0时间，自转动缩回1倍
     local scale = minScale + (math.min(totalSun, threshold) / threshold) * (maxScale - minScale)
-    
+
     local lastScale = sunflower:GetAttribute("LastSunflowerScale")
     if sunflower.PrimaryPart and (typeof(lastScale) ~= "number" or math.abs(lastScale - scale) > 0.01) then
         sunflower:ScaleTo(scale)
         sunflower:SetAttribute("LastSunflowerScale", scale)
     end
 
-    -- 🌟 修复：去我们创建的虚拟独立 UI 锚点方块上寻找 UI
+    -- 去我们创建的虚拟独立 UI 锚点方块上寻找 UI
     local plot = sunflower.Parent
     if not plot then return end
-    
+
     local collectSunPart = nil
     local elementBtn = plot:FindFirstChild("ElementButton", true)
     if elementBtn then collectSunPart = elementBtn:FindFirstChild("CollectSun") end
-    
+
     if not collectSunPart then
         collectSunPart = plot:FindFirstChild("CollectSun")
     end
-    
+
     if collectSunPart then
         local guiAnchor = collectSunPart:FindFirstChild("SunGuiAnchor")
         if guiAnchor then
-            -- 🌟 遍历前后两面的 SurfaceGui 同步更新数值
+            -- 遍历前后两面的 SurfaceGui 同步更新数值
             for _, gui in ipairs(guiAnchor:GetChildren()) do
                 if gui:IsA("SurfaceGui") and gui.Name == "SunCounterGui" then
                     local container = gui:FindFirstChild("Container")
@@ -66,9 +64,7 @@ local function UpdateSunflowerScale(sunflower, totalSun)
     end
 end
 
--- ==========================================
--- [杀毒软件] 强行隐藏特效外壳
--- ==========================================
+-- 杀毒软件 强行隐藏特效外壳
 local function HideAllMutations(model)
     local effectNames = { "Glow", "Lightning", "HolyLight" }
     for _, fxName in ipairs(effectNames) do
@@ -85,14 +81,12 @@ local function HideAllMutations(model)
     end
 end
 
--- ==========================================
--- [主入口] 生成基地向日葵
--- ==========================================
+-- 主入口 生成基地向日葵
 function BaseSunflowerService.SpawnSunflower(player, plot)
     local collectSunPart = nil
     local elementBtn = plot:FindFirstChild("ElementButton", true)
     if elementBtn then collectSunPart = elementBtn:FindFirstChild("CollectSun") end
-    
+
     if not collectSunPart then
         for _, desc in ipairs(Workspace:GetDescendants()) do
             if desc.Name == "CollectSun" and desc:IsA("BasePart") then collectSunPart = desc; break end
@@ -105,17 +99,17 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
         local sunflowerConfig = ItemConfig.Plants and ItemConfig.Plants["Sunflower"]
         local itemModels = ReplicatedStorage:WaitForChild("ItemModels")
         local modelTemplate = itemModels:FindFirstChild("Sunflower_Plant") or itemModels:FindFirstChild("Sunflower")
-        
+
         if modelTemplate then
             local sunflower = modelTemplate:Clone()
             sunflower.Name = "BaseSunflower"
             sunflower:SetAttribute("OwnerId", player.UserId)
-            
+
             if not sunflower.PrimaryPart then sunflower.PrimaryPart = sunflower:FindFirstChildWhichIsA("BasePart", true) end
 
             local hasAnim = sunflowerConfig and sunflowerConfig.IdleAnimId and sunflowerConfig.IdleAnimId ~= ""
-            
-            -- [打钢筋] 防掉落与动画适配
+
+            -- 打钢筋 防掉落与动画适配
             for _, part in ipairs(sunflower:GetDescendants()) do
                 if part:IsA("BasePart") then
                     part.CanCollide = false
@@ -126,17 +120,15 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                     end
                 end
             end
-            
+
             HideAllMutations(sunflower)
             if sunflower.PrimaryPart then sunflower.PrimaryPart.Transparency = 1 end
 
             local targetCFrame = collectSunPart.CFrame * CFrame.new(0, 1.5, 0)
-            sunflower:PivotTo(targetCFrame) 
+            sunflower:PivotTo(targetCFrame)
             sunflower.Parent = plot
-            
-            -- ==========================================
-            -- [创建悬浮UI (🌟 完美静止挂载中枢：悬空+防遮挡+双面显示)]
-            -- ==========================================
+
+            -- 创建悬浮UI ( 静止挂载中枢：悬空+防遮挡+双面显示)
             if collectSunPart then
                 -- 1. 销毁可能存在的旧独立锚点
                 local oldAnchor = collectSunPart:FindFirstChild("SunGuiAnchor")
@@ -145,37 +137,37 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                 -- 2. 创建一个绝对静止、透明的不碰撞看板部件
                 local guiAnchor = Instance.new("Part")
                 guiAnchor.Name = "SunGuiAnchor"
-                guiAnchor.Size = Vector3.new(4, 1.5, 0.05) 
-                guiAnchor.Transparency = 1       -- 隐形
-                guiAnchor.Anchored = true        -- 静止不动
-                guiAnchor.CanCollide = false     -- 无碰撞
-                guiAnchor.CanQuery = false       -- 防鼠标点击拦截
+                guiAnchor.Size = Vector3.new(4, 1.5, 0.05)
+                guiAnchor.Transparency = 1 -- 隐形
+                guiAnchor.Anchored = true -- 静止不动
+                guiAnchor.CanCollide = false -- 无碰撞
+                guiAnchor.CanQuery = false -- 防鼠标点击拦截
                 guiAnchor.CanTouch = false
 
                 -- 3. 悬浮在 CollectSun 上方固定 5 格高空（可根据视线随意微调高度）
                 guiAnchor.CFrame = collectSunPart.CFrame * CFrame.new(0, 5, 0)
                 guiAnchor.Parent = collectSunPart
 
-                -- 4. 🌟 双面渲染渲染逻辑：同时渲染正面和背面，防止转镜头时转到反面看不见
+                -- 4. 双面渲染渲染逻辑：同时间渲染正面和背面，防止转镜头时间转到反面看不见
                 local renderFaces = { Enum.NormalId.Front, Enum.NormalId.Back }
-                
+
                 for _, faceDirection in ipairs(renderFaces) do
                     local sGui = Instance.new("SurfaceGui")
                     sGui.Name = "SunCounterGui"
                     sGui.Face = faceDirection
-                    sGui.LightInfluence = 0          -- 纯亮发光字，不受全地图阴影影响
-                    
-                    -- 🌟 核心修复：开启 AlwaysOnTop！
-                    -- 这样即便向日葵模型膨胀把这个锚点Part整个吞进肚子里，UI 依然会雷打不动地穿透渲染在最前面！
-                    sGui.AlwaysOnTop = true 
+                    sGui.LightInfluence = 0 -- 纯亮发光字，不受全地图阴影影响
+
+                    -- 开启 AlwaysOnTop
+                    -- 这样即便向日葵模型膨胀把这个锚点Part整个吞进肚子里，UI 依然会雷打不动地穿透渲染在最前面
+                    sGui.AlwaysOnTop = true
                     sGui.CanvasSize = Vector2.new(400, 150)
-                    
+
                     local container = Instance.new("Frame")
                     container.Name = "Container"
                     container.Size = UDim2.new(1, 0, 1, 0)
                     container.BackgroundTransparency = 1
                     container.Parent = sGui
-                    
+
                     local icon = Instance.new("ImageLabel")
                     icon.Name = "SunIcon"
                     icon.Size = UDim2.new(0, 100, 0, 100)
@@ -184,7 +176,7 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                     icon.Image = "rbxassetid://102426033120992"
                     icon.ScaleType = Enum.ScaleType.Fit
                     icon.Parent = container
-                    
+
                     local textLabel = Instance.new("TextLabel")
                     textLabel.Name = "SunText"
                     textLabel.Size = UDim2.new(1, -150, 1, 0)
@@ -197,14 +189,12 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                     textLabel.TextScaled = true
                     textLabel.TextXAlignment = Enum.TextXAlignment.Left
                     textLabel.Parent = container
-                    
+
                     sGui.Parent = guiAnchor
                 end
             end
 
-            -- ==========================================
-            -- [🌟 修改核心：自动靠近底座方块收割]
-            -- ==========================================
+            -- 自转动靠近底座方块收割
             local oldPrompt = collectSunPart:FindFirstChild("HarvestPrompt")
             if oldPrompt then oldPrompt:Destroy() end
 
@@ -212,7 +202,7 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                 local isHarvesting = false
                 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
                 local harvestRE = ReplicatedStorage:FindFirstChild("HarvestSunRE")
-                
+
                 while collectSunPart and collectSunPart.Parent and sunflower and sunflower.Parent do
                     task.wait(0.3)
 
@@ -223,20 +213,21 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                     if not rootPart then continue end
 
                     local distance = (rootPart.Position - collectSunPart.Position).Magnitude
-                    
-                    if distance <= 15 then 
+
+                    if distance <= 15 then
                         local pData = PlayerDataManager.GetPlayerData(player)
-                        
+
                         if pData and (pData.TotalSun or 0) > 0 then
                             isHarvesting = true
                             local amount = pData.TotalSun
                             pData.TotalSun = 0
+                            local boostedAmount = PlayerDataManager.ApplyFriendSunBoost(player, amount)
 
-                            local finalReward = PlayerDataManager.GiveCoins(player, amount) or amount
-                            local isX2Sun = finalReward == amount * 2
+                            local finalReward = PlayerDataManager.GiveCoins(player, boostedAmount) or boostedAmount
+                            local isX2Sun = finalReward == boostedAmount * 2
 
                             if harvestRE then
-                                harvestRE:FireClient(player, amount, collectSunPart.Position, isX2Sun)
+                                harvestRE:FireClient(player, boostedAmount, collectSunPart.Position, isX2Sun)
                             end
 
                             local AnalyticsService = game:GetService("AnalyticsService")
@@ -259,13 +250,11 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                 end
             end)
 
-            -- ==========================================
-            -- [装载动画]
-            -- ==========================================
+            -- 装载动画
             if hasAnim then
                 local animController = sunflower:FindFirstChildOfClass("AnimationController") or sunflower:FindFirstChildOfClass("Humanoid")
                 if not animController then animController = Instance.new("AnimationController"); animController.Parent = sunflower end
-                
+
                 local animator = animController:FindFirstChildOfClass("Animator")
                 if not animator then animator = Instance.new("Animator"); animator.Parent = animController end
 
@@ -275,11 +264,11 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                 track.Looped = true;
                 track:Play()
             end
-            
+
             local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
             local pData = PlayerDataManager.GetPlayerData(player)
             UpdateSunflowerScale(sunflower, pData and pData.TotalSun or 0)
-            
+
             -- 加入追踪列表
             activeSunflowers[player.UserId] = sunflower
             print("[BaseSunflower] Spawn successful; auto-harvest enabled.")

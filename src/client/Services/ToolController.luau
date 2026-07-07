@@ -11,7 +11,7 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
 local PopupUtil = require(script.Parent.Parent.Utils.PopupUtil)
 
-local activePrompts = {} -- 保存对 Prompt 的引用，方便随时清理
+local activePrompts = {} -- 保持存对 Prompt 的引用，方便随时间清理
 local activeGiftPopup = nil
 local activeGiftRequestId = nil
 local weaponAttackAnimId = "rbxassetid://135432663541165"
@@ -69,17 +69,15 @@ end
 function ToolController.Init()
     local player = Players.LocalPlayer
     local mouse = player:GetMouse()
-    
+
     local shovelRE = ReplicatedStorage:WaitForChild("ShovelActionRE")
     local giftItemRE = ReplicatedStorage:WaitForChild("GiftItemRE")
     local weaponAttackRE = ReplicatedStorage:WaitForChild("WeaponAttackRE", 10)
-    
-    -- 🌟 注册交换植物的远程事件
+
+    -- 注册交换植物的远程事件
     local swapRE = ReplicatedStorage:WaitForChild("SwapCombatPlantRE", 10)
 
-   --=====================================
-    -- [🌟 樱桃炸弹：爆炸范围指示球设置]
-    -- ==========================================
+    -- 樱桃炸弹：爆炸范围指示球设置
    local throwBombRE = ReplicatedStorage:WaitForChild("ThrowBombRE", 10)
 
     if not weaponAttackRE then
@@ -92,12 +90,12 @@ function ToolController.Init()
         warn("[ToolController] ThrowBombRE was not created by the server; Cherry Bomb is temporarily unavailable")
     end
 
-    -- 恢复为红色的警示球，加深颜色
+    -- 恢复为红点色的警示球，加深颜色
     local rangeSphere = Instance.new("Part")
     rangeSphere.Shape = Enum.PartType.Ball -- 保持球体
     rangeSphere.Material = Enum.Material.ForceField
     rangeSphere.Color = Color3.fromRGB(255, 20, 20)
-    rangeSphere.Transparency = 0.4 -- 🌟键修改：透明度从0.8降到0.4，颜色会变得非常深且明显
+    rangeSphere.Transparency = 0.4 -- 键：透明度从0.8降到0.4，颜色会变得非常深且明显
     rangeSphere.Anchored = true
     rangeSphere.CanCollide = false
     rangeSphere.CastShadow = false
@@ -107,19 +105,19 @@ function ToolController.Init()
     RunService.RenderStepped:Connect(function()
         local char = player.Character
         if not char then rangeSphere.Parent = nil return end
-        
+
         local equippedItem = char:GetAttribute("EquippedSeed")
-        
+
         if type(equippedItem) == "string" and string.match(equippedItem, "Plant_CherryBomb") then
             local rootPart = char:FindFirstChild("HumanoidRootPart")
             if rootPart then
-                -- 🌟 大小完全由配置决定
+                -- 大小完全由配置决定
                 local radius = ItemConfig.Plants["CherryBomb"].ExplosionRadius or 18
                 rangeSphere.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
 
-                -- 🌟 稍微推远一点，从 15 改为 22 格，防止离玩家太近挡视野
+                -- 稍微推远一点击，从 15 改为 22 格，防止离玩家太近挡视野
                 local forwardPos = rootPart.CFrame.Position + rootPart.CFrame.LookVector * 22
-                
+
                 local rayOrigin = forwardPos + Vector3.new(0, 20, 0)
                 local rayDir = Vector3.new(0, -40, 0)
                 local rayParams = RaycastParams.new()
@@ -144,9 +142,7 @@ function ToolController.Init()
         end
     end)
 
-    -- ==========================================
-    -- [E键交互：提示框逻辑 (铲子/植物交换)]
-    -- ==========================================
+    -- E键交互：提示框逻辑 (铲子/植物交换)
     local function clearAllPrompts()
         for plant, prompt in pairs(activePrompts) do
             if prompt and prompt.Parent then prompt:Destroy() end
@@ -161,44 +157,44 @@ function ToolController.Init()
         local isCombat = plant:GetAttribute("IsCombatPlant")
         local isFarm = plant:GetAttribute("PlantedOn")
         local isMature = plant:GetAttribute("IsMature")
-        
+
         local actionName = nil
-        
-        -- [🌟 核心判定：手里拿的是铲子 还是 植物？]
+
+        -- 判定：手里拿的是铲子 还是 植物？
         if equippedItem == "Tool_Shovel" then
-            -- 铲子逻辑：战斗植物可回收，农田植物必须【未成熟】
+            -- 铲子逻辑：战斗植物可回收，农田植物必须未成熟
             if isCombat or (isFarm and not isMature) then
                 actionName = "Recycle to Backpack"
             end
         elseif type(equippedItem) == "string" and string.match(equippedItem, "^Plant_") then
             -- 拿着植物！开启交换逻辑，只能交换阵地上的战斗植物
-            -- 【樱桃炸弹例外】：拿在手里不触发交换植物的功能
+            -- 樱桃炸弹例外：拿在手里不触发交换植物的功能
             if isCombat and not string.match(equippedItem, "Plant_CherryBomb") then
                 actionName = "Swap Plant"
             end
         end
-        
+
         if actionName then
             local prompt = Instance.new("ProximityPrompt")
             prompt.ActionText = actionName
             prompt.ObjectText = plant.Name or "Plant"
             prompt.KeyboardKeyCode = Enum.KeyCode.E
-            prompt.HoldDuration = 0.2 -- 稍微加一点长按时间，防止误触
+            prompt.HoldDuration = 0.2 -- 稍微加一点击长按时间，防止误触
             prompt.MaxActivationDistance = 12
             prompt.RequiresLineOfSight = false
-            
+
             local attachPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart", true)
             if attachPart then
                 prompt.Parent = attachPart
                 activePrompts[plant] = prompt
-                
+
                 prompt.Triggered:Connect(function()
                     if isCombat then
                         local lawnPart = plant.Parent
                         local plot = lawnPart and lawnPart.Parent and lawnPart.Parent.Parent
                         if plot and plot:GetAttribute("IsLevelActive") then
-                            
-                            -- [🌟 战斗中的置换/回收确认弹窗]
+
+                            -- 战斗中的置换/回收确认弹窗
                             if actionName == "Swap Plant" or actionName == "Recycle to Backpack" then
                                 local cost = getCombatEditCost(player, plot)
                                 local costText = UIEffectUtil.FormatNumber(cost)
@@ -231,7 +227,7 @@ function ToolController.Init()
                         end
                     end
 
-                    -- [🌟 根据动作发送给不同的服务端接口 (非战斗状态走这里)]
+                    -- 根据动作发送给不同的服务端接口 (非战斗状态走这里)
                     if actionName == "Swap Plant" then
                         if swapRE then
                             swapRE:FireServer(plant, equippedItem, false)
@@ -241,16 +237,16 @@ function ToolController.Init()
                     else
                         shovelRE:FireServer(plant, false)
                     end
-                    
+
                     -- 先隐藏，防闪烁
                     if activePrompts[plant] then
                         local currentPrompt = activePrompts[plant]
-                        currentPrompt.Enabled = false 
+                        currentPrompt.Enabled = false
                         activePrompts[plant] = nil
-                        
+
                         task.delay(0.1, function()
-                            if currentPrompt and currentPrompt.Parent then 
-                                currentPrompt:Destroy() 
+                            if currentPrompt and currentPrompt.Parent then
+                                currentPrompt:Destroy()
                             end
                         end)
                     end
@@ -262,18 +258,18 @@ function ToolController.Init()
     local function updateToolState()
         local char = player.Character
         if not char then return end
-        
+
         local equippedItem = char:GetAttribute("EquippedSeed")
-        
+
         -- 每次切换装备，先清理旧的提示框
         clearAllPrompts()
-        
+
         -- 如果拿起了铲子，或者举起了成熟的植物(Plant_开头)
         if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) then
             local plot = getLocalPlayerPlot(player)
             if not plot then return end
 
-            -- 只扫描本地玩家自己的基地，避免每次切换工具都遍历整张地图。
+            -- 只扫描本地玩家自己的基地，避免每次切换工具都遍历整张地图
             for _, obj in ipairs(plot:GetDescendants()) do
                 if obj:IsA("Model") and (obj:GetAttribute("IsCombatPlant") or obj:GetAttribute("PlantedOn")) then
                     checkAndAddPrompt(obj, equippedItem)
@@ -430,7 +426,7 @@ function ToolController.Init()
 
     Workspace.DescendantAdded:Connect(function(desc)
         if desc:IsA("Model") then
-            task.delay(0.1, function() 
+            task.delay(0.1, function()
                 local char = player.Character
                 if char then
                     local equippedItem = char:GetAttribute("EquippedSeed")
@@ -444,7 +440,7 @@ function ToolController.Init()
             end)
         end
     end)
-    
+
     task.spawn(function()
         while task.wait(1) do
             for plant, prompt in pairs(activePrompts) do
@@ -458,14 +454,12 @@ function ToolController.Init()
             end
         end
     end)
-  
-    -- ==========================================
-    -- [鼠标点击行为中枢：投掷 / 近战攻击 / 赠送]
-    -- ==========================================
-    local isAttacking = false 
+
+    -- 鼠标点击行为中枢：投掷 / 近战攻击 / 赠送
+    local isAttacking = false
     local isThrowingBomb = false
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
-       if gameProcessed then return end 
+       if gameProcessed then return end
 
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             local char = player.Character
@@ -473,20 +467,20 @@ function ToolController.Init()
 
             local equippedItem = char:GetAttribute("EquippedSeed")
 
-            -- 👇 [🌟 行为 1：樱桃炸弹投掷动作 (支持连续投掷)]
+            -- 行为 1：樱桃炸弹投掷动作 (支持连续投掷)
             if type(equippedItem) == "string" and string.match(equippedItem, "Plant_CherryBomb") then
                 -- 确保范围球存在，且当前不在冷却中
                 if rangeSphere.Parent == Workspace and not isThrowingBomb then
                     isThrowingBomb = true
-                    
+
                     -- 发送投掷请求给服务端
                     if throwBombRE then
                         throwBombRE:FireServer(equippedItem, rangeSphere.Position)
                     else
                         UIEffectUtil.ShowTip("Bomb service is not ready")
                     end
-                    
-                    -- 🌟 赋予 0.5 秒的投掷冷却，冷却结束后可以无缝扔出下一个！
+
+                    -- 赋予 0.5 秒的投掷冷却，冷却后可以无缝扔出下一个
                     task.delay(0.5, function()
                         isThrowingBomb = false
                     end)
@@ -517,7 +511,7 @@ function ToolController.Init()
                     task.spawn(function()
                         local hitTargets = {}
                         local processed = {}
-                        local checkDuration = 0.35 
+                        local checkDuration = 0.35
                         local startTime = tick()
 
                         while tick() - startTime < checkDuration and isAttacking do
@@ -525,7 +519,7 @@ function ToolController.Init()
                             if not rootPart then break end
 
                             local checkCFrame = rootPart.CFrame * CFrame.new(0, 0, -3.5)
-                            local checkSize = Vector3.new(6.5, 6, 7.5) 
+                            local checkSize = Vector3.new(6.5, 6, 7.5)
                             local overlapParams = OverlapParams.new()
 
                             local hitParts = Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)
@@ -543,9 +537,9 @@ function ToolController.Init()
 
                             if #hitTargets > 0 and weaponAttackRE then
                                 weaponAttackRE:FireServer(hitTargets)
-                                table.clear(hitTargets) 
+                                table.clear(hitTargets)
                             end
-                            task.wait(0.05) 
+                            task.wait(0.05)
                         end
                     end)
 
@@ -558,7 +552,7 @@ function ToolController.Init()
             end
         end
     end)
-   
+
     print("Client: ToolController (arc/interactions/combat weapon integration) loaded.")
 end
 

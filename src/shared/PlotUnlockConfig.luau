@@ -1,6 +1,6 @@
 local PlotUnlockConfig = {
     DefaultUnlockedCount = 4, -- 默认解锁前4块地
-    
+
     -- 从第5块地开始的解锁价格配置
     UnlockPrices = {
         [5] = 500,

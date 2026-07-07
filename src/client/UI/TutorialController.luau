@@ -5,7 +5,7 @@ local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local TutorialEffect = require(script.Parent.Parent.Utils.TutorialEffect) 
+local TutorialEffect = require(script.Parent.Parent.Utils.TutorialEffect)
 
 function TutorialController.Init()
     local player = Players.LocalPlayer
@@ -13,8 +13,10 @@ function TutorialController.Init()
     local basicGui = playerGui:WaitForChild("BasicGui")
     local inventoryGui = basicGui:WaitForChild("InventoryGui")
     local overlayGui = playerGui:WaitForChild("GlobalOverlayGui")
-    local seedPage = inventoryGui:WaitForChild("MainFrame"):WaitForChild("Pages"):WaitForChild("SeedPage")
-    local closeButton = inventoryGui:WaitForChild("MainFrame"):WaitForChild("CloseButton") 
+    local inventoryMain = inventoryGui:WaitForChild("MainFrame")
+    local inventoryPages = inventoryMain:WaitForChild("MainFrame")
+    local seedPage = inventoryPages:WaitForChild("SeedPage")
+    local closeButton = inventoryMain:WaitForChild("Banner"):WaitForChild("Close")
     local playProperty = basicGui:WaitForChild("PlayProperty")
     local hotbarFrame = playProperty:WaitForChild("HotbarFrame")
     local battleBtn = playProperty:WaitForChild("StartBattle") -- 战斗按钮
@@ -37,7 +39,7 @@ function TutorialController.Init()
         bgFrame.AutomaticSize = Enum.AutomaticSize.X
         bgFrame.Size = UDim2.new(0, 0, 0, 80)
         bgFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-        bgFrame.BackgroundTransparency = 1 
+        bgFrame.BackgroundTransparency = 1
         bgFrame.BorderSizePixel = 0
         bgFrame.Parent = overlayGui
 
@@ -102,11 +104,11 @@ function TutorialController.Init()
     local function startStepEight()
         print("Tutorial step 8: guide player to the shop")
         local removeTip = showTutorialTip("You are not strong enough. Buy more seeds!")
-        
+
         -- 寻找玩家自己的地块，并在里面寻找 CrazyDave
         local plotsFolder = Workspace:WaitForChild("Plots", 10)
         local targetPlot = nil
-        
+
         if plotsFolder then
             for _, plot in ipairs(plotsFolder:GetChildren()) do
                 if plot:GetAttribute("OwnerId") == player.UserId then
@@ -118,7 +120,7 @@ function TutorialController.Init()
 
         local shopNPC = targetPlot and targetPlot:FindFirstChild("CrazyDave")
         local targetPart = shopNPC and (shopNPC.PrimaryPart or shopNPC:FindFirstChildWhichIsA("BasePart"))
-        
+
         if not targetPart then
             warn("Shop NPC (CrazyDave) not found; ending tutorial.")
             ReplicatedStorage.UpdateTutorialRE:FireServer(8)
@@ -173,7 +175,7 @@ function TutorialController.Init()
                     break
                 end
             end
-            
+
             if targetPlot then
                 -- 等待服务端开启战斗状态 (最多等2秒防错)
                 local waitTime = 0
@@ -181,13 +183,13 @@ function TutorialController.Init()
                     task.wait(0.1)
                     waitTime += 0.1
                 end
-                
+
                 -- 等待战斗结束 (IsLevelActive 变回 false)
                 while targetPlot:GetAttribute("IsLevelActive") do
                     targetPlot:GetAttributeChangedSignal("IsLevelActive"):Wait()
                 end
             end
-            
+
             -- 等待战斗结算面板关闭后再弹出商店引导
             local resultGui = playerGui:FindFirstChild("BattleResultGui")
             if resultGui then
@@ -196,7 +198,7 @@ function TutorialController.Init()
                     bgOverlay:GetPropertyChangedSignal("Visible"):Wait()
                 end
             end
-            
+
             task.wait(0.5)
             startStepEight()
         end)
@@ -208,19 +210,19 @@ function TutorialController.Init()
     local function startStepSeven()
       print("Tutorial step 7: click the battle button")
         local removeTip = showTutorialTip("Here are some Peashooters! Click BATTLE to start!")
-        
+
         local stopFlash = TutorialEffect.AddFlash(battleBtn)
-        local stopArrow = TutorialEffect.AddUIArrow(battleBtn) 
+        local stopArrow = TutorialEffect.AddUIArrow(battleBtn)
 
         local connection
         connection = battleBtn.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                 connection:Disconnect()
                 stopFlash()
-                stopArrow() 
+                stopArrow()
                 removeTip()
                 ReplicatedStorage.UpdateTutorialRE:FireServer(7)
-                
+
                 -- 触发战斗后，开启后台监听，等打完过渡到第 8 步
                 handleStepSevenToEight()
             end
@@ -236,7 +238,7 @@ function TutorialController.Init()
 
         local plotsFolder = Workspace:WaitForChild("Plots", 10)
         local targetPlot, targetLawn = nil, nil
-        
+
         if plotsFolder then
             for _, plot in ipairs(plotsFolder:GetChildren()) do
                 if plot:GetAttribute("OwnerId") == player.UserId then
@@ -260,19 +262,19 @@ function TutorialController.Init()
             stopGuide()
             removeTip()
             ReplicatedStorage.UpdateTutorialRE:FireServer(6)
-            
+
             local tutorialDeployRE = ReplicatedStorage:WaitForChild("TutorialDeployRE", 3)
             if tutorialDeployRE then
                 for i = 2, 6 do
                     -- 拼接出 Lawn2_1, Lawn3_1 ... Lawn6_1
                     local nextLawn = "Lawn" .. i .. "_1"
                     tutorialDeployRE:FireServer(nextLawn, "Peashooter")
-                    task.wait(0.15) 
+                    task.wait(0.15)
                 end
             else
                 warn("Tutorial error: TutorialDeployRE server event not found")
             end
-            
+
             task.wait(0.5)
             startStepSeven() -- 进入点击 Battle 的引导
         end
@@ -289,7 +291,7 @@ function TutorialController.Init()
                         end
                     end
                 end
-                
+
                 if isPlanted then break end
                 task.wait(0.5)
             end
@@ -303,7 +305,7 @@ function TutorialController.Init()
     -- ==========================================
     local function startStepFive(targetPlot, targetSoil)
         local removeWaitTip = showTutorialTip("Plant is growing, please wait...")
-        
+
         local maturePlant = nil
         while true do
             local currentPlant = getPlantOnPosition(targetPlot, targetSoil.Name)
@@ -313,7 +315,7 @@ function TutorialController.Init()
             end
             task.wait(0.5)
         end
-        
+
         if removeWaitTip then removeWaitTip() end
 
         local removeHarvestTip = showTutorialTip("Plant is mature! Follow the arrow and press [E] to harvest.")
@@ -328,7 +330,7 @@ function TutorialController.Init()
                 stopGuide()
                 removeHarvestTip()
                 ReplicatedStorage.UpdateTutorialRE:FireServer(5)
-                
+
                 task.wait(0.5)
                 -- 🚀【核心修改】：删除了之前的 startStepSix (装备植物)，收获后直接跳入现在的战斗部署引导
                 startStepSix()
@@ -372,16 +374,16 @@ function TutorialController.Init()
         local plantsFolder = targetPlot:WaitForChild("Plants")
          local connection
         connection = plantsFolder.ChildAdded:Connect(function(child)
-            task.wait(0.1) 
+            task.wait(0.1)
             if child:IsA("Model") and child:GetAttribute("PlantedOn") then
                 connection:Disconnect()
                 stopGuide()
                 removeTip()
                 ReplicatedStorage.UpdateTutorialRE:FireServer(4)
-                
+
                 local actualSoilName = child:GetAttribute("PlantedOn")
                 local actualSoil = targetPlot.Soils:FindFirstChild(actualSoilName) or targetSoil
-                
+
                 task.wait(0.5)
                 startStepFive(targetPlot, actualSoil)
             end
@@ -400,7 +402,7 @@ function TutorialController.Init()
             if not inventoryGui.Enabled then
                 connection:Disconnect()
                 stopFlash()
-                stopArrow() 
+                stopArrow()
                 removeTip()
                 ReplicatedStorage.UpdateTutorialRE:FireServer(3)
                 task.wait(0.5)
@@ -430,21 +432,21 @@ function TutorialController.Init()
 
         if targetSeed then
              local stopFlash = TutorialEffect.AddFlash(targetSeed)
-            local stopArrow = TutorialEffect.AddUIArrow(targetSeed) 
+            local stopArrow = TutorialEffect.AddUIArrow(targetSeed)
             local isStepCompleted = false
             local connection
-            
+
             local closeConn
             closeConn = inventoryGui:GetPropertyChangedSignal("Enabled"):Connect(function()
                  if not inventoryGui.Enabled and not isStepCompleted then
                     removeTip()
                     if stopFlash then stopFlash() end
-                    if stopArrow then stopArrow() end 
+                    if stopArrow then stopArrow() end
                     if connection then connection:Disconnect() end
                     closeConn:Disconnect()
-                    
+
                     local warningTip = showTutorialTip("Please open Inventory to continue!")
-                   
+
                     local reopenConn
                     reopenConn = inventoryGui:GetPropertyChangedSignal("Enabled"):Connect(function()
                         if inventoryGui.Enabled then
@@ -462,7 +464,7 @@ function TutorialController.Init()
                     connection:Disconnect()
                     if closeConn then closeConn:Disconnect() end
                     stopFlash()
-                    stopArrow() 
+                    stopArrow()
                     removeTip()
                     ReplicatedStorage.UpdateTutorialRE:FireServer(2)
                     task.wait(0.5)
@@ -478,14 +480,14 @@ function TutorialController.Init()
         local backpackBtn = hotbarFrame:WaitForChild("System_Backpack")
         local removeTip = showTutorialTip("Click the flashing icon to open Inventory.")
         local stopFlash = TutorialEffect.AddFlash(backpackBtn)
-        local stopArrow = TutorialEffect.AddUIArrow(backpackBtn) 
+        local stopArrow = TutorialEffect.AddUIArrow(backpackBtn)
 
         local conn
         conn = inventoryGui:GetPropertyChangedSignal("Enabled"):Connect(function()
             if inventoryGui.Enabled then
                 conn:Disconnect()
                 stopFlash()
-                stopArrow() 
+                stopArrow()
                 removeTip()
                 ReplicatedStorage.UpdateTutorialRE:FireServer(1)
                 task.wait(0.5)
@@ -518,7 +520,7 @@ function TutorialController.Init()
                     break
                  end
             end
-            
+
             if targetPlot and targetSoil then
                 startStepFive(targetPlot, targetSoil)
             else

@@ -1,145 +1,239 @@
 -- src/client/Services/FreeRewardClientController.luau
 local FreeRewardClientController = {}
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
-local REWARD_ITEM_NAME = "Threepeater" 
-local GROUP_ID = 229662289 -- ⚠️⚠️⚠️ 保持与服务端一致，填入你的群组 ID！
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local DEFAULT_WAIT_TIMEOUT = 10
+local CLAIM_ATTRIBUTE = "HasClaimedFreeRewardv1"
+local JOIN_COMMUNITY_MESSAGE = "Please join the community and like the game."
+local CLAIM_SUCCESS_MESSAGE = "Claimed 10000 Sun + 1x Ice Melon-pult!"
+
+local RED_GRADIENT = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 95, 95)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(190, 0, 0)),
+})
+
+local GREEN_GRADIENT = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(85, 255, 127)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 170, 0)),
+})
+
+local function waitForRequired(parent, childName)
+    if not parent then
+        return nil
+    end
+
+    local child = parent:WaitForChild(childName, DEFAULT_WAIT_TIMEOUT)
+    if not child then
+        warn(("[FreeReward] Missing %s under %s"):format(childName, parent:GetFullName()))
+    end
+    return child
+end
+
+local function findButton(root)
+    if not root then
+        return nil
+    end
+
+    if root:IsA("GuiButton") then
+        return root
+    end
+
+    return root:FindFirstChildWhichIsA("GuiButton", true)
+end
+
+local function setButtonEnabled(button, enabled)
+    if not button then
+        return
+    end
+
+    button.Active = enabled
+    button.AutoButtonColor = enabled
+    pcall(function()
+        button.Interactable = enabled
+    end)
+end
+
+local function setGuiOpen(gui, isOpen)
+    if not gui then
+        return
+    end
+
+    if gui:IsA("ScreenGui") then
+        gui.Enabled = isOpen
+    elseif gui:IsA("GuiObject") then
+        gui.Visible = isOpen
+    end
+end
+
+local function setRootVisible(root, isVisible)
+    if root and root:IsA("GuiObject") then
+        root.Visible = isVisible
+    end
+end
+
+local function getGradient(root)
+    if not root then
+        return nil
+    end
+
+    local namedGradient = root:FindFirstChild("UIGradient")
+    if namedGradient and namedGradient:IsA("UIGradient") then
+        return namedGradient
+    end
+
+    return root:FindFirstChildWhichIsA("UIGradient", true)
+end
 
 function FreeRewardClientController.Init()
     local player = Players.LocalPlayer
-    local playerGui = player:WaitForChild("PlayerGui")
-    local basicGui = playerGui:WaitForChild("BasicGui")
-    local eventPage = basicGui:WaitForChild("EventPage")
-    
-    local freeRewardUI = eventPage:WaitForChild("FreeRewardUI")
-    local closeBtn = freeRewardUI:WaitForChild("CloseButton")
-    local claimBtn = freeRewardUI:WaitForChild("ClaimBattle")
-    local claimBtnText = claimBtn:WaitForChild("TextLabel")
-    local node1 = freeRewardUI:WaitForChild("Node_1")
-    local node2 = freeRewardUI:WaitForChild("Node_2")
-    
-    local viewportFrame = freeRewardUI:WaitForChild("ViewportFrame") 
-    
-    local rewardPart = Workspace:WaitForChild("FreeReward")
-    local claimRE = ReplicatedStorage:WaitForChild("ClaimFreeRewardRE")
+    local playerGui = waitForRequired(player, "PlayerGui")
+    local basicGui = waitForRequired(playerGui, "BasicGui")
+    local playProperty = waitForRequired(basicGui, "PlayProperty")
+    local freeRoot = waitForRequired(playProperty, "Free")
+    local groupGui = waitForRequired(basicGui, "GroupGui")
+    local group = waitForRequired(groupGui, "Group")
+    local top = groupGui and groupGui:FindFirstChild("Top") or nil
+    if not top then
+        top = waitForRequired(group, "Top")
+    end
+    local closeRoot = waitForRequired(top, "Close")
+    local redeemRoot = waitForRequired(group, "Redeem")
+    local claimRE = waitForRequired(ReplicatedStorage, "ClaimFreeRewardRE")
+
+    if not (playerGui and basicGui and playProperty and freeRoot and groupGui and top and closeRoot and group and redeemRoot and claimRE) then
+        return
+    end
+
     local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
+    local freeButton = findButton(freeRoot)
+    local closeButton = findButton(closeRoot)
+    local redeemButton = findButton(redeemRoot)
+    local redeemGradient = getGradient(redeemRoot)
 
-    local hasLiked = true -- 点赞依然是假验证
-    local isDebounce = false
+    if not freeButton then
+        warn("[FreeReward] PlayProperty.Free does not contain a GuiButton.")
+        return
+    end
 
-    freeRewardUI.Visible = false
-    local rotateConnection = nil
+    if not closeButton then
+        warn("[FreeReward] GroupGui.Top.Close does not contain a GuiButton.")
+        return
+    end
 
-    local function SetupViewportModel()
-        viewportFrame:ClearAllChildren()
-        local plantsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
-        local modelName = REWARD_ITEM_NAME .. "_Plant"
-        local modelTemplate = plantsFolder and plantsFolder:FindFirstChild(modelName)
-        
-        if not modelTemplate then
-            warn("[FreeReward] Reward model not found: " .. tostring(modelName))
+    if not redeemButton then
+        warn("[FreeReward] GroupGui.Group.Redeem does not contain a GuiButton.")
+        return
+    end
+
+    if not redeemGradient then
+        warn("[FreeReward] GroupGui.Group.Redeem.UIGradient was not found.")
+    end
+
+    local claiming = false
+    local gradientPulseId = 0
+
+    local function setFreeEntryAvailable(isAvailable)
+        setRootVisible(freeRoot, isAvailable)
+        setButtonEnabled(freeButton, isAvailable)
+    end
+
+    local function closeGroupGui()
+        setGuiOpen(groupGui, false)
+    end
+
+    local function openGroupGui()
+        if player:GetAttribute(CLAIM_ATTRIBUTE) == true then
+            setFreeEntryAvailable(false)
+            closeGroupGui()
             return
         end
 
-        local displayModel = modelTemplate:Clone()
-        displayModel.Parent = viewportFrame
+        if basicGui:IsA("ScreenGui") then
+            basicGui.Enabled = true
+        end
+        setGuiOpen(groupGui, true)
+    end
 
-        -- 背包同款摄像机参数
-        local camera = Instance.new("Camera")
-        camera.FieldOfView = 40 
-        camera.Parent = viewportFrame
-        viewportFrame.CurrentCamera = camera
+    local function updateClaimedState()
+        local hasClaimed = player:GetAttribute(CLAIM_ATTRIBUTE)
+        if hasClaimed == true then
+            setFreeEntryAvailable(false)
+            closeGroupGui()
+        elseif hasClaimed == false then
+            setFreeEntryAvailable(true)
+        else
+            setFreeEntryAvailable(false)
+        end
+    end
 
-        local cframe, size = displayModel:GetBoundingBox()
-        local maxDim = math.max(size.X, size.Y, size.Z)
-        if maxDim == 0 then maxDim = 2 end 
-        
-        displayModel:PivotTo(CFrame.new(0, 0, 0))
-        
-        camera.CFrame = CFrame.lookAt(
-           Vector3.new(0, 0, maxDim * 1.5 + 1),
-            Vector3.new(0, size.Y / 3, 0)
-        )
-
-        if rotateConnection then
-            rotateConnection:Disconnect()
-            rotateConnection = nil
+    local function pulseRedeemFailure()
+        if not redeemGradient then
+            return
         end
 
-        local currentAngle = 0
-        rotateConnection = RunService.RenderStepped:Connect(function(dt)
-            if freeRewardUI.Visible then
-                currentAngle = currentAngle + math.rad(60 * dt) 
-                displayModel:PivotTo(CFrame.new(0, 0, 0) * CFrame.Angles(0, currentAngle, 0))
+        gradientPulseId += 1
+        local myPulseId = gradientPulseId
+        redeemGradient.Color = RED_GRADIENT
+
+        task.delay(0.45, function()
+            if myPulseId == gradientPulseId and redeemGradient.Parent then
+                redeemGradient.Color = GREEN_GRADIENT
             end
         end)
     end
 
-    rewardPart.Touched:Connect(function(hit)
-        if isDebounce then return end
-        local character = player.Character
-        if character and hit:IsDescendantOf(character) then
-            isDebounce = true
-            
-            -- 🌟 核心修改：真实向 Roblox 请求玩家是否在群组中
-            local inGroup = false
-            pcall(function()
-                inGroup = player:IsInGroup(GROUP_ID)
-            end)
+    closeGroupGui()
+    updateClaimedState()
 
-            -- 更新文本状态：根据群组状态切换 1/1 或 0/1
-            node1.Text = hasLiked and "1/1" or "0/1"
-            node2.Text = inGroup and "1/1" or "0/1"
-            
-            if player:GetAttribute("HasClaimedFreeReward") then
-                claimBtnText.Text = "Claimed"
-                claimBtn.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
-                claimBtn.Interactable = false
-            else
-                claimBtnText.Text = "Claim"
-                claimBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                claimBtn.Interactable = true
-            end
-            
-            if eventPage:IsA("ScreenGui") then eventPage.Enabled = true end
-            SetupViewportModel()
-            freeRewardUI.Visible = true
-            
-            task.wait(1)
-            isDebounce = false
-        end
+    player:GetAttributeChangedSignal(CLAIM_ATTRIBUTE):Connect(updateClaimedState)
+
+    freeButton.Activated:Connect(openGroupGui)
+
+    closeButton.Activated:Connect(function()
+        closeGroupGui()
     end)
 
-    closeBtn.MouseButton1Click:Connect(function()
-        freeRewardUI.Visible = false
-        if rotateConnection then
-            rotateConnection:Disconnect()
-            rotateConnection = nil
+    redeemButton.Activated:Connect(function()
+        if claiming then
+            return
         end
-        viewportFrame:ClearAllChildren()
+
+        if player:GetAttribute(CLAIM_ATTRIBUTE) == true then
+            updateClaimedState()
+            return
+        end
+
+        claiming = true
+        setButtonEnabled(redeemButton, false)
+        claimRE:FireServer()
     end)
 
-    claimBtn.MouseButton1Click:Connect(function()
-        if player:GetAttribute("HasClaimedFreeReward") then return end
-        
-        if node1.Text == "1/1" and node2.Text == "1/1" then
-            claimRE:FireServer()
-        else
-            -- 🌟 修改了提示文字
-            UIEffectUtil.ShowTip("Please Like and Join our Group first!")
-        end
-    end)
+    claimRE.OnClientEvent:Connect(function(success, message, code)
+        claiming = false
+        setButtonEnabled(redeemButton, true)
 
-    claimRE.OnClientEvent:Connect(function(success)
         if success then
-            claimBtnText.Text = "Claimed"
-            claimBtn.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
-            claimBtn.Interactable = false
-            UIEffectUtil.ShowTip("Successfully claimed " .. REWARD_ITEM_NAME .. " x1!")
+            player:SetAttribute(CLAIM_ATTRIBUTE, true)
+            UIEffectUtil.ShowTip(message or CLAIM_SUCCESS_MESSAGE)
+            updateClaimedState()
+            return
         end
+
+        if code == "AlreadyClaimed" then
+            player:SetAttribute(CLAIM_ATTRIBUTE, true)
+            updateClaimedState()
+            return
+        end
+
+        if code == "NotInGroup" then
+            pulseRedeemFailure()
+            UIEffectUtil.ShowTip(message or JOIN_COMMUNITY_MESSAGE)
+            return
+        end
+
+        UIEffectUtil.ShowTip(message or "Unable to claim. Please try again.")
     end)
 end
 

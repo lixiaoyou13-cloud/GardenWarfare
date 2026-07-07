@@ -13,11 +13,11 @@ local PlotService = require(script.Parent.PlotService)
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local CoinDropService = require(script.Parent.CoinDropService)
 
--- [终极特效控制系统：支持 Attachment 容器穿透]
+-- 特效控制系统：支持 Attachment 容器穿透
 function PlantGrowthService.ApplyMutationEffects(model, mutationLevel)
     mutationLevel = mutationLevel or 1
     local effectMap = { [2] = "Glow", [3] = "Lightning", [4] = "HolyLight" }
-    
+
     for lvl, fxName in pairs(effectMap) do
         local shouldEnable = (mutationLevel == lvl)
         for _, node in ipairs(model:GetDescendants()) do
@@ -32,25 +32,25 @@ function PlantGrowthService.ApplyMutationEffects(model, mutationLevel)
     end
 end
 
--- [生成成熟植物]
+-- 生成成熟植物
 function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolder, savedMutation)
     local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
     local matureModelName = itemDetail.YieldPlant .. "_Plant"
     local matureModel = itemModelsFolder:FindFirstChild(matureModelName) or itemModelsFolder:FindFirstChild(itemDetail.YieldPlant)
     if not matureModel then return nil end
-    
+
     local plotNum = tonumber(string.match(plot.Name, "%d+")) or 1
     local yRotation = (plotNum <= 4) and CFrame.Angles(0, math.rad(90), 0) or CFrame.Angles(0, math.rad(90), 0)
-    
+
     local grownPlant = matureModel:Clone()
     grownPlant.Name = itemDetail.YieldPlant
     grownPlant:SetAttribute("IsMature", true)
     grownPlant:SetAttribute("PlantedOn", soil.Name)
-    
+
     local maxYield = itemDetail.YieldCount or 1
     grownPlant:SetAttribute("MaxYield", maxYield)
     grownPlant:SetAttribute("YieldCount", maxYield)
-    
+
     local mutationLevel = savedMutation or 1
     grownPlant:SetAttribute("MutationLevel", mutationLevel)
     local ownerId = 0
@@ -58,28 +58,28 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
         if PlotService.GetPlayerPlot(p) == plot then ownerId = p.UserId; break end
     end
     grownPlant:SetAttribute("OwnerId", ownerId)
-    
+
     if grownPlant:IsA("Model") and grownPlant.PrimaryPart then
         grownPlant:PivotTo(soil.CFrame * CFrame.new(0, soil.Size.Y/2 + grownPlant.PrimaryPart.Size.Y/2, 0) * yRotation)
     elseif grownPlant:IsA("BasePart") then
         grownPlant.CFrame = soil.CFrame * CFrame.new(0, soil.Size.Y/2 + grownPlant.Size.Y/2, 0) * yRotation
     end
-    
+
     local plantConfig = ItemConfig.Plants[itemDetail.YieldPlant]
     local targetAnimId = plantConfig and plantConfig.IdleAnimId
     for _, part in pairs(grownPlant:GetDescendants()) do
-        if part:IsA("BasePart") then 
+        if part:IsA("BasePart") then
             part.CanCollide = false
             if targetAnimId and grownPlant.PrimaryPart and part == grownPlant.PrimaryPart then
                 part.Anchored = true
             elseif part.Name == "Glow" or part.Name == "HolyLight" or part.Name == "Lightning" then
                 part.Anchored = true
             else
-                part.Anchored = not targetAnimId 
+                part.Anchored = not targetAnimId
             end
         end
     end
-    
+
     if targetAnimId then
         local animController = grownPlant:FindFirstChildOfClass("AnimationController") or grownPlant:FindFirstChildOfClass("Humanoid")
         if not animController then animController = Instance.new("AnimationController"); animController.Parent = grownPlant end
@@ -97,7 +97,7 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
     billboard.StudsOffset = Vector3.new(0, 3.5, 0)
     billboard.AlwaysOnTop = true
     billboard.MaxDistance = 50
-    
+
     local bgFrame = Instance.new("Frame")
     bgFrame.Size = UDim2.new(1, 0, 1, 0)
     bgFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -113,9 +113,9 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
     statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     statusLabel.TextScaled = true
     statusLabel.Font = Enum.Font.FredokaOne
-    
+
     local mutName = ItemConfig.MutationName and ItemConfig.MutationName[mutationLevel] or ""
-    statusLabel.Text = (mutationLevel > 1) and ("⭐" .. mutName) or "Loading..."
+    statusLabel.Text = (mutationLevel > 1 and mutName ~= "") and mutName or "Loading..."
     statusLabel.Parent = bgFrame
 
     local barBg = Instance.new("Frame")
@@ -130,7 +130,7 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
     local barFill = Instance.new("Frame")
     barFill.Name = "BarFill"
     barFill.Size = UDim2.new(1, 0, 1, 0)
-    barFill.BackgroundColor3 = Color3.fromRGB(255, 215, 0) 
+    barFill.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
     local fillCorner = Instance.new("UICorner"); fillCorner.CornerRadius = UDim.new(0, 4); fillCorner.Parent = barFill
     barFill.Parent = barBg
 
@@ -153,7 +153,7 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
         TweenService:Create(barFill, TweenInfo.new(0.3), {Size = UDim2.new(ratio, 0, 1, 0)}):Play()
         progressText.Text = current .. " / " .. max
     end)
-    
+
     local rootPart = grownPlant:IsA("Model") and grownPlant.PrimaryPart or grownPlant
     billboard.Parent = rootPart
     grownPlant.Parent = plantsFolder
@@ -166,8 +166,7 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
                 break
             end
         end
-        -- 【核心修复】：改用 ShowTipRE 触发全服 UIEffectUtil.ShowTip
-        -- ==========================================
+        -- 改用 ShowTipRE 触发全服 UIEffectUtil.ShowTip
         local showTipRE = ReplicatedStorage:FindFirstChild("ShowTipRE")
         if showTipRE then
             local msg = "[" .. ownerName .. "]'s 5-Star rare plant [" .. plantConfig.Name .. "] has matured!"
@@ -176,26 +175,26 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
         -- 3. 在 3D 场景中创建一个如同实体模型般的“Legendary”悬浮文字
         local legendaryBillboard = Instance.new("BillboardGui")
         legendaryBillboard.Name = "LegendaryTagUI"
-        
-        -- 【核心修复】：使用 Scale 也就是 3D 物理单位(Studs)，而不是像素。
-        -- 这里的 4.5 和 1.2 代表它在场景中的实际物理宽高。它将和模型一样近大远小。
-        legendaryBillboard.Size = UDim2.new(4.5, 0, 1.2, 0) 
-        
-        legendaryBillboard.StudsOffset = Vector3.new(0, 5.2, 0) 
-        
-        -- 【核心修复】：关闭 AlwaysOnTop，开启 LightInfluence，让它完全融入 3D 世界
+
+        -- 使用 Scale 也就是 3D 物理单位(Studs)，而不是像素
+        -- 这里的 4.5 和 1.2 代表它在场景中的实际物理宽高。它将和模型一样近大远小
+        legendaryBillboard.Size = UDim2.new(4.5, 0, 1.2, 0)
+
+        legendaryBillboard.StudsOffset = Vector3.new(0, 5.2, 0)
+
+        -- 关闭 AlwaysOnTop，开启 LightInfluence，让它完全融入 3D 世界
         legendaryBillboard.AlwaysOnTop = false -- 开启真实空间遮挡，不再穿透模型
         legendaryBillboard.LightInfluence = 1 -- 接受场景的光照影响，就像真实模型一样
-        legendaryBillboard.MaxDistance = 150 
+        legendaryBillboard.MaxDistance = 150
 
         local textLabel = Instance.new("TextLabel")
         textLabel.Size = UDim2.new(1, 0, 1, 0)
         textLabel.BackgroundTransparency = 1
         textLabel.Text = "Legendary"
-        textLabel.TextColor3 = Color3.fromRGB(255, 170, 0) 
-        textLabel.Font = Enum.Font.FredokaOne 
-        textLabel.TextScaled = true 
-        
+        textLabel.TextColor3 = Color3.fromRGB(255, 170, 0)
+        textLabel.Font = Enum.Font.FredokaOne
+        textLabel.TextScaled = true
+
         textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         textLabel.TextStrokeTransparency = 0
 
@@ -203,10 +202,10 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
         legendaryBillboard.Parent = rootPart
     end
 
-    return grownPlant -- [保留原有的这行返回]
+    return grownPlant -- 原有的这行返回
 end
 
--- [生成幼苗]
+-- 生成幼苗
 function PlantGrowthService.CreateSeedling(seedId, soil, itemDetail, plantedTime, plot, plantsFolder)
     local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
     local seedModelName = itemDetail.SeedId or "PlantSeed"
@@ -221,7 +220,7 @@ function PlantGrowthService.CreateSeedling(seedId, soil, itemDetail, plantedTime
     newPlant.Name = seedId
     newPlant:SetAttribute("YieldPlant", itemDetail.YieldPlant)
     newPlant:SetAttribute("GrowthTime", itemDetail.GrowthTime)
-    newPlant:SetAttribute("PlantedOn", soil.Name) 
+    newPlant:SetAttribute("PlantedOn", soil.Name)
     newPlant:SetAttribute("PlantedTime", plantedTime)
 
     if newPlant:IsA("Model") and newPlant.PrimaryPart then
@@ -240,7 +239,7 @@ function PlantGrowthService.CreateSeedling(seedId, soil, itemDetail, plantedTime
     billboard.StudsOffset = Vector3.new(0, 3.5, 0)
     billboard.AlwaysOnTop = true
     billboard.MaxDistance = 50
-    
+
     local bgFrame = Instance.new("Frame")
     bgFrame.Size = UDim2.new(1, 0, 1, 0)
     bgFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -271,7 +270,7 @@ function PlantGrowthService.CreateSeedling(seedId, soil, itemDetail, plantedTime
     local barFill = Instance.new("Frame")
     barFill.Name = "BarFill"
     barFill.Size = UDim2.new(0, 0, 1, 0)
-    barFill.BackgroundColor3 = Color3.fromRGB(85, 255, 127) 
+    barFill.BackgroundColor3 = Color3.fromRGB(85, 255, 127)
     local fillCorner = Instance.new("UICorner"); fillCorner.CornerRadius = UDim.new(0, 4); fillCorner.Parent = barFill
     barFill.Parent = barBg
 
@@ -284,53 +283,51 @@ function PlantGrowthService.CreateSeedling(seedId, soil, itemDetail, plantedTime
     progressText.TextScaled = true
     progressText.Font = Enum.Font.SourceSansBold
     progressText.ZIndex = 2
-    progressText.Text = "⏳ --s"
+    progressText.Text = "--s"
     progressText.Parent = barBg
-    
+
     local rootPart = newPlant:IsA("Model") and newPlant.PrimaryPart or newPlant
     billboard.Parent = rootPart
     newPlant.Parent = plantsFolder
     return newPlant
 end
 
--- [开始植物生长循环]
+-- 开始植物生长循环
 function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt, plantsFolder)
     task.spawn(function()
         local growthTime = itemDetail.GrowthTime
-        -- 👇 1. 获取该植物种子的购买原价（保底100）
-        local buyPrice = itemDetail.BuyPrice or 100 
+        -- 1. 获取该植物种子的购买原价（保持底100）
+        local buyPrice = itemDetail.BuyPrice or 100
 
         while newPlant and newPlant.Parent do
             local elapsed = os.time() - (newPlant:GetAttribute("PlantedTime") or os.time())
             local remaining = math.max(0, growthTime - elapsed)
-           
+
             -- 用于植物头顶进度条的比例
             local progressRatio = math.clamp(elapsed / growthTime, 0, 1)
-            
+
             local currentCost = buyPrice * 2
 
             local billboard = newPlant:FindFirstChild("GrowthUI", true)
             if remaining > 0 then
-                if billboard then 
-                    billboard.Enabled = true 
+                if billboard then
+                    billboard.Enabled = true
                     local barFill = billboard:FindFirstChild("BarFill", true)
                     local progressText = billboard:FindFirstChild("ProgressText", true)
-                    
+
                     if barFill then barFill.Size = UDim2.new(progressRatio, 0, 1, 0) end
                     -- 头顶UI继续显示倒计时秒数
-                    if progressText then progressText.Text = "⏳ " .. remaining .. "s" end
+                    if progressText then progressText.Text = tostring(remaining) .. "s" end
                 end
 
-                -- 👇 3. 🌟 核心修复：把原先显示的秒数，替换为真实阳光花费！
-                if prompt and prompt.Parent then 
-                    -- 你可以把 Coins 改成 ☀️ 或者 阳光，只要你喜欢
-                    prompt.ActionText = "Speed up (" .. NumberFormatUtil.FormatNumber(currentCost) .. " Coins)" 
+                -- 3. ：把原先显示的秒数，替换为真实阳光花费
+                if prompt and prompt.Parent then
+                    -- 你可以把 Coins 改成 或者 阳光，只要你喜欢
+                    prompt.ActionText = "Speed up (" .. NumberFormatUtil.FormatNumber(currentCost) .. " Coins)"
                 end
             else
-                -- ==========================================
                 -- 以下为植物成熟的代码，保持原样不动
-                -- ==========================================
-                local seedId = newPlant.Name 
+                local seedId = newPlant.Name
                 local finalItemDetail = itemDetail
                 local finalPlantId = seedId
 
@@ -338,7 +335,7 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                     local data = PlayerDataManager.GetPlayerData(player)
                     local maxLevel = data and data.UnlockedLevel or 1
                     local maxPossibleId = math.clamp(maxLevel + 1, 1, #ItemConfig.IdToSeedKey)
-                    
+
                     local randomNum = math.random(1, maxPossibleId)
                     finalPlantId = ItemConfig.IdToSeedKey[randomNum]
                     finalItemDetail = ItemConfig.Seeds[finalPlantId]
@@ -347,10 +344,10 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                         PlayerDataManager.UnlockSeed(player, finalPlantId)
                         local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                         if showNotifRE then
-                           showNotifRE:FireClient(player, "📖 Collection Unlocked!", "The seed grew into [" .. finalItemDetail.Name .. "]!\nAvailable in Shop!")
+                           showNotifRE:FireClient(player, "Collection Unlocked!", "The seed grew into [" .. finalItemDetail.Name .. "]!\nAvailable in Shop!")
                         end
                     end
-                    
+
                     PlayerDataManager.UpdatePlantedPlant(player, soil.Name, finalPlantId, os.time() - growthTime)
                 end
 
@@ -368,14 +365,14 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                     for _, part in ipairs(seedParts) do
                         local tween = TweenService:Create(part, pulseInfo, { Color = Color3.fromRGB(255, 255, 255), Transparency = 0.5 })
                         tween:Play()
-                        lastTween = tween 
+                        lastTween = tween
                     end
                     if lastTween then lastTween.Completed:Wait() end
                 end
 
                 if player and player.Parent then
                     local dropPos = soil.Position + Vector3.new(0, 3, 0)
-                    local totalCoinValue = finalItemDetail.Output or 20 
+                    local totalCoinValue = finalItemDetail.Output or 20
                     CoinDropService.DropCoins(player, dropPos, 5, totalCoinValue)
                 end
 
@@ -383,22 +380,22 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
 
                 if newPlant:IsA("Model") and newPlant.PrimaryPart then newPlant:ScaleTo(3) end
                 for _, part in pairs(newPlant:GetDescendants()) do
-                    if part:IsA("BasePart") then part.Transparency = 1 end 
+                    if part:IsA("BasePart") then part.Transparency = 1 end
                 end
 
-                task.wait(0.2) 
+                task.wait(0.2)
 
                 local pData = PlayerDataManager.GetPlayerData(player)
                 local savedMutation = pData and pData.PlantedPlants[soil.Name] and pData.PlantedPlants[soil.Name].Mutation or 1
                 PlantGrowthService.SpawnMaturePlant(soil, finalItemDetail, plot, plantsFolder, savedMutation)
-                newPlant:Destroy() 
-                  
-                if prompt then 
+                newPlant:Destroy()
+
+                if prompt then
                     prompt.ActionText = "Harvest"
                     prompt.HoldDuration = 15 -- 成熟后变15秒长按
-                    prompt.Enabled = true 
+                    prompt.Enabled = true
                 end
-                break 
+                break
             end
             task.wait(0.2)
         end

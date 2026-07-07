@@ -5,171 +5,282 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local MarketplaceService = game:GetService("MarketplaceService")
-local PRODUCT_ID = 3582734340 -- 内购 ID
 
--- 封装埋点上报函数
-local function ReportAnalytics(eventName, eventData)
+local PRODUCT_ID = 3582734340
+
+local UIEffectUtil = require(script.Parent.Parent.Parent.Utils.UIEffectUtil)
+local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
+
+local DAYS_PER_TIER = SignInRewardConfig.DaysPerTier or 7
+
+local GREEN_GRADIENT = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(85, 255, 127)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 170, 0)),
+})
+
+local GREY_GRADIENT = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 180, 180)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 100, 100)),
+})
+
+local CLAIMED_GRADIENT = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 200, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 100, 200)),
+})
+
+local CLAIMED_STROKE = Color3.fromRGB(0, 50, 100)
+local BLACK_STROKE = Color3.new(0, 0, 0)
+local GREEN_STROKE = Color3.fromRGB(0, 100, 0)
+
+local function reportAnalytics(eventName, eventData)
     local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE")
     if analyticsRE then
         analyticsRE:FireServer("Custom", eventName, eventData)
     end
 end
 
--- 引入 Viewport 渲染工具
-local UIEffectUtil = require(script.Parent.Parent.Parent.Utils.UIEffectUtil)
-
--- 👇 新增：引入签到奖励统一配置
-local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
-
--- 定义颜色渐变
-local GREEN_GRADIENT = ColorSequence.new{
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(85, 255, 127)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 170, 0))
-}
-local GREY_GRADIENT = ColorSequence.new{
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 180, 180)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 100, 100))
-}
--- 已领取按钮的专属渐变（清爽蓝）
-local CLAIMED_GRADIENT = ColorSequence.new{
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 200, 255)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 100, 200))
-}
-local CLAIMED_STROKE = Color3.fromRGB(0, 50, 100) -- 按钮描边颜色
-
--- 辅助函数：格式化倒计时
-local function GetFormattedRemainingTime()
+local function getFormattedRemainingTime()
     local now = os.date("*t", os.time())
     local tomorrowMidnight = os.time({
-        year = now.year, month = now.month, day = now.day + 1, 
-        hour = 0, min = 0, sec = 0
+        year = now.year,
+        month = now.month,
+        day = now.day + 1,
+        hour = 0,
+        min = 0,
+        sec = 0,
     })
-    local diff = tomorrowMidnight - os.time()
-    
+    local diff = math.max(0, tomorrowMidnight - os.time())
+
     local hours = math.floor(diff / 3600)
     local minutes = math.floor((diff % 3600) / 60)
     local seconds = diff % 60
-    
+
     return string.format("%02d:%02d:%02d", hours, minutes, seconds)
 end
 
-local function RenderUI(sevenDayFrame, playerData)
-    if not playerData then return end
-    
-    local timeText = sevenDayFrame:FindFirstChild("TimeText", true)
-    local signInDays = playerData.SignInDays or 0
-    local lastTime = playerData.LastSignInTime or 0
-    
-    local isClaimedToday = false
-    if lastTime > 0 then
-        local lastDate = os.date("*t", lastTime)
-        local currDate = os.date("*t", os.time())
-        isClaimedToday = (lastDate.year == currDate.year and lastDate.month == currDate.month and lastDate.day == currDate.day)
+local function isTextNode(node)
+    return node and (node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox"))
+end
+
+local function getClaimButton(dayNode)
+    return dayNode:FindFirstChild("ImageButton") or dayNode:FindFirstChild("ClaimBattle", true)
+end
+
+local function isClaimButtonText(dayNode, node)
+    local claimBtn = getClaimButton(dayNode)
+    return claimBtn and node:IsDescendantOf(claimBtn)
+end
+
+local function setFirstText(root, names, text)
+    for _, name in ipairs(names) do
+        local node = root:FindFirstChild(name, true)
+        if isTextNode(node) then
+            node.Text = text
+            return node
+        end
+    end
+    return nil
+end
+
+local function getRewardAmountText(rewardCfg)
+    local amount = tonumber(rewardCfg.Amount) or 1
+    return "x" .. UIEffectUtil.FormatNumber(amount)
+end
+
+local function applyRewardText(dayNode, rewardCfg)
+    if not rewardCfg then
+        return
     end
 
-    if timeText then timeText.Visible = isClaimedToday end
-    
-    -- ==========================================
-    -- 控制内购按钮的显示与隐藏
+    local amountText = getRewardAmountText(rewardCfg)
+    for _, node in ipairs(dayNode:GetDescendants()) do
+        if node.Name == "TextLabel" and isTextNode(node) and not isClaimButtonText(dayNode, node) then
+            node.Text = amountText
+            return
+        end
+    end
+end
+
+local function clearViewport(viewport)
+    if not (viewport and viewport:IsA("ViewportFrame")) then
+        return
+    end
+
+    for _, child in ipairs(viewport:GetChildren()) do
+        if child:IsA("Model") or child:IsA("BasePart") or child:IsA("Camera") then
+            child:Destroy()
+        end
+    end
+end
+
+local function getRewardViewport(dayNode)
+    for _, node in ipairs(dayNode:GetDescendants()) do
+        if node:IsA("ViewportFrame") and not isClaimButtonText(dayNode, node) then
+            return node
+        end
+    end
+    return nil
+end
+
+local function updateRewardVisual(dayNode, rewardCfg)
+    applyRewardText(dayNode, rewardCfg)
+
+    local viewport = getRewardViewport(dayNode)
+    if not viewport then
+        return
+    end
+
+    if rewardCfg and rewardCfg.RewardType == "Seed" and rewardCfg.ItemId then
+        viewport.Visible = true
+        UIEffectUtil.RenderToViewport(viewport, rewardCfg.ItemId, "Plant")
+
+        if not viewport:GetAttribute("IsRotating") then
+            viewport:SetAttribute("IsRotating", true)
+            task.spawn(function()
+                while viewport and viewport.Parent do
+                    local dt = RunService.RenderStepped:Wait()
+                    local model = viewport:FindFirstChildOfClass("Model")
+                    if model then
+                        model:PivotTo(model:GetPivot() * CFrame.Angles(0, math.rad(60 * dt), 0))
+                    end
+                end
+            end)
+        end
+    else
+        clearViewport(viewport)
+        viewport.Visible = false
+    end
+end
+
+local function updateStageText(sevenDayFrame, tier)
+    setFirstText(sevenDayFrame, { "StageText", "PageText", "RoundText", "Title" }, "Sign-in Round " .. tostring(tier))
+end
+
+local function isClaimedToday(lastTime)
+    if (tonumber(lastTime) or 0) <= 0 then
+        return false
+    end
+
+    local lastDate = os.date("*t", lastTime)
+    local currDate = os.date("*t", os.time())
+    return lastDate.year == currDate.year and lastDate.month == currDate.month and lastDate.day == currDate.day
+end
+
+local function renderUI(sevenDayFrame, playerData)
+    if not playerData then
+        return
+    end
+
+    local signInTier = SignInRewardConfig.NormalizeTier(playerData.SignInTier or 1)
+    local signInDays = math.clamp(math.floor(tonumber(playerData.SignInDays) or 0), 0, DAYS_PER_TIER)
+    local claimedToday = isClaimedToday(playerData.LastSignInTime)
+    local purchasedClaimAllToday = isClaimedToday(playerData.LastSignInPurchaseTime)
+
+    updateStageText(sevenDayFrame, signInTier)
+
+    local timeText = sevenDayFrame:FindFirstChild("TimeText", true)
+    if timeText then
+        timeText.Visible = claimedToday
+    end
+
     local claimAllBtn = sevenDayFrame:FindFirstChild("ClaimAllBattle", true)
     if claimAllBtn then
-        --“7天奖励全部领完后，才隐藏内购按钮”
-         claimAllBtn.Visible = (signInDays < 7)
+        local canPurchaseClaimAll = signInDays < DAYS_PER_TIER and not purchasedClaimAllToday
+        claimAllBtn.Visible = canPurchaseClaimAll
+        claimAllBtn.Active = canPurchaseClaimAll
+        claimAllBtn.AutoButtonColor = canPurchaseClaimAll
     end
-    -- ==========================================
 
-    local BLACK_STROKE = Color3.new(0, 0, 0)
-    local GREEN_STROKE = Color3.fromRGB(0, 100, 0)
-
-    for i = 1, 7 do
+    for i = 1, DAYS_PER_TIER do
         local dayNode = sevenDayFrame:FindFirstChild("Day_" .. i, true)
-        if not dayNode then continue end
-        
-        -- ==========================================
-        -- [🌟 修正：读取统一配置来渲染 3D 植物]
-        -- ==========================================
-        local rewardCfg = SignInRewardConfig[i]
-        
-        if rewardCfg and rewardCfg.IsSpecial then
-            -- 找到你那个名字叫 ImageLabel，但其实是 ViewportFrame 的节点
-            local viewport = dayNode:FindFirstChild("ImageLabel", true)
-           
-            if viewport and viewport:IsA("ViewportFrame") then
-                -- 直接将配置里的 ItemId 渲染进去
-                UIEffectUtil.RenderToViewport(viewport, rewardCfg.ItemId, "Plant")
-
-                -- 执行平滑旋转动画
-                if not viewport:GetAttribute("IsRotating") then
-                    viewport:SetAttribute("IsRotating", true)
-                    task.spawn(function()
-                        while viewport and viewport.Parent do
-                            local dt = RunService.RenderStepped:Wait()
-                            local model = viewport:FindFirstChildOfClass("Model")
-                            if model then
-                                -- 以每秒 60 度的速度旋转
-                                model:PivotTo(model:GetPivot() * CFrame.Angles(0, math.rad(60 * dt), 0))
-                            end
-                        end
-                    end)
-                end
-            end
+        if not dayNode then
+            continue
         end
 
+        local rewardCfg = SignInRewardConfig.GetReward(signInTier, i)
+        updateRewardVisual(dayNode, rewardCfg)
+
         local claimBtn = dayNode:FindFirstChild("ImageButton")
-        if not claimBtn then continue end
-        
+        if not claimBtn then
+            continue
+        end
+
         local btnText = claimBtn:FindFirstChild("TextLabel")
         local gradient = claimBtn:FindFirstChildOfClass("UIGradient")
         local btnStroke = claimBtn:FindFirstChildOfClass("UIStroke")
 
-        local targetText, targetGradient, targetStrokeColor, isActive = "", nil, nil, false
+        local targetText = "Locked"
+        local targetGradient = GREY_GRADIENT
+        local targetStrokeColor = BLACK_STROKE
+        local isActive = false
 
         if i <= signInDays then
-            -- 已领取状态
-            targetText = "Claimed"; targetGradient = CLAIMED_GRADIENT; targetStrokeColor = CLAIMED_STROKE; isActive = false
-        elseif i == signInDays + 1 and not isClaimedToday then
-            -- 可领取状态
-            targetText = "Claim"; targetGradient = GREEN_GRADIENT; targetStrokeColor = GREEN_STROKE; isActive = true
-        else
-            -- 锁定状态
-            targetText = "Locked"; targetGradient = GREY_GRADIENT; targetStrokeColor = BLACK_STROKE; isActive = false
+            targetText = "Claimed"
+            targetGradient = CLAIMED_GRADIENT
+            targetStrokeColor = CLAIMED_STROKE
+        elseif i == signInDays + 1 and not claimedToday then
+            targetText = "Claim"
+            targetGradient = GREEN_GRADIENT
+            targetStrokeColor = GREEN_STROKE
+            isActive = true
         end
 
-        if btnText then 
-            btnText.Text = targetText; btnText.TextStrokeColor3 = targetStrokeColor; btnText.TextStrokeTransparency = 0 
+        if btnText then
+            btnText.Text = targetText
+            btnText.TextStrokeColor3 = targetStrokeColor
+            btnText.TextStrokeTransparency = 0
+
             local textUIStroke = btnText:FindFirstChildOfClass("UIStroke")
-            if textUIStroke then textUIStroke.Enabled = true; textUIStroke.Color = targetStrokeColor end
+            if textUIStroke then
+                textUIStroke.Enabled = true
+                textUIStroke.Color = targetStrokeColor
+            end
         end
-        if gradient then gradient.Color = targetGradient end
-        if btnStroke then btnStroke.Enabled = true; btnStroke.Color = targetStrokeColor; btnStroke.Thickness = 2 end
 
-        claimBtn.Active = isActive; claimBtn.AutoButtonColor = isActive
+        if gradient then
+            gradient.Color = targetGradient
+        end
 
-        if isActive and not claimBtn:GetAttribute("IsBound") then
+        if btnStroke then
+            btnStroke.Enabled = true
+            btnStroke.Color = targetStrokeColor
+            btnStroke.Thickness = 2
+        end
+
+        claimBtn.Active = isActive
+        claimBtn.AutoButtonColor = isActive
+        claimBtn:SetAttribute("SignInTier", signInTier)
+        claimBtn:SetAttribute("SignInDay", i)
+
+        if not claimBtn:GetAttribute("IsBound") then
             claimBtn:SetAttribute("IsBound", true)
-            claimBtn.MouseButton1Click:Connect(function()
-                -- 埋点：玩家尝试领取第几天的奖励
-                ReportAnalytics("SignIn_ClaimAttempt", {
-                    DayIndex = i,
-                    IsPremium = false
+            claimBtn.Activated:Connect(function()
+                if not claimBtn.Active then
+                    return
+                end
+
+                local attemptTier = SignInRewardConfig.NormalizeTier(claimBtn:GetAttribute("SignInTier") or 1)
+                local attemptDay = math.floor(tonumber(claimBtn:GetAttribute("SignInDay")) or i)
+
+                reportAnalytics("SignIn_ClaimAttempt", {
+                    DayIndex = attemptDay,
+                    Tier = attemptTier,
+                    IsPremium = false,
                 })
 
                 local claimSignInRF = ReplicatedStorage:WaitForChild("ClaimSignInRF")
-                local success = claimSignInRF:InvokeServer()
+                local success, claimedTier, claimedDay = claimSignInRF:InvokeServer()
                 if success then
-                    -- 埋点：领取成功
-                    ReportAnalytics("SignIn_ClaimSuccess", {
-                        DayIndex = i,
-                        CurrentTotalDays = signInDays + 1
+                    claimedTier = SignInRewardConfig.NormalizeTier(claimedTier or attemptTier)
+                    claimedDay = math.floor(tonumber(claimedDay) or attemptDay)
+
+                    reportAnalytics("SignIn_ClaimSuccess", {
+                        DayIndex = claimedDay,
+                        Tier = claimedTier,
                     })
-                    
-                    -- 👇 改为：直接从配置表里读取 Tip
-                    local currentReward = SignInRewardConfig[i]
-                    if currentReward and currentReward.Tip then
-                        UIEffectUtil.ShowTip(currentReward.Tip)
-                    else
-                        UIEffectUtil.ShowTip("Claimed!")
-                    end
+
+                    local currentReward = SignInRewardConfig.GetReward(claimedTier, claimedDay)
+                    UIEffectUtil.ShowTip((currentReward and currentReward.Tip) or "Claimed!")
                 end
             end)
         end
@@ -177,64 +288,90 @@ local function RenderUI(sevenDayFrame, playerData)
 end
 
 function SevenDayPage.Init(sevenDayFrame)
-    if not sevenDayFrame then return end
-    
+    if not sevenDayFrame then
+        return
+    end
+
     local closeBtn = sevenDayFrame:FindFirstChild("CloseBtn", true)
     local timeText = sevenDayFrame:FindFirstChild("TimeText", true)
     local claimAllBtn = sevenDayFrame:FindFirstChild("ClaimAllBattle", true)
-    
+
     sevenDayFrame.Visible = true
-    if closeBtn then closeBtn.MouseButton1Click:Connect(function() sevenDayFrame.Visible = false end) end
-    
+
+    if closeBtn then
+        closeBtn.Activated:Connect(function()
+            sevenDayFrame.Visible = false
+        end)
+    end
+
     task.spawn(function()
         while true do
             if sevenDayFrame.Visible and timeText and timeText.Visible then
-                timeText.Text = "Next reward will appear in " .. GetFormattedRemainingTime()
+                timeText.Text = "Next reward will appear in " .. getFormattedRemainingTime()
             end
             task.wait(1)
         end
     end)
-    
+
     task.spawn(function()
         local data = ReplicatedStorage:WaitForChild("GetPlayerDataRF"):InvokeServer(Players.LocalPlayer)
-        RenderUI(sevenDayFrame, data)
+        renderUI(sevenDayFrame, data)
     end)
 
-   if claimAllBtn then
-       claimAllBtn.MouseButton1Click:Connect(function()
-            -- 🌟 新增：向服务器发送主动购买信号，证明这是新订单，不需要发补偿！
-            local markIntentRE = ReplicatedStorage:FindFirstChild("MarkPurchaseIntentRE")
-            if markIntentRE then markIntentRE:FireServer() end
+    if claimAllBtn then
+        claimAllBtn.Activated:Connect(function()
+            local preparePurchaseRF = ReplicatedStorage:WaitForChild("PrepareSignInClaimAllPurchaseRF", 10)
+            if not preparePurchaseRF then
+                UIEffectUtil.ShowTip("Purchase is not ready. Please try again later.")
+                return
+            end
 
-            -- 埋点：点击内购按钮（追踪付费意向）
-            ReportAnalytics("SignIn_PurchaseClick", {
+            local ok, canPurchase, message = pcall(function()
+                return preparePurchaseRF:InvokeServer()
+            end)
+
+            if not ok then
+                UIEffectUtil.ShowTip("Purchase is not ready. Please try again later.")
+                return
+            end
+
+            if not canPurchase then
+                UIEffectUtil.ShowTip(tostring(message or "You can purchase all sign-in rewards once per day."))
+                local data = ReplicatedStorage:WaitForChild("GetPlayerDataRF"):InvokeServer(Players.LocalPlayer)
+                renderUI(sevenDayFrame, data)
+                return
+            end
+
+            reportAnalytics("SignIn_PurchaseClick", {
                 ProductId = PRODUCT_ID,
-                Price = 4 -- 这里填入你的实际定价
+                Price = 4,
             })
+
             MarketplaceService:PromptProductPurchase(Players.LocalPlayer, PRODUCT_ID)
         end)
     end
 
-    -- 监听内购结果回调
     MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, isPurchased)
-        if productId == PRODUCT_ID then
-            -- 埋点：内购最终状态（成功或取消）
-            ReportAnalytics("SignIn_PurchaseResult", {
-                ProductId = productId,
-                Status = isPurchased and "Success" or "Cancelled/Failed"
+        if userId ~= Players.LocalPlayer.UserId or productId ~= PRODUCT_ID then
+            return
+        end
+
+        reportAnalytics("SignIn_PurchaseResult", {
+            ProductId = productId,
+            Status = isPurchased and "Success" or "Cancelled/Failed",
+        })
+
+        if isPurchased then
+            reportAnalytics("SignIn_BatchUnlockSuccess", {
+                UnlockType = "CurrentRoundRemainingDays",
             })
-            
-            if isPurchased then
-                -- 埋点：成功一键解锁 7 天奖励
-                ReportAnalytics("SignIn_BatchUnlockSuccess", {
-                    UnlockType = "AllSevenDays"
-                })
-            end
         end
     end)
-        
+
     ReplicatedStorage:WaitForChild("UpdateInventoryRE").OnClientEvent:Connect(function(newData)
-        if sevenDayFrame.Visible then RenderUI(sevenDayFrame, newData) end
+        if sevenDayFrame.Visible then
+            renderUI(sevenDayFrame, newData)
+        end
     end)
 end
 

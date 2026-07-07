@@ -7,17 +7,17 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
 local PRODUCT_ID = 3594585526
-local TIME_LIMIT_SECONDS = 24 * 60 * 60 -- 24 小时
+local TIME_LIMIT_SECONDS = 24 * 60 * 60 -- 24 小时间
 
 function NewbieGiftController.Init()
     local player = Players.LocalPlayer
     local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF")
     local startNewbieGiftRF = ReplicatedStorage:WaitForChild("StartNewbieGiftRF")
     local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE")
-    
+
     task.spawn(function()
         local data = getPlayerDataRF:InvokeServer()
-        
+
         -- 1. 等待玩家打完新手教程（TutorialStep >= 9）
         while (data.TutorialStep or 0) < 9 do
             task.wait(2)
@@ -45,18 +45,18 @@ function NewbieGiftController.Init()
         local basicGui = playerGui:WaitForChild("BasicGui")
         local playProperty = basicGui:WaitForChild("PlayProperty")
         local template = ReplicatedStorage:WaitForChild("UITemplates"):WaitForChild("Newbie_TimeLimitGift")
-        
+
         local giftUI = template:Clone()
-        giftUI.Position = UDim2.new(0.938, 0, 0.482, 0)
+        giftUI.Position = UDim2.new(0.963, 0, 0.623, 0)
         giftUI.Parent = playProperty
-        
+
         local timeTextLabel = giftUI:FindFirstChild("TimeText", true)
-        
+
         -- 6. 绑定点击事件，拉起支付
         local clickBtn = giftUI:IsA("GuiButton") and giftUI or giftUI:FindFirstChildWhichIsA("GuiButton", true)
         local clickConn
         if clickBtn then
-            clickConn = clickBtn.MouseButton1Click:Connect(function()
+            clickConn = clickBtn.Activated:Connect(function()
                 MarketplaceService:PromptProductPurchase(player, PRODUCT_ID)
             end)
         end
@@ -69,16 +69,16 @@ function NewbieGiftController.Init()
             end
         end)
 
-        -- 8. 倒计时核心循环
+        -- 8. 倒计时循环
         local loopConn
         local lastTick = tick()
         loopConn = RunService.Heartbeat:Connect(function()
-            -- 每1秒刷新一次UI，节省性能
+            -- 每1秒刷新一次数UI，节省性能
             if tick() - lastTick >= 1 then
                 lastTick = tick()
-                
+
                 local timeLeft = getTimeLeft()
-                
+
                 -- 如果已经购买，或者时间到了 -> 销毁 UI
                 if isPurchased or timeLeft <= 0 then
                     giftUI:Destroy()

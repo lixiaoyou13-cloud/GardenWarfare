@@ -1,9 +1,9 @@
 -- src/shared/LevelRewardConfig.luau
 local LevelRewardConfig = {
-    
-    -- [关卡数] = { Sun = 阳光数量, Seed = "种子ID", SeedCount = 种子数量 }
+
+    -- 关卡数 = { Sun = 阳光数量, Seed = "种子ID", SeedCount = 种子数量 }
     -- 如果某关不给种子，直接不写 Seed 字段即可
-    
+
     [1] = { Sun = 1000, Seed = "Peashooter", SeedCount = 3 },
     [5] = { Sun = 2000, Seed = "PotatoMine", SeedCount = 1 },
     [10]= { Sun = 5000, Seed = "PotatoMine", SeedCount = 3},
