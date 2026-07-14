@@ -22,6 +22,7 @@ local ItemConfig = {
         "CobCannon",
         "MusicIcePeashooter",
         "AppleMortar",
+        "LanternFlower",
 
     },
 
@@ -305,6 +306,30 @@ local ItemConfig = {
 			IAPProductId = 0,
 			IAPPrice = 0,
 		},
+		["LanternFlower"] = {
+			Id = 24,
+			Name = "Lantern Flower Seed",
+			Quality = 5,
+			GrowthTime = 600,
+			YieldPlant = "LanternFlower",
+			BuyPrice = 2000000000,
+			UnlockLevel = 240,
+			ExcludeFromRandomSeedRewards = true,
+			IAPProductId = 3609146952,
+			IAPPrice = 620,
+		},
+		["LightningReed"] = {
+			Id = 25,
+			Name = "Lightning Reed Seed",
+			Quality = 5,
+			GrowthTime = 2400,
+			YieldPlant = "LightningReed",
+			BuyPrice = 0,
+			IsSellable = false,
+			ExcludeFromRandomSeedRewards = true,
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
 	},
 
 	Plants = {
@@ -557,6 +582,23 @@ local ItemConfig = {
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
 		},
+		["LanternFlower"] = {
+			Id = "LanternFlower",
+			Name = "Lantern Flower",
+			IconId = "rbxassetid://138661011543911",
+			HP = 500,
+			Quality = 5,
+			IdleAnimId = "rbxassetid://93774771904448",
+			CanAttack = false,
+			AttackBuffAura = {
+				GridRadius = 1,
+				BaseDamageBonus = 0.2,
+			},
+			ExcludeFromRandomPlantRewards = true,
+			Description = "Description: Buffs plants in the surrounding 3x3 area, increasing their attack damage.",
+			IAPProductId = 3609146952,
+			IAPPrice = 620,
+		},
 
 		-- 5星植物 (传说级)
 		["TwinSunflower"] = {
@@ -702,6 +744,31 @@ local ItemConfig = {
 				MaxOnePerGrid = true,
 			},
 			Description = "Description: Lobs heavy apples in a high arc, dealing huge burst damage.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["LightningReed"] = {
+			Id = "LightningReed",
+			Name = "Lightning Reed",
+			IconId = "rbxassetid://75037609060928",
+			HP = 1000,
+			Quality = 5,
+			CanAttack = true,
+			Attack = 12000,
+			AttackInterval = 1,
+			IdleAnimId = "rbxassetid://86947836521261",
+			AttackAnimation = "rbxassetid://91389394351978",
+			HitEffectTexture = "rbxassetid://243098098",
+			HitEffectColor = Color3.fromRGB(120, 220, 255),
+			ProjectileName = "Reed",
+			ChainProjectile = {
+				ExtraTargets = 3,
+				Range = 100,
+				DamageScale = 1,
+				SpeedMultiplier = 3,
+			},
+			ExcludeFromRandomPlantRewards = true,
+			Description = "Description: Fires lightning reeds that chain to nearby zombies.",
 			IAPProductId = 0,
 			IAPPrice = 0,
 		},
@@ -856,6 +923,44 @@ local ItemConfig = {
 		[8] = Color3.fromRGB(0, 255, 255),
 	},
 }
+ItemConfig.Items = {
+    ["ShinyPotion"] = {
+        Id = "ShinyPotion",
+        Name = "Shiny Potion",
+        IconId = "rbxassetid://82045159921006",
+        Quality = 4,
+        ModelName = "ShinyPotion",
+        ItemType = "MutationPotion",
+        MutationLevel = 2,
+        DurationSeconds = 900,
+        WeightBonusPercent = 100,
+        AmountText = "100%",
+    },
+    ["ThunderPotion"] = {
+        Id = "ThunderPotion",
+        Name = "Thunder Potion",
+        IconId = "rbxassetid://128785586508022",
+        Quality = 5,
+        ModelName = "ThunderPotion",
+        ItemType = "MutationPotion",
+        MutationLevel = 3,
+        DurationSeconds = 900,
+        WeightBonusPercent = 100,
+        AmountText = "100%",
+    },
+    ["DivinePotion"] = {
+        Id = "DivinePotion",
+        Name = "Divine Potion",
+        IconId = "rbxassetid://73520502074318",
+        Quality = 6,
+        ModelName = "DivinePotion",
+        ItemType = "MutationPotion",
+        MutationLevel = 4,
+        DurationSeconds = 900,
+        WeightBonusPercent = 100,
+        AmountText = "100%",
+    },
+}
 ItemConfig.Chests = {
     ["Chest1"] = {
         Id = "Chest1",
@@ -887,9 +992,9 @@ ItemConfig.Chests = {
     },
 }
 ItemConfig.MutationStats = {
-    [1] = { DamageMul = 1.0, HealthMul = 1.0 }, -- 普通
-    [2] = { DamageMul = 1.5, HealthMul = 1.5 }, -- 闪光 (+50% 攻击, +50% 血量)
-    [3] = { DamageMul = 2, HealthMul = 3 }, -- 雷电 (+100% 攻击, +200% 血量)
-    [4] = { DamageMul = 2.5, HealthMul = 4 }, -- 神圣 (+150% 攻击, +300% 血量)
+    [1] = { DamageMul = 1.0, HealthMul = 1.0, AuraBuffMul = 1.0 }, -- 普通
+    [2] = { DamageMul = 1.5, HealthMul = 1.5, AuraBuffMul = 1.5 }, -- 闪光 (+50% 攻击, +50% 血量)
+    [3] = { DamageMul = 2, HealthMul = 3, AuraBuffMul = 2.0 }, -- 雷电 (+100% 攻击, +200% 血量)
+    [4] = { DamageMul = 2.5, HealthMul = 4, AuraBuffMul = 2.5 }, -- 神圣 (+150% 攻击, +300% 血量)
 }
 return ItemConfig

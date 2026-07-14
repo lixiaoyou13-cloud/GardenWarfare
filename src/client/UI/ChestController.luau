@@ -859,6 +859,25 @@ function ChestController.Init()
         end)
     end
 
+    local playerDataPatchRE = ReplicatedStorage:FindFirstChild("PlayerDataPatchRE") or ReplicatedStorage:WaitForChild("PlayerDataPatchRE", 10)
+    if playerDataPatchRE then
+        playerDataPatchRE.OnClientEvent:Connect(function(patch)
+            if type(patch) ~= "table" then
+                return
+            end
+
+            cachedPlayerData = cachedPlayerData or {}
+            for key, value in pairs(patch) do
+                cachedPlayerData[key] = value
+            end
+
+            local currentGui = findChestGui()
+            if currentGui and currentChestId then
+                updateIAPTextVisibility(currentGui, currentChestId)
+            end
+        end)
+    end
+
     if player.Character then
         bindCharacter(player.Character)
     end

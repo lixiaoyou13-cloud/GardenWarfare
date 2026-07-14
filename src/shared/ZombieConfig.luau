@@ -79,6 +79,20 @@ local ZombieConfig = {
             Eat  = "rbxassetid://119641402238824",
             Rise = "rbxassetid://116948729939997",
         },
+    },
+    ["GargantuarZombie"] = {
+        Id = "GargantuarZombie",
+        Name = "Gargantuar Zombie",
+        HP = 5000,
+        Attack = 20000,
+        Speed = 1,
+        AttackRange = 4,
+        AttackInterval = 2,
+        AttackDamageDelay = 2,
+        Anims = {
+            Walk = "rbxassetid://107281220243285",
+            Eat = "rbxassetid://109513519434326",
+        },
     }
 }
 return ZombieConfig

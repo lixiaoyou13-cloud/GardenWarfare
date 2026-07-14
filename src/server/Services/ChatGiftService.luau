@@ -43,6 +43,11 @@ local TB1234_CLAIM_FLAG = "Code_TB1234_Claimed"
 local TB1234_REWARDS = {
     { PlantId = "CherryBomb", Amount = 100, Mutation = 1 },
 }
+local LUCKY_CODE = "lucky"
+local LUCKY_CLAIM_FLAG = "Code_Lucky_Claimed"
+local LUCKY_REWARDS = {
+    { ItemId = "ThunderPotion", Amount = 3 },
+}
 
 local claimingPlayers = {}
 local chatConnections = {}
@@ -118,6 +123,17 @@ local function validatePlantRewards(rewards)
         local plantId = type(reward) == "table" and reward.PlantId or nil
         if not (ItemConfig.Plants and ItemConfig.Plants[plantId]) then
             return false, plantId
+        end
+    end
+
+    return true
+end
+
+local function validateItemRewards(rewards)
+    for _, reward in ipairs(rewards) do
+        local itemId = type(reward) == "table" and reward.ItemId or nil
+        if not (ItemConfig.Items and ItemConfig.Items[itemId]) then
+            return false, itemId
         end
     end
 
@@ -285,6 +301,41 @@ local function claimTB1234Code(player)
     return true, "Code claimed: 100x Cherry Bomb!"
 end
 
+local function claimLuckyCode(player)
+    if claimingPlayers[player] then
+        return false, "Redeem is already processing."
+    end
+
+    claimingPlayers[player] = true
+
+    local data = PlayerDataManager.WaitForPlayerData(player, 10)
+    if not data then
+        claimingPlayers[player] = nil
+        return false, "Gift failed: data is still loading."
+    end
+
+    local rewardsOk, missingItemId = validateItemRewards(LUCKY_REWARDS)
+    if not rewardsOk then
+        claimingPlayers[player] = nil
+        warn("[ChatGiftService] Lucky code item config not found: " .. tostring(missingItemId))
+        return false, "Gift failed: reward config not found."
+    end
+
+    local success, message = PlayerDataManager.GrantSavedItemBundle(
+        player,
+        LUCKY_CLAIM_FLAG,
+        LUCKY_REWARDS
+    )
+
+    claimingPlayers[player] = nil
+
+    if not success then
+        return false, message or "Gift failed: please try again later."
+    end
+
+    return true, "Code claimed: 3x Thunder Potion!"
+end
+
 local function redeemCode(player, rawCode)
     local code = normalizeCommand(rawCode)
     if code == "" then
@@ -305,6 +356,10 @@ local function redeemCode(player, rawCode)
 
     if code == TB1234_CODE then
         return claimTB1234Code(player)
+    end
+
+    if code == LUCKY_CODE then
+        return claimLuckyCode(player)
     end
 
     if code ~= GIFT_CODE then

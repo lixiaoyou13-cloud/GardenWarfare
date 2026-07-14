@@ -110,7 +110,7 @@ function HotbarController.Init()
         hideCloseButtons()
 
         local currentItems, hotbarList = {}, newData.Hotbar or {}
-        local seedQuantityMap, plantQuantityMap, chestQuantityMap = {}, {}, {}
+        local seedQuantityMap, plantQuantityMap, chestQuantityMap, itemQuantityMap = {}, {}, {}, {}
 
         if newData.Inventory.Seeds then
             for _, s in ipairs(newData.Inventory.Seeds) do seedQuantityMap[s.ID] = s.Quantity end
@@ -126,6 +126,12 @@ function HotbarController.Init()
         if newData.Inventory.Chests then
             for _, c in ipairs(newData.Inventory.Chests) do
                 chestQuantityMap[c.ID] = c.Quantity
+            end
+        end
+
+        if newData.Inventory.Items then
+            for _, itemData in ipairs(newData.Inventory.Items) do
+                itemQuantityMap[itemData.ID] = itemData.Quantity
             end
         end
 
@@ -148,6 +154,9 @@ function HotbarController.Init()
             elseif itemType == "Chest" then
                 qty = chestQuantityMap[realId] or 0
                 itemDetail = ItemConfig.Chests and ItemConfig.Chests[realId]
+            elseif itemType == "Item" then
+                qty = itemQuantityMap[realId] or 0
+                itemDetail = ItemConfig.Items and ItemConfig.Items[realId]
             elseif itemType == "Tool" then
                 qty = "INF";
                 itemDetail = BaseItemConfig.Tools and BaseItemConfig.Tools[realId]
@@ -184,7 +193,7 @@ function HotbarController.Init()
                     local touchPressToken = 0
                     local activeTouchInput = nil
                     local touchLongPressTriggered = false
-                    local canTouchHoldRemove = (itemType == "Seed" or itemType == "Plant" or itemType == "Chest")
+                    local canTouchHoldRemove = (itemType == "Seed" or itemType == "Plant" or itemType == "Chest" or itemType == "Item")
                     local handleRemove = nil
 
                     if canTouchHoldRemove then
@@ -291,7 +300,7 @@ function HotbarController.Init()
                 local icomNode = targetSlot:FindFirstChild("Icom", true)
                 local customIcon = targetSlot:FindFirstChild("CustomIcon", true)
 
-                if itemType == "Tool" then
+                if itemType == "Tool" or itemType == "Item" then
                     if bgImag then bgImag.Visible = true; bgImag.ZIndex = 1 end
                     if icomNode then icomNode.Visible = false end
                     if not customIcon then

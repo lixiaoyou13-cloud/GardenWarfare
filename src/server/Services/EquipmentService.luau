@@ -140,6 +140,10 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
     elseif itemType == "Chest" then
         local chestFolder = ReplicatedStorage:FindFirstChild("Chest")
         realModel = chestFolder and chestFolder:FindFirstChild(realId)
+    elseif itemType == "Item" then
+        local itemDetail = ItemConfig.Items and ItemConfig.Items[realId]
+        local modelName = (itemDetail and itemDetail.ModelName) or realId
+        realModel = itemModelsFolder and itemModelsFolder:FindFirstChild(modelName)
     end
 
     if realModel then
@@ -207,6 +211,11 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
             elseif itemType == "Tool" and realId == "WeaponBlock" then
                 -- 如果角度不对，可以下面这三个数字 (X轴, Y轴, Z轴 的旋转度数)
                 rotationOffset = CFrame.Angles(math.rad(-90), 0, 0)
+            elseif itemType == "Item" then
+                local itemDetail = ItemConfig.Items and ItemConfig.Items[realId]
+                if itemDetail and itemDetail.ItemType == "MutationPotion" then
+                    rotationOffset = CFrame.Angles(0, -90, 0)
+                end
 
             end
 

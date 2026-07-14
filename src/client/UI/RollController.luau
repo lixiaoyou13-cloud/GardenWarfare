@@ -287,6 +287,30 @@ function RollController.Init()
     -- 监听数据更新事件，随时刷新红点
     local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE")
     updateInventoryRE.OnClientEvent:Connect(RefreshUI)
+    local playerDataPatchRE = ReplicatedStorage:WaitForChild("PlayerDataPatchRE", 10)
+    if playerDataPatchRE then
+        playerDataPatchRE.OnClientEvent:Connect(function(patch)
+            if type(patch) ~= "table" then
+                return
+            end
+
+            if patch.RollTickets ~= nil then
+                currentTickets = patch.RollTickets
+                hasSyncedRollTickets = true
+            end
+            if patch.OnlineRollTimer ~= nil then
+                localRollTimer = patch.OnlineRollTimer
+            end
+
+            if patch.RollTickets ~= nil or patch.OnlineRollTimer ~= nil then
+                CreateOrUpdateRedDot(tab1Btn, currentTickets[1] or 0)
+                CreateOrUpdateRedDot(tab2Btn, currentTickets[2] or 0)
+                CreateOrUpdateRedDot(openPageBtn, (currentTickets[1] or 0) + (currentTickets[2] or 0))
+                RefreshDrawButtonText()
+                RefreshCashUI()
+            end
+        end)
+    end
 
     local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF")
     local function SyncRollTicketsFromServer()

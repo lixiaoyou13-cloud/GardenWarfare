@@ -15,6 +15,8 @@ local PassShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForC
 local PassQuestConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PassQuestConfig"))
 local NoticeConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NoticeConfig"))
 local RollConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RollConfig"))
+local RankingSeasonConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RankingSeasonConfig"))
+local ZombossShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ZombossShopConfig"))
 local FriendSunBoostService = require(script.Parent.Services.FriendSunBoostService)
 -- 引入签到奖励配置
 local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
@@ -31,9 +33,12 @@ local X2_SUN_CACHE_TTL = 60
 local ROLL_TAB1_CASH_COST = 200000
 local onlineRollTimerStarted = false
 local passQuestOnlineTimerStarted = false
+local firePlayerDataPatch
 local AUTO_SAVE_INTERVAL = 300
 local SAVE_DEBOUNCE_SECONDS = 8
 local SAVE_MIN_INTERVAL_SECONDS = 8
+local DATASTORE_SAVE_BUDGET_TIMEOUT_SECONDS = 12
+local DATASTORE_SAVE_BUDGET_POLL_SECONDS = 0.5
 local BIND_TO_CLOSE_TIMEOUT = 25
 local SAVE_VERSION_KEY = "_SaveVersion"
 local LAST_SAVE_TIME_KEY = "_LastSaveTime"
@@ -41,6 +46,8 @@ local ACTIVE_SESSION_ID_KEY = "_ActiveSessionId"
 local ACTIVE_SESSION_JOB_ID_KEY = "_ActiveSessionJobId"
 local ACTIVE_SESSION_HEARTBEAT_KEY = "_ActiveSessionHeartbeatAt"
 local ACTIVE_SESSION_IS_STUDIO_KEY = "_ActiveSessionIsStudio"
+local SUN_RESET_20260707_KEY = "SunReset_20260707_V1"
+local SUN_RESET_20260707_CAP = 1000000
 local SESSION_HEARTBEAT_INTERVAL = 60
 local SESSION_TIMEOUT_SECONDS = 180
 local SESSION_ACQUIRE_MAX_ATTEMPTS = 5
@@ -53,6 +60,11 @@ local STALE_SESSION_KICK_MESSAGE = "Your data is active in a newer server. Pleas
 local IS_STUDIO = RunService:IsStudio()
 local SERVER_SESSION_ID = HttpService:GenerateGUID(false)
 local SERVER_JOB_ID = if IS_STUDIO then "Studio-" .. SERVER_SESSION_ID elseif game.JobId and game.JobId ~= "" then game.JobId else SERVER_SESSION_ID
+local SAVE_DATASTORE_REQUEST_TYPES = {
+    Enum.DataStoreRequestType.UpdateAsync,
+    Enum.DataStoreRequestType.StandardRead,
+    Enum.DataStoreRequestType.StandardWrite,
+}
 
 local function isStudioRuntime()
     local ok, isStudioNow = pcall(function()
@@ -155,12 +167,7 @@ analyticsRE.Name = "AnalyticsRE"
 analyticsRE.Parent = ReplicatedStorage
 
 analyticsRE.OnServerEvent:Connect(function(player, eventType, eventName, extraData)
-    print(string.format("[Analytics] Player: %s | Type: %s | Event: %s", player.Name, tostring(eventType), tostring(eventName)))
-    if eventType == "Custom" then
-        local logValue = 1
-        if type(extraData) == "number" then logValue = extraData end
-        AnalyticsService:LogCustomEvent(player, eventName, logValue)
-    elseif eventType == "Funnel" then
+    if eventType == "Funnel" then
         if type(extraData) == "table" then
             local sessionId = extraData.SessionId
             local stepIndex = extraData.StepIndex or 1
@@ -341,6 +348,7 @@ local function GetDefaultData()
    return {
         Coins = 1000, Level = 1, UnlockedLevel = 1,
         TotalSun = 0,
+        Tacos = 0,
         UnlockedPlots = 4,
         SignInDays = 0,
         SignInTier = 1,
@@ -351,12 +359,17 @@ local function GetDefaultData()
         SignInReset_V1 = true,
 
         Hotbar = {"Tool_Shovel","System_Backpack", "Tool_WeaponBlock"},
-        Inventory = { Seeds = { { ID = "Peashooter", Quantity = 1 } }, Plants = {}, Chests = {}, Titles = {} },
+        Inventory = { Seeds = { { ID = "Peashooter", Quantity = 1 } }, Plants = {}, Chests = {}, Titles = {}, Items = {} },
         EquippedTitle = "",
         PlantedPlants = {}, CombatPlants = {},
         UnlockedSeeds = { ["Peashooter"] = true },
         TutorialStep = 0,
         UnlockedMutations = {},
+        ActiveMutationPotionBuffs = {},
+        ZombossShop = {
+            WindowId = ZombossShopConfig.GetCurrentWindowId(os.time()),
+            Purchases = {},
+        },
         ClaimedAchieve = {},
         RollTickets = {0, 0},
         PassV1 = {
@@ -386,7 +399,9 @@ local function GetDefaultData()
         PendingGifts = {},
         ClaimedGiftIds = {},
         RankingSeasonBaselines = {},
+        RankingSeasonUnlockedLevels = { [RankingSeasonConfig.GetSeasonId()] = 1 },
         LastSeenNoticeId = "",
+        [SUN_RESET_20260707_KEY] = true,
         FreeRewardClaimedv1 = false,
         ProcessedReceipts = {},
         ProcessedReceiptOrder = {},
@@ -398,6 +413,40 @@ local function GetDefaultData()
         [SAVE_VERSION_KEY] = 0,
         [LAST_SAVE_TIME_KEY] = 0
     }
+end
+
+local function applySunReset20260707(data)
+    if type(data) ~= "table" or data[SUN_RESET_20260707_KEY] == true then
+        return false
+    end
+
+    local currentCoins = math.max(0, math.floor(tonumber(data.Coins) or 0))
+    local pendingSun = math.max(0, math.floor(tonumber(data.TotalSun) or 0))
+
+    data.Coins = math.min(SUN_RESET_20260707_CAP, currentCoins + pendingSun)
+    data.TotalSun = 0
+    data[SUN_RESET_20260707_KEY] = true
+
+    return true
+end
+
+local function normalizeRankingSeasonProgress(data)
+    RankingSeasonConfig.NormalizeSeasonUnlockedLevels(data)
+    return data
+end
+
+local function getRankingSeasonClearedLevel(data)
+    return RankingSeasonConfig.GetSeasonClearedLevel(data)
+end
+
+local function updatePlayerMaxLevelTitle(player, data)
+    local character = player and player.Character
+    local head = character and character:FindFirstChild("Head")
+    local titleGui = head and head:FindFirstChild("PlayerTitleGui")
+    local textLabel = titleGui and titleGui:FindFirstChildWhichIsA("TextLabel")
+    if textLabel then
+        textLabel.Text = "MAX  " .. tostring(getRankingSeasonClearedLevel(data))
+    end
 end
 
 local function normalizeMutationLevel(mutationLevel)
@@ -511,12 +560,13 @@ local function normalizeTitleData(data)
 
     local changed = false
     if type(data.Inventory) ~= "table" then
-        data.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {} }
+        data.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} }
         changed = true
     end
     if type(data.Inventory.Seeds) ~= "table" then data.Inventory.Seeds = {}; changed = true end
     if type(data.Inventory.Plants) ~= "table" then data.Inventory.Plants = {}; changed = true end
     if type(data.Inventory.Chests) ~= "table" then data.Inventory.Chests = {}; changed = true end
+    if type(data.Inventory.Items) ~= "table" then data.Inventory.Items = {}; changed = true end
     if type(data.Inventory.Titles) ~= "table" then
         data.Inventory.Titles = {}
         changed = true
@@ -566,6 +616,105 @@ local function cloneValue(value)
         copy[k] = cloneValue(v)
     end
     return copy
+end
+
+local function normalizeZombossShopData(data, now)
+    if type(data) ~= "table" then
+        return false
+    end
+
+    local changed = false
+    local tacos = math.max(0, math.floor(tonumber(data.Tacos) or 0))
+    if data.Tacos ~= tacos then
+        data.Tacos = tacos
+        changed = true
+    end
+
+    local windowId = ZombossShopConfig.GetCurrentWindowId(now)
+    if type(data.ZombossShop) ~= "table" then
+        data.ZombossShop = {
+            WindowId = windowId,
+            Purchases = {},
+        }
+        return true
+    end
+
+    if data.ZombossShop.WindowId ~= windowId or type(data.ZombossShop.Purchases) ~= "table" then
+        data.ZombossShop.WindowId = windowId
+        data.ZombossShop.Purchases = {}
+        return true
+    end
+
+    for _, offerId in ipairs(ZombossShopConfig.OfferOrder or {}) do
+        local rawCount = data.ZombossShop.Purchases[offerId]
+        local count = math.max(0, math.floor(tonumber(rawCount) or 0))
+        if rawCount ~= nil and rawCount ~= count then
+            data.ZombossShop.Purchases[offerId] = count
+            changed = true
+        end
+    end
+
+    for offerId in pairs(data.ZombossShop.Purchases) do
+        if not ZombossShopConfig.GetOffer(offerId) then
+            data.ZombossShop.Purchases[offerId] = nil
+            changed = true
+        end
+    end
+
+    return changed
+end
+
+local function normalizeActiveMutationPotionBuffs(data, now)
+    if type(data) ~= "table" then
+        return false
+    end
+
+    if type(data.ActiveMutationPotionBuffs) ~= "table" then
+        data.ActiveMutationPotionBuffs = {}
+        return true
+    end
+
+    now = now or os.time()
+    local changed = false
+    for itemId, expiresAt in pairs(data.ActiveMutationPotionBuffs) do
+        local itemDetail = type(itemId) == "string" and ItemConfig.Items and ItemConfig.Items[itemId]
+        local expiry = tonumber(expiresAt)
+        if not itemDetail or itemDetail.ItemType ~= "MutationPotion" or not expiry or expiry <= now then
+            data.ActiveMutationPotionBuffs[itemId] = nil
+            changed = true
+        else
+            local normalizedExpiry = math.floor(expiry)
+            if normalizedExpiry ~= expiresAt then
+                data.ActiveMutationPotionBuffs[itemId] = normalizedExpiry
+                changed = true
+            end
+        end
+    end
+
+    return changed
+end
+
+local function getHighestActiveMutationPotionBuff(data, now)
+    local changed = normalizeActiveMutationPotionBuffs(data, now)
+    local buffs = data and data.ActiveMutationPotionBuffs
+    if type(buffs) ~= "table" then
+        return nil, nil, changed
+    end
+
+    local bestItemId = nil
+    local bestItemDetail = nil
+    local bestMutationLevel = 0
+    for itemId, expiresAt in pairs(buffs) do
+        local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+        local mutationLevel = tonumber(itemDetail and itemDetail.MutationLevel) or 0
+        if itemDetail and itemDetail.ItemType == "MutationPotion" and tonumber(expiresAt) and tonumber(expiresAt) > (now or os.time()) and mutationLevel > bestMutationLevel then
+            bestItemId = itemId
+            bestItemDetail = itemDetail
+            bestMutationLevel = mutationLevel
+        end
+    end
+
+    return bestItemId, bestItemDetail, changed
 end
 
 local function normalizeProcessedReceipts(data)
@@ -737,12 +886,53 @@ local function prepareDataForSave(dataToSave, nextVersion, saveTime)
     return dataForSave
 end
 
+local function hasSaveBudget()
+    for _, requestType in ipairs(SAVE_DATASTORE_REQUEST_TYPES) do
+        local ok, budget = pcall(function()
+            return DataStoreService:GetRequestBudgetForRequestType(requestType)
+        end)
+
+        if ok and tonumber(budget) ~= nil and budget <= 0 then
+            return false, requestType.Name
+        end
+    end
+
+    return true
+end
+
+local function waitForSaveBudget(timeoutSeconds)
+    local timeout = tonumber(timeoutSeconds) or DATASTORE_SAVE_BUDGET_TIMEOUT_SECONDS
+    local deadline = os.clock() + math.max(0, timeout)
+    local blockedRequestType = nil
+
+    while true do
+        local hasBudget, requestTypeName = hasSaveBudget()
+        if hasBudget then
+            return true
+        end
+
+        blockedRequestType = requestTypeName
+        if os.clock() >= deadline then
+            return false, blockedRequestType
+        end
+
+        task.wait(math.min(DATASTORE_SAVE_BUDGET_POLL_SECONDS, math.max(0, deadline - os.clock())))
+    end
+end
+
 local function saveWithRetry(userId, dataToSave, options)
     options = options or {}
     local localVersion = getSaveVersion(dataToSave)
     local lastError = nil
 
     for attempt = 1, 3 do
+        local budgetReady, blockedRequestType = waitForSaveBudget(options.BudgetWaitTimeoutSeconds)
+        if not budgetReady then
+            warn("[Data] Save budget unavailable for userId " .. tostring(userId)
+                .. ". Blocked request type: " .. tostring(blockedRequestType))
+            return false, "datastore_budget_timeout"
+        end
+
         local staleWriteBlocked = false
         local blockedSessionId = nil
         local blockedSessionJobId = nil
@@ -902,7 +1092,12 @@ local function refreshSessionHeartbeat(player)
         return false, "stale_session"
     end
 
-    applyCurrentSessionLock(sessionData[userId], heartbeatAt)
+    local currentSessionData = sessionData[userId]
+    if not currentSessionData then
+        return false, "missing_data"
+    end
+
+    applyCurrentSessionLock(currentSessionData, heartbeatAt)
     return true
 end
 
@@ -926,12 +1121,16 @@ end
 local function runQueuedSave(userId, dataToSave, options)
     options = options or {}
     local state = getSaveState(userId)
+    local shouldRespectMinInterval = options.RespectMinInterval
+    if shouldRespectMinInterval == nil then
+        shouldRespectMinInterval = options.ReleaseSession ~= true
+    end
 
     while state.IsSaving do
         task.wait(0.1)
     end
 
-    if options.RespectMinInterval == true then
+    if shouldRespectMinInterval then
         local elapsed = os.clock() - (state.LastSaveClock or 0)
         if elapsed < SAVE_MIN_INTERVAL_SECONDS then
             task.wait(SAVE_MIN_INTERVAL_SECONDS - elapsed)
@@ -1093,7 +1292,6 @@ local function startGlobalOnlineRollTimer()
         while true do
             task.wait(1)
 
-            local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
             for _, plr in ipairs(Players:GetPlayers()) do
                 local pData = sessionData[plr.UserId]
                 if pData then
@@ -1104,9 +1302,10 @@ local function startGlobalOnlineRollTimer()
                         pData.RollTickets = pData.RollTickets or {0, 0}
                         pData.RollTickets[1] = (pData.RollTickets[1] or 0) + 1
 
-                        if updateInventoryRE then
-                            updateInventoryRE:FireClient(plr, pData)
-                        end
+                        firePlayerDataPatch(plr, {
+                            OnlineRollTimer = pData.OnlineRollTimer,
+                            RollTickets = pData.RollTickets,
+                        })
                         markSessionDataChanged(plr, "online roll ticket")
                     end
                 end
@@ -1144,6 +1343,17 @@ local function getOrCreateRemoteFunction(name)
     local remote = ReplicatedStorage:FindFirstChild(name)
     if not remote then
         remote = Instance.new("RemoteFunction")
+        remote.Name = name
+        remote.Parent = ReplicatedStorage
+    end
+
+    return remote
+end
+
+local function getOrCreateRemoteEvent(name)
+    local remote = ReplicatedStorage:FindFirstChild(name)
+    if not remote then
+        remote = Instance.new("RemoteEvent")
         remote.Name = name
         remote.Parent = ReplicatedStorage
     end
@@ -1296,6 +1506,14 @@ local function fireInventoryUpdate(player, data)
     end
 end
 
+function firePlayerDataPatch(player, patch)
+    if not player or not player.Parent or type(patch) ~= "table" then
+        return
+    end
+
+    getOrCreateRemoteEvent("PlayerDataPatchRE"):FireClient(player, patch)
+end
+
 local function firePassDataUpdate(player, data)
     local passData = normalizePassV1Data(data)
     getUpdatePassDataRemote():FireClient(player, passData, PASS_V1_EXP_PER_LEVEL, PASS_V1_MAX_LEVEL)
@@ -1328,12 +1546,12 @@ local function rollbackReliableRewardMutation(player, data, snapshot, context)
 end
 
 local function saveReliableRewardMutation(player, data, snapshot, context)
-    local saved, saveErr = savePlayerSession(player)
-    if saved then
+    local saveQueued, saveErr = requestDeferredSave(player, context)
+    if saveQueued then
         return true
     end
 
-    warn("[PlayerDataManager] Failed to save " .. tostring(context) .. " for "
+    warn("[PlayerDataManager] Failed to queue save after " .. tostring(context) .. " for "
         .. tostring(player and player.Name or "unknown") .. ": " .. tostring(saveErr))
     rollbackReliableRewardMutation(player, data, snapshot, context)
     return false, saveErr
@@ -1851,11 +2069,13 @@ local function onPlayerAdded(player)
             isLoaded = true
             if success then
                 if savedData then
+                local sunResetApplied = false
                 savedData.Hotbar = {"Tool_Shovel", "System_Backpack", "Tool_WeaponBlock"}
-                if type(savedData.Inventory) ~= "table" then savedData.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {} } end
+                if type(savedData.Inventory) ~= "table" then savedData.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} } end
                 if type(savedData.Inventory.Seeds) ~= "table" then savedData.Inventory.Seeds = {} end
                 if type(savedData.Inventory.Plants) ~= "table" then savedData.Inventory.Plants = {} end
                 if type(savedData.Inventory.Chests) ~= "table" then savedData.Inventory.Chests = {} end
+                if type(savedData.Inventory.Items) ~= "table" then savedData.Inventory.Items = {} end
                 if type(savedData.Inventory.Titles) ~= "table" then savedData.Inventory.Titles = {} end
                 if type(savedData.EquippedTitle) ~= "string" then savedData.EquippedTitle = "" end
                 normalizeTitleData(savedData)
@@ -1873,9 +2093,12 @@ local function onPlayerAdded(player)
                 if type(savedData.ExclusiveRollTotalRolls) ~= "number" then savedData.ExclusiveRollTotalRolls = 0 end
                 if type(savedData.ExclusiveRollTickets) ~= "number" then savedData.ExclusiveRollTickets = 0 end
                 if type(savedData.PassShopTokens) ~= "number" then savedData.PassShopTokens = 0 end
+                normalizeZombossShopData(savedData, os.time())
                 if type(savedData.PendingGifts) ~= "table" then savedData.PendingGifts = {} end
                 if type(savedData.ClaimedGiftIds) ~= "table" then savedData.ClaimedGiftIds = {} end
                 if type(savedData.RankingSeasonBaselines) ~= "table" then savedData.RankingSeasonBaselines = {} end
+                if type(savedData.RankingSeasonUnlockedLevels) ~= "table" then savedData.RankingSeasonUnlockedLevels = {} end
+                normalizeRankingSeasonProgress(savedData)
                 if type(savedData.LastSeenNoticeId) ~= "string" then savedData.LastSeenNoticeId = "" end
                 normalizeProcessedReceipts(savedData)
                 if type(savedData.RollTickets) ~= "table" then savedData.RollTickets = {0, 0} end
@@ -1886,10 +2109,12 @@ local function onPlayerAdded(player)
                 normalizePassV1Data(savedData)
                 normalizePassQuestV1Data(savedData)
                 ensureEnterGamePassQuest(savedData)
+                normalizeActiveMutationPotionBuffs(savedData, os.time())
                 syncPassPremiumOwnership(player, savedData)
                 savedData[SAVE_VERSION_KEY] = getSaveVersion(savedData)
                 savedData[LAST_SAVE_TIME_KEY] = tonumber(savedData[LAST_SAVE_TIME_KEY]) or 0
                 applyCurrentSessionLock(savedData, os.time())
+                sunResetApplied = applySunReset20260707(savedData)
 
                 -- 兼容老玩家数据
                 if type(savedData.OnlineRollTimer) ~= "number" then savedData.OnlineRollTimer = 300 end
@@ -1921,6 +2146,10 @@ local function onPlayerAdded(player)
                 end
                 sessionData[player.UserId] = savedData
                 dataSaveAllowed[player.UserId] = true
+                if sunResetApplied then
+                    markSessionDataChanged(player, "sun reset 20260707")
+                    print("[Data] Player " .. player.Name .. " Sun reset applied; retained up to 1M Sun.")
+                end
                 print("[Data] Player " .. player.Name .. " data loaded successfully!")
 
                 if (savedData.TutorialStep or 0) == 0 then
@@ -2054,8 +2283,23 @@ function PlayerDataManager.Init()
     getPlayerDataRF.Parent = ReplicatedStorage
     getPlayerDataRF.OnServerInvoke = function(player)
         while not sessionData[player.UserId] do task.wait(0.1) end
-        syncPassPremiumOwnership(player, sessionData[player.UserId])
-        return sessionData[player.UserId]
+        local data = sessionData[player.UserId]
+        syncPassPremiumOwnership(player, data)
+        local now = os.time()
+        if normalizeZombossShopData(data, now) then
+            firePlayerDataPatch(player, {
+                Tacos = data.Tacos,
+                ZombossShop = cloneValue(data.ZombossShop),
+            })
+            markSessionDataChanged(player, "zomboss shop cleanup")
+        end
+        if normalizeActiveMutationPotionBuffs(data, now) then
+            firePlayerDataPatch(player, {
+                ActiveMutationPotionBuffs = cloneValue(data.ActiveMutationPotionBuffs),
+            })
+            markSessionDataChanged(player, "mutation potion buff cleanup")
+        end
+        return data
     end
 
     if not ReplicatedStorage:FindFirstChild("UpdateInventoryRE") then
@@ -2063,6 +2307,7 @@ function PlayerDataManager.Init()
         updateInventoryRE.Name = "UpdateInventoryRE"
         updateInventoryRE.Parent = ReplicatedStorage
     end
+    getOrCreateRemoteEvent("PlayerDataPatchRE")
 
     getUpdatePassDataRemote()
     getOrCreateRemoteFunction(PassRewardConfig.RemoteName).OnServerInvoke = function(player, trackKey, tier)
@@ -2175,29 +2420,27 @@ function PlayerDataManager.Init()
         -- 5. 将结果返回给客户端用于播放转盘动画
         return true, finalPrize
     end
-    local startNewbieGiftRF = ReplicatedStorage:FindFirstChild("StartNewbieGiftRF")
-    if not startNewbieGiftRF then
-        startNewbieGiftRF = Instance.new("RemoteFunction")
-        startNewbieGiftRF.Name = "StartNewbieGiftRF"
-        startNewbieGiftRF.Parent = ReplicatedStorage
-    end
-    startNewbieGiftRF.OnServerInvoke = function(player)
-        local data = sessionData[player.UserId]
-        -- 如果玩家存在，且计时未开始，则记录当前真实服务器时间
-        if data and data.NewbieGiftStartTime == 0 then
-            data.NewbieGiftStartTime = os.time()
-
-            local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-            if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
-
-            markSessionDataChanged(player, "newbie gift timer")
-            return true, data.NewbieGiftStartTime
-        end
-        return false, data and data.NewbieGiftStartTime or 0
-    end
 end
 
 function PlayerDataManager.GetPlayerData(player) return sessionData[player.UserId] end
+
+function PlayerDataManager.NormalizeZombossShopData(data, now)
+    return normalizeZombossShopData(data, now)
+end
+
+function PlayerDataManager.GetRankingSeasonNextLevel(player)
+    local data = player and sessionData[player.UserId]
+    return RankingSeasonConfig.GetSeasonNextLevel(data)
+end
+
+function PlayerDataManager.GetRankingSeasonClearedLevel(player)
+    local data = player and sessionData[player.UserId]
+    return getRankingSeasonClearedLevel(data)
+end
+
+function PlayerDataManager.GetRankingSeasonClearedLevelFromData(data)
+    return getRankingSeasonClearedLevel(data)
+end
 
 function PlayerDataManager.AddPassExp(player, amount)
     local data = player and sessionData[player.UserId]
@@ -2284,12 +2527,26 @@ local function deepCopy(value)
     return copy
 end
 
+local function restoreDataTable(target, snapshot)
+    if type(target) ~= "table" or type(snapshot) ~= "table" then
+        return
+    end
+
+    for key in pairs(target) do
+        target[key] = nil
+    end
+    for key, value in pairs(snapshot) do
+        target[key] = deepCopy(value)
+    end
+end
+
 local function addPlantToData(data, plantId, amount, mutationLevel)
-    data.Inventory = data.Inventory or { Seeds = {}, Plants = {}, Chests = {}, Titles = {} }
+    data.Inventory = data.Inventory or { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} }
     data.Inventory.Seeds = data.Inventory.Seeds or {}
     data.Inventory.Plants = data.Inventory.Plants or {}
     data.Inventory.Chests = data.Inventory.Chests or {}
     data.Inventory.Titles = data.Inventory.Titles or {}
+    data.Inventory.Items = data.Inventory.Items or {}
     mutationLevel = normalizeMutationLevel(mutationLevel)
 
     local found = false
@@ -2323,6 +2580,25 @@ local function addPlantToData(data, plantId, amount, mutationLevel)
     markMutationUnlocked(data, plantId, mutationLevel)
 end
 
+local function addItemToData(data, itemId, amount)
+    data.Inventory = data.Inventory or { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} }
+    data.Inventory.Seeds = data.Inventory.Seeds or {}
+    data.Inventory.Plants = data.Inventory.Plants or {}
+    data.Inventory.Chests = data.Inventory.Chests or {}
+    data.Inventory.Titles = data.Inventory.Titles or {}
+    data.Inventory.Items = data.Inventory.Items or {}
+
+    amount = math.max(1, math.floor(tonumber(amount) or 1))
+    for _, itemData in ipairs(data.Inventory.Items) do
+        if itemData.ID == itemId then
+            itemData.Quantity = math.max(0, math.floor(tonumber(itemData.Quantity) or 0)) + amount
+            return
+        end
+    end
+
+    table.insert(data.Inventory.Items, { ID = itemId, Quantity = amount })
+end
+
 function PlayerDataManager.GrantSavedChatGift(player, claimFlag, plantId, plantAmount, mutationLevel, coins)
     local userId = player and player.UserId
     local data = userId and sessionData[userId]
@@ -2339,23 +2615,16 @@ function PlayerDataManager.GrantSavedChatGift(player, claimFlag, plantId, plantA
     mutationLevel = normalizeMutationLevel(mutationLevel)
     local wasFirstUnlock = not isMutationUnlocked(data, plantId, mutationLevel)
 
-    local dataForGiftSave = deepCopy(data)
-    dataForGiftSave[claimFlag] = true
-    addPlantToData(dataForGiftSave, plantId, plantAmount, mutationLevel)
-    dataForGiftSave.Coins = (tonumber(dataForGiftSave.Coins) or 0) + coins
-
-    local saved = runQueuedSave(userId, dataForGiftSave, {
-        RespectMinInterval = false,
-    })
-    if not saved then
-        return false, "Gift failed: please try again later."
-    end
-
+    local snapshot = deepCopy(data)
     data[claimFlag] = true
     addPlantToData(data, plantId, plantAmount, mutationLevel)
     data.Coins = (tonumber(data.Coins) or 0) + coins
-    data[SAVE_VERSION_KEY] = dataForGiftSave[SAVE_VERSION_KEY]
-    data[LAST_SAVE_TIME_KEY] = dataForGiftSave[LAST_SAVE_TIME_KEY]
+
+    local saveQueued, saveErr = requestDeferredSave(player, "saved chat gift")
+    if not saveQueued then
+        restoreDataTable(data, snapshot)
+        return false, "Gift failed: please try again later. " .. tostring(saveErr or "")
+    end
 
     local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
     if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
@@ -2411,25 +2680,17 @@ function PlayerDataManager.GrantSavedPlantBundle(player, claimFlag, rewards)
         end
     end
 
-    local dataForBundleSave = deepCopy(data)
-    dataForBundleSave[claimFlag] = true
-    for _, reward in ipairs(normalizedRewards) do
-        addPlantToData(dataForBundleSave, reward.PlantId, reward.Amount, reward.Mutation)
-    end
-
-    local saved = runQueuedSave(userId, dataForBundleSave, {
-        RespectMinInterval = false,
-    })
-    if not saved then
-        return false, "Gift failed: please try again later."
-    end
-
+    local snapshot = deepCopy(data)
     data[claimFlag] = true
     for _, reward in ipairs(normalizedRewards) do
         addPlantToData(data, reward.PlantId, reward.Amount, reward.Mutation)
     end
-    data[SAVE_VERSION_KEY] = dataForBundleSave[SAVE_VERSION_KEY]
-    data[LAST_SAVE_TIME_KEY] = dataForBundleSave[LAST_SAVE_TIME_KEY]
+
+    local saveQueued, saveErr = requestDeferredSave(player, "saved plant bundle")
+    if not saveQueued then
+        restoreDataTable(data, snapshot)
+        return false, "Gift failed: please try again later. " .. tostring(saveErr or "")
+    end
 
     local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
     if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
@@ -2440,6 +2701,57 @@ function PlayerDataManager.GrantSavedPlantBundle(player, claimFlag, rewards)
             playUnlockAnimRE:FireClient(player, unlock.PlantId, unlock.Mutation)
         end
     end
+
+    return true
+end
+
+function PlayerDataManager.GrantSavedItemBundle(player, claimFlag, rewards)
+    local userId = player and player.UserId
+    local data = userId and sessionData[userId]
+    if not data then
+        return false, "Gift failed: data is still loading."
+    end
+    if dataSaveAllowed[userId] ~= true then
+        return false, "Gift failed: data is still loading. Please try again later."
+    end
+    if data[claimFlag] then
+        return false, "You have already claimed this code."
+    end
+    if type(rewards) ~= "table" or #rewards <= 0 then
+        return false, "Gift failed: reward config is empty."
+    end
+
+    local normalizedRewards = {}
+    for _, reward in ipairs(rewards) do
+        if type(reward) ~= "table" or type(reward.ItemId) ~= "string" or reward.ItemId == "" then
+            return false, "Gift failed: reward config is invalid."
+        end
+
+        local itemId = reward.ItemId
+        if not (ItemConfig.Items and ItemConfig.Items[itemId]) then
+            return false, "Gift failed: reward item config not found."
+        end
+
+        table.insert(normalizedRewards, {
+            ItemId = itemId,
+            Amount = math.max(1, math.floor(tonumber(reward.Amount) or 1)),
+        })
+    end
+
+    local snapshot = deepCopy(data)
+    data[claimFlag] = true
+    for _, reward in ipairs(normalizedRewards) do
+        addItemToData(data, reward.ItemId, reward.Amount)
+    end
+
+    local saveQueued, saveErr = requestDeferredSave(player, "saved item bundle")
+    if not saveQueued then
+        restoreDataTable(data, snapshot)
+        return false, "Gift failed: please try again later. " .. tostring(saveErr or "")
+    end
+
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
 
     return true
 end
@@ -2472,6 +2784,56 @@ function PlayerDataManager.ClearTransientPlotData(player)
     markSessionDataChanged(player, "clear plot data")
 end
 
+local function rollMutationLevelForData(data)
+    local mutationProb = ItemConfig.MutationProb
+    if type(mutationProb) ~= "table" then
+        return 1
+    end
+
+    local weights = {}
+    for level, weight in pairs(mutationProb) do
+        local numericLevel = tonumber(level)
+        local numericWeight = tonumber(weight) or 0
+        if numericLevel and numericWeight > 0 then
+            weights[numericLevel] = numericWeight
+        end
+    end
+
+    local _, activePotion = getHighestActiveMutationPotionBuff(data, os.time())
+    if activePotion then
+        local targetLevel = normalizeMutationLevel(activePotion.MutationLevel)
+        local bonusPercent = tonumber(activePotion.WeightBonusPercent) or 0
+        if weights[targetLevel] and bonusPercent > 0 then
+            weights[targetLevel] += weights[targetLevel] * (bonusPercent / 100)
+        end
+    end
+
+    local levels = {}
+    local totalWeight = 0
+    for level, weight in pairs(weights) do
+        if weight > 0 then
+            totalWeight += weight
+            table.insert(levels, level)
+        end
+    end
+
+    if totalWeight <= 0 then
+        return 1
+    end
+
+    table.sort(levels)
+    local roll = math.random() * totalWeight
+    local currentWeight = 0
+    for _, level in ipairs(levels) do
+        currentWeight += weights[level]
+        if roll <= currentWeight then
+            return level
+        end
+    end
+
+    return levels[#levels] or 1
+end
+
 function PlayerDataManager.UpdatePlantedPlant(player, soilName, seedId, plantedTime)
     local data = sessionData[player.UserId]
     if not data then return end
@@ -2480,20 +2842,7 @@ function PlayerDataManager.UpdatePlantedPlant(player, soilName, seedId, plantedT
     local mutationLevel = existingPlant and normalizeMutationLevel(existingPlant.Mutation)
 
     if not mutationLevel then
-        mutationLevel = 1
-        if ItemConfig.MutationProb then
-            local totalWeight = 0
-            for _, weight in pairs(ItemConfig.MutationProb) do totalWeight += weight end
-            local roll = math.random() * totalWeight
-            local currentWeight = 0
-            for level, weight in pairs(ItemConfig.MutationProb) do
-                currentWeight += weight
-                if roll <= currentWeight then
-                    mutationLevel = level
-                    break
-                end
-            end
-        end
+        mutationLevel = rollMutationLevelForData(data)
     end
 
     data.PlantedPlants[soilName] = {
@@ -2524,12 +2873,13 @@ local MAX_HOTBAR_ITEMS = 10
 local function ensureInventoryTables(data)
     if not data then return nil end
     if type(data.Inventory) ~= "table" then
-        data.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {} }
+        data.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} }
     end
     if type(data.Inventory.Seeds) ~= "table" then data.Inventory.Seeds = {} end
     if type(data.Inventory.Plants) ~= "table" then data.Inventory.Plants = {} end
     if type(data.Inventory.Chests) ~= "table" then data.Inventory.Chests = {} end
     if type(data.Inventory.Titles) ~= "table" then data.Inventory.Titles = {} end
+    if type(data.Inventory.Items) ~= "table" then data.Inventory.Items = {} end
     if type(data.EquippedTitle) ~= "string" then data.EquippedTitle = "" end
     return data.Inventory
 end
@@ -2559,6 +2909,154 @@ local function addOrReplaceHotbarItem(data, compositeId, replaceWhenFull)
     end
 
     return false
+end
+
+local function removeHotbarItem(data, compositeId)
+    if type(data) ~= "table" or type(data.Hotbar) ~= "table" then
+        return false
+    end
+
+    local changed = false
+    for index = #data.Hotbar, 1, -1 do
+        if data.Hotbar[index] == compositeId then
+            table.remove(data.Hotbar, index)
+            changed = true
+        end
+    end
+
+    return changed
+end
+
+local function consumeInventoryItem(data, itemId, amount)
+    local inventory = ensureInventoryTables(data)
+    if not inventory then
+        return false
+    end
+
+    amount = math.max(1, math.floor(tonumber(amount) or 1))
+    for index, itemData in ipairs(inventory.Items) do
+        if itemData.ID == itemId then
+            local quantity = math.floor(tonumber(itemData.Quantity) or 0)
+            if quantity < amount then
+                return false
+            end
+
+            itemData.Quantity = quantity - amount
+            if itemData.Quantity <= 0 then
+                table.remove(inventory.Items, index)
+                removeHotbarItem(data, "Item_" .. itemId)
+            end
+
+            return true
+        end
+    end
+
+    return false
+end
+
+function PlayerDataManager.GiveItem(player, itemId, amount, autoEquip)
+    local data = player and sessionData[player.UserId]
+    if not data then return false end
+    if not (ItemConfig.Items and ItemConfig.Items[itemId]) then
+        warn("[PlayerDataManager] Unknown item id: " .. tostring(itemId))
+        return false
+    end
+
+    amount = math.max(1, math.floor(tonumber(amount) or 1))
+    local inventory = ensureInventoryTables(data)
+
+    local found = false
+    for _, itemData in ipairs(inventory.Items) do
+        if itemData.ID == itemId then
+            itemData.Quantity = math.max(0, math.floor(tonumber(itemData.Quantity) or 0)) + amount
+            found = true
+            break
+        end
+    end
+
+    if not found then
+        table.insert(inventory.Items, { ID = itemId, Quantity = amount })
+    end
+
+    local compositeId = "Item_" .. itemId
+    if autoEquip == true then
+        addOrReplaceHotbarItem(data, compositeId, true)
+    end
+
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+
+    if autoEquip then
+        local forceSelectRE = ReplicatedStorage:FindFirstChild("ForceSelectRE")
+        if forceSelectRE then
+            task.delay(0.1, function()
+                if player and player.Parent then
+                    forceSelectRE:FireClient(player, compositeId)
+                end
+            end)
+        end
+    end
+
+    markSessionDataChanged(player, "item grant")
+    return true, compositeId
+end
+
+function PlayerDataManager.ConsumeItem(player, itemId, amount)
+    local data = player and sessionData[player.UserId]
+    if not data then return false end
+    if not consumeInventoryItem(data, itemId, amount) then
+        return false
+    end
+
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    markSessionDataChanged(player, "item consume")
+    return true
+end
+
+function PlayerDataManager.ActivateMutationPotion(player, itemId)
+    local data = player and sessionData[player.UserId]
+    if not data then
+        return false, "Data is still loading."
+    end
+
+    local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+    if not itemDetail or itemDetail.ItemType ~= "MutationPotion" then
+        return false, "This item cannot be used."
+    end
+
+    if not consumeInventoryItem(data, itemId, 1) then
+        return false, "You do not have this potion."
+    end
+
+    normalizeActiveMutationPotionBuffs(data, os.time())
+    local duration = math.max(1, math.floor(tonumber(itemDetail.DurationSeconds) or 900))
+    data.ActiveMutationPotionBuffs[itemId] = os.time() + duration
+
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    firePlayerDataPatch(player, {
+        ActiveMutationPotionBuffs = cloneValue(data.ActiveMutationPotionBuffs),
+    })
+
+    markSessionDataChanged(player, "mutation potion use")
+    return true, (itemDetail.Name or itemId) .. " activated.", cloneValue(data.ActiveMutationPotionBuffs)
+end
+
+function PlayerDataManager.GetActiveMutationPotionBuffs(player)
+    local data = player and sessionData[player.UserId]
+    if not data then
+        return {}
+    end
+
+    if normalizeActiveMutationPotionBuffs(data, os.time()) then
+        firePlayerDataPatch(player, {
+            ActiveMutationPotionBuffs = cloneValue(data.ActiveMutationPotionBuffs),
+        })
+        markSessionDataChanged(player, "mutation potion buff cleanup")
+    end
+
+    return cloneValue(data.ActiveMutationPotionBuffs)
 end
 
 function PlayerDataManager.GiveChest(player, chestId, amount, autoEquip)
@@ -2860,17 +3358,65 @@ function PlayerDataManager.UnlockMutation(player, plantId, mutationLevel, suppre
     end
 end
 
+function PlayerDataManager.FireDataPatch(player, patch)
+    firePlayerDataPatch(player, patch)
+end
+
 function PlayerDataManager.ConsumeCoins(player, amount)
     local data = sessionData[player.UserId];
     if not data then return false end
     if data.Coins >= amount then
         data.Coins -= amount
-        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-        if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+        firePlayerDataPatch(player, { Coins = data.Coins })
         markSessionDataChanged(player, "coins consume")
         return true
     end
     return false
+end
+
+function PlayerDataManager.AdminDeductCoins(player, amount, context)
+    if not player or not player.Parent then
+        return false, "Target player is not online."
+    end
+
+    local data = sessionData[player.UserId]
+    if not data then
+        return false, "Target data is still loading."
+    end
+
+    local requestedAmount = tonumber(amount)
+    if not requestedAmount or requestedAmount <= 0 or requestedAmount % 1 ~= 0 or requestedAmount == math.huge then
+        return false, "Deduct failed: amount must be a positive integer."
+    end
+
+    local previousCoins = data.Coins
+    local beforeCoins = math.max(0, math.floor(tonumber(previousCoins) or 0))
+    local actualDeducted = math.min(beforeCoins, requestedAmount)
+    local afterCoins = beforeCoins - actualDeducted
+
+    if previousCoins ~= afterCoins then
+        data.Coins = afterCoins
+        firePlayerDataPatch(player, { Coins = data.Coins })
+
+        local saveQueued, saveErr = markSessionDataChanged(player, context or "admin deduct sun")
+        if not saveQueued then
+            data.Coins = previousCoins
+            firePlayerDataPatch(player, { Coins = data.Coins })
+            return false, "Deduct failed: save unavailable. " .. tostring(saveErr or ""), {
+                RequestedAmount = requestedAmount,
+                ActualDeducted = 0,
+                BeforeCoins = beforeCoins,
+                AfterCoins = beforeCoins,
+            }
+        end
+    end
+
+    return true, {
+        RequestedAmount = requestedAmount,
+        ActualDeducted = actualDeducted,
+        BeforeCoins = beforeCoins,
+        AfterCoins = afterCoins,
+    }
 end
 
 function PlayerDataManager.GiveCoins(player, amount)
@@ -2881,8 +3427,7 @@ function PlayerDataManager.GiveCoins(player, amount)
         finalAmount = amount * 2
     end
     data.Coins += finalAmount
-    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    firePlayerDataPatch(player, { Coins = data.Coins })
     markSessionDataChanged(player, "coins grant")
     return finalAmount
 end
@@ -2891,8 +3436,7 @@ function PlayerDataManager.GiveCoinsRaw(player, amount)
     local data = sessionData[player.UserId];
     if not data then return end
     data.Coins += amount
-    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+    firePlayerDataPatch(player, { Coins = data.Coins })
     markSessionDataChanged(player, "raw coins grant")
     return amount
 end
@@ -2958,30 +3502,21 @@ function PlayerDataManager.UnlockNextLevel(player, completedLevelId)
     local data = sessionData[player.UserId]
     if not data then return end
 
-    -- 只有当玩家打通了他们当前的最高关卡时，才需要升级和更新 UI
+    completedLevelId = math.max(0, math.floor(tonumber(completedLevelId) or 0))
+    local historicalChanged = false
+
     if completedLevelId >= (data.UnlockedLevel or 1) then
         data.UnlockedLevel = completedLevelId + 1
+        historicalChanged = true
+    end
 
-        -- 实时更新玩家头顶的最高关卡 UI
-        local character = player.Character
-        if character then
-            local head = character:FindFirstChild("Head")
-            if head then
-                local titleGui = head:FindFirstChild("PlayerTitleGui")
-                if titleGui then
-                    local textLabel = titleGui:FindFirstChildWhichIsA("TextLabel")
-                    if textLabel then
-                        -- 直接显示当前解锁层数
-                        local maxCleared = data.UnlockedLevel or 1
-                        textLabel.Text = "MAX  " .. tostring(maxCleared)
-                    end
-                end
-            end
-        end
+    local seasonChanged = RankingSeasonConfig.AdvanceSeasonLevel(data, completedLevelId)
 
+    if historicalChanged or seasonChanged then
+        updatePlayerMaxLevelTitle(player, data)
         local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
         if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
-        markSessionDataChanged(player, "level unlock")
+        markSessionDataChanged(player, historicalChanged and "level unlock" or "ranking season level unlock")
     end
 end
 
@@ -2993,6 +3528,17 @@ function PlayerDataManager.AddCombatPlant(player, gridName, plantId, hp, mutatio
     end
 end
 
+function PlayerDataManager.UpdateCombatPlantMutation(player, gridName, mutationLevel)
+    local data = sessionData[player.UserId]
+    if type(gridName) ~= "string" or not data or not data.CombatPlants or not data.CombatPlants[gridName] then
+        return false
+    end
+
+    data.CombatPlants[gridName].Mutation = normalizeMutationLevel(mutationLevel)
+    markSessionDataChanged(player, "combat plant mutation update")
+    return true
+end
+
 function PlayerDataManager.UpdateCombatPlantHP(player, gridName, hp) end
 
 function PlayerDataManager.RemoveCombatPlant(player, gridName)
@@ -3001,6 +3547,17 @@ function PlayerDataManager.RemoveCombatPlant(player, gridName)
         data.CombatPlants[gridName] = nil
         markSessionDataChanged(player, "combat plant removal")
     end
+end
+
+function PlayerDataManager.UpdatePlantedPlantMutation(player, soilName, mutationLevel)
+    local data = sessionData[player.UserId]
+    if type(soilName) ~= "string" or not data or not data.PlantedPlants or not data.PlantedPlants[soilName] then
+        return false
+    end
+
+    data.PlantedPlants[soilName].Mutation = normalizeMutationLevel(mutationLevel)
+    markSessionDataChanged(player, "planted plant mutation update")
+    return true
 end
 
 function PlayerDataManager.UnlockSeed(player, seedId)
@@ -3024,8 +3581,7 @@ function PlayerDataManager.AddTotalSun(player, amount)
     local data = sessionData[player.UserId]
     if data then
         data.TotalSun = (data.TotalSun or 0) + amount
-        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-        if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+        firePlayerDataPatch(player, { TotalSun = data.TotalSun })
         markSessionDataChanged(player, "total sun add")
     end
 end
@@ -3042,19 +3598,12 @@ function PlayerDataManager.CollectAllSun(player)
         local boostedAmount = PlayerDataManager.ApplyFriendSunBoost(player, amount)
         local finalAmount = PlayerDataManager.GiveCoins(player, boostedAmount) or boostedAmount
 
-        local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
-        if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+        firePlayerDataPatch(player, {
+            Coins = data.Coins,
+            TotalSun = data.TotalSun,
+        })
         markSessionDataChanged(player, "sun collection")
 
-        AnalyticsService:LogEconomyEvent(
-            player,
-            Enum.AnalyticsEconomyFlowType.Source,
-            "Coins",
-            finalAmount,
-            data.Coins,
-            Enum.AnalyticsEconomyTransactionType.Gameplay.Name,
-            "Sunflower_Collect"
-        )
         return finalAmount
     end
     return 0

@@ -16,8 +16,10 @@ GiftingConfig.RewardTypes = {
     Title = "Title",
     ExclusiveRollTicket = "ExclusiveRollTicket",
     PassShopToken = "PassShopToken",
+    Tacos = "Tacos",
 }
 
 GiftingConfig.AdminCommand = "!gift"
+GiftingConfig.AdminDeductSunCommand = "!deductsun"
 
 return GiftingConfig

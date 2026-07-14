@@ -5,7 +5,6 @@ local PlantService = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
-local AnalyticsService = game:GetService("AnalyticsService")
 local CollectionService = game:GetService("CollectionService") -- 引入 CollectionService 用于雷达标签
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
@@ -469,9 +468,6 @@ function PlantService.Init()
                                 local cost = buyPrice * 2
 
                                 if PlayerDataManager.ConsumeCoins(player, cost) then
-                                    local data = PlayerDataManager.GetPlayerData(player)
-                                    AnalyticsService:LogEconomyEvent(player, Enum.AnalyticsEconomyFlowType.Sink, "Coins", cost, data and data.Coins or 0, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "SpeedUpPlant_" .. tostring(targetPlant.Name))
-
                                     local newTime = os.time() - growthTime - 1
                                     targetPlant:SetAttribute("PlantedTime", newTime)
                                     PlayerDataManager.UpdatePlantedPlant(player, soil.Name, targetPlant.Name, newTime)
@@ -511,13 +507,6 @@ function PlantService.Init()
 
                     if PlayerDataManager.ConsumeSeed(player, realId, 1) then
                         local data = PlayerDataManager.GetPlayerData(player)
-                        local remainingQuantity = 0
-                        if data and data.Inventory and data.Inventory.Seeds then
-                            for _, s in ipairs(data.Inventory.Seeds) do
-                                if s.ID == realId then remainingQuantity = s.Quantity; break end
-                            end
-                        end
-                        AnalyticsService:LogEconomyEvent(player, Enum.AnalyticsEconomyFlowType.Sink, "Seeds", 1, remainingQuantity, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "FarmPlanting_" .. tostring(realId))
 
                         local hasStock = false
                         if data and data.Inventory.Seeds then

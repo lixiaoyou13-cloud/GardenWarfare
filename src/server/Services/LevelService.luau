@@ -4,7 +4,6 @@ local LevelService = {}
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local AnalyticsService = game:GetService("AnalyticsService")
 
 local PlotService = require(script.Parent.PlotService)
 local ZombieService = require(script.Parent.ZombieService)
@@ -17,9 +16,29 @@ local function fireTip(player, message)
     end
 end
 
+local function isZombossBossFightActive()
+    local ok, service = pcall(function()
+        return require(script.Parent.ZombossBossFightService)
+    end)
+
+    if not ok or not service or type(service.IsActive) ~= "function" then
+        return false
+    end
+
+    return service.IsActive()
+end
+
 local function getMaxSelectableLevel(player)
-    local data = PlayerDataManager.GetPlayerData(player)
-    return math.max(1, tonumber(data and data.UnlockedLevel) or 1)
+    return math.max(1, PlayerDataManager.GetRankingSeasonNextLevel(player))
+end
+
+local function normalizeLevelId(levelId)
+    return math.max(1, math.floor(tonumber(levelId) or 1))
+end
+
+local function getLevelSelectCost(levelId)
+    levelId = normalizeLevelId(levelId)
+    return math.max(1, math.floor((100 + levelId * 20) / 20))
 end
 
 local function cancelCurrentBattle(player, plot)
@@ -35,6 +54,94 @@ end
 
 
 
+local function startLevel(player, plot, levelId, shouldCancelCurrentBattle)
+    if shouldCancelCurrentBattle then
+        cancelCurrentBattle(player, plot)
+        task.wait(0.1)
+    end
+
+    -- Clear any retreat/game-over state left by the previous battle before starting.
+    plot:SetAttribute("IsGameOver", false)
+
+    local CombatService = require(script.Parent.CombatService)
+    ZombieService.RestorePlotPlants(plot, player)
+    CombatService.ReloadSavedPlants(player)
+
+    print("[LevelService] Player " .. player.Name .. " battle refreshed: Level " .. levelId .. "")
+    ZombieService.StartLevel(plot, levelId, player)
+end
+
+local function startDefaultLevel(player)
+    if isZombossBossFightActive() then
+        return false, "Defeat Dr. Zomboss first."
+    end
+
+    local plot = PlotService.GetPlayerPlot(player)
+    if not plot then
+        return false, "Battle plot is not ready."
+    end
+
+    if plot:GetAttribute("IsLevelActive") then
+        return false
+    end
+
+    local levelId = getMaxSelectableLevel(player)
+    startLevel(player, plot, levelId, false)
+    return true, nil, levelId, 0
+end
+
+local function startSelectedLevel(player, targetLevel)
+    if isZombossBossFightActive() then
+        return false, "Defeat Dr. Zomboss first."
+    end
+
+    local requestedLevel = tonumber(targetLevel)
+    if not requestedLevel then
+        return false, "Please select a level."
+    end
+
+    local plot = PlotService.GetPlayerPlot(player)
+    if not plot then
+        return false, "Battle plot is not ready."
+    end
+
+    requestedLevel = normalizeLevelId(requestedLevel)
+    local maxLevel = getMaxSelectableLevel(player)
+    local levelId = math.min(requestedLevel, maxLevel)
+    local cost = getLevelSelectCost(levelId)
+
+    local data = PlayerDataManager.GetPlayerData(player)
+    if not data then
+        return false, "Player data is still loading.", levelId, cost
+    end
+
+    if (tonumber(data.Coins) or 0) < cost then
+        return false, "Not enough Sunshine.", levelId, cost
+    end
+
+    if not PlayerDataManager.ConsumeCoins(player, cost) then
+        return false, "Not enough Sunshine.", levelId, cost
+    end
+
+    if requestedLevel > maxLevel then
+        fireTip(player, "Your current season max level is Level " .. tostring(maxLevel) .. ". Starting Level " .. tostring(maxLevel) .. ".")
+    end
+
+    task.spawn(function()
+        local ok, err = pcall(function()
+            startLevel(player, plot, levelId, true)
+        end)
+
+        if not ok then
+            PlayerDataManager.GiveCoinsRaw(player, cost)
+            warn("[LevelService] Failed to start selected level for " .. player.Name .. ": " .. tostring(err))
+            fireTip(player, "Unable to start level. Please try again.")
+        end
+    end)
+
+    return true, nil, levelId, cost
+end
+
 function LevelService.Init()
     local startBattleRE = ReplicatedStorage:FindFirstChild("StartBattleRE") or Instance.new("RemoteEvent")
     startBattleRE.Name = "StartBattleRE"
@@ -44,58 +151,41 @@ function LevelService.Init()
     endBattleRE.Name = "EndBattleRE"
     endBattleRE.Parent = ReplicatedStorage
 
+    local startSelectedLevelRF = ReplicatedStorage:FindFirstChild("StartSelectedLevelRF") or Instance.new("RemoteFunction")
+    startSelectedLevelRF.Name = "StartSelectedLevelRF"
+    startSelectedLevelRF.Parent = ReplicatedStorage
+
     local syncBattleUI_RE = ReplicatedStorage:FindFirstChild("SyncBattleUI_RE") or Instance.new("RemoteEvent")
     syncBattleUI_RE.Name = "SyncBattleUI_RE"
     syncBattleUI_RE.Parent = ReplicatedStorage
 
-   -- 增加对 targetLevel 的支持，并在开始前刷新植物
-    -- 增加对 targetLevel 的支持，并在开始前刷新植物
+    startSelectedLevelRF.OnServerInvoke = function(player, targetLevel)
+        return startSelectedLevel(player, targetLevel)
+    end
+
     startBattleRE.OnServerEvent:Connect(function(player, targetLevel)
-        local plot = PlotService.GetPlayerPlot(player)
-        if not plot then return end
-
-        local requestedLevel = tonumber(targetLevel)
-        local isLevelSelect = requestedLevel ~= nil
-        if plot:GetAttribute("IsLevelActive") and not isLevelSelect then return end
-
-        if isLevelSelect then
-            requestedLevel = math.max(1, math.floor(requestedLevel))
-            local maxLevel = getMaxSelectableLevel(player)
-            if requestedLevel > maxLevel then
-                requestedLevel = maxLevel
-                fireTip(player, "Your max unlocked level is Level " .. tostring(maxLevel) .. ". Starting Level " .. tostring(maxLevel) .. ".")
-            end
-
-            cancelCurrentBattle(player, plot)
-            task.wait(0.1)
+        local success, message
+        if targetLevel == nil then
+            success, message = startDefaultLevel(player)
+        else
+            success, message = startSelectedLevel(player, targetLevel)
         end
 
-        -- 这一行代码：强行清晰除上一局残留的撤退/标签记
-        plot:SetAttribute("IsGameOver", false)
-
-        -- 方案：不再先销毁后重连，而是执行原地复活逻辑
-        local CombatService = require(script.Parent.CombatService)
-
-        -- 1. 瞬间重置地块上已存在的植物（满血、变回可见）
-        ZombieService.RestorePlotPlants(plot, player)
-
-        -- 2. 同步存档中的新植物（如果有的话）
-        CombatService.ReloadSavedPlants(player)
-
-        local levelId = requestedLevel or 1
-        print("[LevelService] Player " .. player.Name .. " battle refreshed: Level " .. levelId .. "")
-
-        ZombieService.StartLevel(plot, levelId, player)
+        if not success and message then
+            fireTip(player, message)
+        end
     end)
 
     endBattleRE.OnServerEvent:Connect(function(player)
+        if isZombossBossFightActive() then
+            fireTip(player, "Defeat Dr. Zomboss first.")
+            return
+        end
+
         local plot = PlotService.GetPlayerPlot(player)
 
         -- 如果没在战斗中，直接无视
         if not plot or not plot:GetAttribute("IsLevelActive") then return end
-
-        local currentLevel = plot:GetAttribute("CurrentLevel") or 1
-        AnalyticsService:LogCustomEvent(player, "Manual_Retreat_Level_" .. tostring(currentLevel), 1)
 
         print("[LevelService] Player " .. player.Name .. " chose manual retreat")
 
@@ -139,11 +229,6 @@ function LevelService.Init()
             end
         end)
     end)
-    local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE") or Instance.new("RemoteEvent")
-    analyticsRE.Name = "AnalyticsRE"
-    analyticsRE.Parent = ReplicatedStorage
-
-
 end
 
 return LevelService

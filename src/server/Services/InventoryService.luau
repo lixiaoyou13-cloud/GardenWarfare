@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local PlotService = require(script.Parent.PlotService)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
 local ChestConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ChestConfig"))
 local CombatService = require(script.Parent.CombatService)
 local EquipmentService = require(script.Parent.EquipmentService)
@@ -15,6 +16,10 @@ local chestOpenLocks = setmetatable({}, { __mode = "k" })
 local chestIAPIntents = setmetatable({}, { __mode = "k" })
 local chestRng = Random.new()
 local CHEST_IAP_INTENT_TTL = 300
+local POTION_MUTATION_CHANCE = 0.15
+local POTION_INTERACTION_MAX_DISTANCE = 35
+local POTION_MUTATION_ANIMATION_SECONDS = 2.1
+local potionUseLocks = setmetatable({}, { __mode = "k" })
 
 local function getDisplayItemName(itemType, realId)
     if itemType == "Seed" then
@@ -125,20 +130,20 @@ local function fireInventoryUpdate(player, data)
 end
 
 local function saveInventoryTransaction(player, data, snapshot, context)
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if saved then
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, context)
+    if saveQueued then
         return true
     end
 
-    warn("[InventoryService] Failed to save " .. tostring(context) .. " for "
+    warn("[InventoryService] Failed to queue save after " .. tostring(context) .. " for "
         .. tostring(player and player.Name or "unknown") .. ": " .. tostring(saveErr))
 
     restoreInventoryTransactionState(data, snapshot)
     fireInventoryUpdate(player, data)
 
-    local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "rollback " .. tostring(context))
     if not rollbackSaved and rollbackErr ~= "stale_session" then
-        warn("[InventoryService] Failed to save rollback after " .. tostring(context) .. " for "
+        warn("[InventoryService] Failed to queue rollback save after " .. tostring(context) .. " for "
             .. tostring(player and player.Name or "unknown") .. ": " .. tostring(rollbackErr))
     end
 
@@ -196,6 +201,12 @@ local function CleanUpGhostItems(data)
                     isValid = true; break
                 end
             end
+        elseif itemType == "Item" and data.Inventory.Items then
+            for _, itemData in ipairs(data.Inventory.Items) do
+                if itemData.ID == realId and itemData.Quantity > 0 then
+                    isValid = true; break
+                end
+            end
         end
 
         if isValid then
@@ -247,6 +258,185 @@ local function findFirstOwnedChest(data)
     end
 
     return nil
+end
+
+local function getEquippedItemId(player)
+    local character = player and player.Character
+    local equippedId = character and character:GetAttribute("EquippedSeed")
+    if type(equippedId) == "string" and string.sub(equippedId, 1, 5) == "Item_" then
+        return string.sub(equippedId, 6)
+    end
+
+    return nil
+end
+
+local function getPlantSeedId(plantId, preferredSeedId)
+    if type(preferredSeedId) == "string" then
+        local preferredSeed = ItemConfig.Seeds and ItemConfig.Seeds[preferredSeedId]
+        if preferredSeed and preferredSeed.YieldPlant == plantId then
+            return preferredSeedId
+        end
+    end
+
+    if type(plantId) ~= "string" or not ItemConfig.Seeds then
+        return nil
+    end
+
+    for seedId, seedConfig in pairs(ItemConfig.Seeds) do
+        if seedConfig and seedConfig.YieldPlant == plantId then
+            return seedId
+        end
+    end
+
+    return nil
+end
+
+local function getInstancePosition(instance)
+    if typeof(instance) ~= "Instance" then
+        return nil
+    end
+
+    if instance:IsA("Model") then
+        local ok, pivot = pcall(function()
+            return instance:GetPivot()
+        end)
+        if ok and typeof(pivot) == "CFrame" then
+            return pivot.Position
+        end
+
+        local part = instance.PrimaryPart or instance:FindFirstChildWhichIsA("BasePart", true)
+        return part and part.Position or nil
+    elseif instance:IsA("BasePart") then
+        return instance.Position
+    end
+
+    return nil
+end
+
+local function getPotionTargetInfo(player, targetPlant)
+    if typeof(targetPlant) ~= "Instance" or not targetPlant:IsA("Model") or not targetPlant.Parent then
+        return nil, "Move near a plant and press F to use this potion."
+    end
+
+    local plot = PlotService.GetPlayerPlot(player)
+    if not plot or not targetPlant:IsDescendantOf(plot) then
+        return nil, "Use potions on your own plants."
+    end
+
+    local character = player.Character
+    local characterRoot = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
+    local targetPosition = getInstancePosition(targetPlant)
+    if not characterRoot or not targetPosition then
+        return nil, "Move closer to the plant."
+    end
+
+    if (characterRoot.Position - targetPosition).Magnitude > POTION_INTERACTION_MAX_DISTANCE then
+        return nil, "Move closer to the plant."
+    end
+
+    local data = PlayerDataManager.GetPlayerData(player)
+    if not data then
+        return nil, "Data is still loading."
+    end
+
+    if targetPlant:GetAttribute("IsCombatPlant") then
+        local lawnPart = targetPlant.Parent
+        local gridName = targetPlant:GetAttribute("GridName") or (lawnPart and lawnPart.Name)
+        if type(gridName) ~= "string" then
+            return nil, "This plant cannot mutate."
+        end
+        local combatInfo = gridName and data.CombatPlants and data.CombatPlants[gridName]
+        if not combatInfo then
+            return nil, "This plant cannot mutate right now."
+        end
+        local plantId = (combatInfo and combatInfo.PlantId) or targetPlant.Name
+        local seedId = getPlantSeedId(plantId)
+
+        if not seedId then
+            return nil, "This plant has no seed and cannot mutate."
+        end
+
+        return {
+            Kind = "Combat",
+            Target = targetPlant,
+            GridName = gridName,
+            PlantId = plantId,
+            SeedId = seedId,
+            CurrentMutation = tonumber(combatInfo and combatInfo.Mutation) or tonumber(targetPlant:GetAttribute("MutationLevel")) or 1,
+        }
+    end
+
+    local soilName = targetPlant:GetAttribute("PlantedOn")
+    if soilName then
+        local plantedInfo = data.PlantedPlants and data.PlantedPlants[soilName]
+        if not plantedInfo then
+            return nil, "This plant cannot mutate right now."
+        end
+        local savedSeedId = plantedInfo and plantedInfo.SeedId
+        local savedSeedConfig = savedSeedId and ItemConfig.Seeds and ItemConfig.Seeds[savedSeedId]
+        local plantId = savedSeedConfig and savedSeedConfig.YieldPlant
+            or targetPlant:GetAttribute("YieldPlant")
+            or string.gsub(targetPlant.Name, "_Plant$", "")
+        local seedId = getPlantSeedId(plantId, savedSeedId)
+
+        if not seedId then
+            return nil, "This plant has no seed and cannot mutate."
+        end
+
+        return {
+            Kind = "Planted",
+            Target = targetPlant,
+            SoilName = soilName,
+            PlantId = plantId,
+            SeedId = seedId,
+            CurrentMutation = tonumber(plantedInfo and plantedInfo.Mutation) or tonumber(targetPlant:GetAttribute("MutationLevel")) or 1,
+        }
+    end
+
+    return nil, "This plant cannot mutate."
+end
+
+local function updatePlantMutationDisplay(targetPlant, mutationLevel)
+    local statusLabel = targetPlant and targetPlant:FindFirstChild("StatusLabel", true)
+    if not statusLabel or not statusLabel:IsA("TextLabel") then
+        return
+    end
+
+    local mutationName = ItemConfig.MutationName and ItemConfig.MutationName[mutationLevel] or ""
+    statusLabel.Text = (mutationLevel > 1 and mutationName ~= "") and mutationName or "Loading..."
+end
+
+local function applyPotionMutation(player, targetInfo, mutationLevel)
+    local targetPlant = targetInfo and targetInfo.Target
+    if not targetPlant or not targetPlant.Parent then
+        return false, "Mutation failed: plant is gone."
+    end
+
+    targetPlant:SetAttribute("MutationLevel", mutationLevel)
+    EffectUtil.ApplyMutationEffects(targetPlant, mutationLevel)
+    updatePlantMutationDisplay(targetPlant, mutationLevel)
+
+    if targetInfo.Kind == "Combat" then
+        local plantConfig = ItemConfig.Plants and ItemConfig.Plants[targetInfo.PlantId]
+        local stats = ItemConfig.MutationStats and (ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1])
+        if plantConfig and stats then
+            local oldMaxHP = math.max(1, tonumber(targetPlant:GetAttribute("MaxHealth")) or tonumber(plantConfig.HP) or 300)
+            local oldHP = math.max(0, tonumber(targetPlant:GetAttribute("Health")) or oldMaxHP)
+            local hpRatio = math.clamp(oldHP / oldMaxHP, 0, 1)
+            local newMaxHP = math.max(1, math.floor((tonumber(plantConfig.HP) or 300) * (tonumber(stats.HealthMul) or 1)))
+            targetPlant:SetAttribute("MaxHealth", newMaxHP)
+            targetPlant:SetAttribute("Health", math.max(1, math.floor(newMaxHP * hpRatio)))
+        end
+
+        PlayerDataManager.UpdateCombatPlantMutation(player, targetInfo.GridName, mutationLevel)
+    elseif targetInfo.Kind == "Planted" then
+        PlayerDataManager.UpdatePlantedPlantMutation(player, targetInfo.SoilName, mutationLevel)
+    else
+        return false, "This plant cannot mutate."
+    end
+
+    PlayerDataManager.UnlockMutation(player, targetInfo.PlantId, mutationLevel, true)
+    return true
 end
 
 local function openChestInternal(player, chestId, options)
@@ -429,6 +619,10 @@ function InventoryService.Init()
     removeHotbarRE.Name = "RemoveHotbarRE"
     removeHotbarRE.Parent = ReplicatedStorage
 
+    local usePotionRE = ReplicatedStorage:FindFirstChild("UsePotionRE") or Instance.new("RemoteEvent")
+    usePotionRE.Name = "UsePotionRE"
+    usePotionRE.Parent = ReplicatedStorage
+
     local prepareChestIAPPurchaseRE = ReplicatedStorage:FindFirstChild("PrepareChestIAPPurchaseRE") or Instance.new("RemoteEvent")
     prepareChestIAPPurchaseRE.Name = "PrepareChestIAPPurchaseRE"
     prepareChestIAPPurchaseRE.Parent = ReplicatedStorage
@@ -557,6 +751,80 @@ function InventoryService.Init()
                 ReplicatedStorage.UpdateInventoryRE:FireClient(player, data)
             end
         end
+    end)
+
+    usePotionRE.OnServerEvent:Connect(function(player, itemId, targetPlant)
+        if type(itemId) ~= "string" or itemId == "" then
+            usePotionRE:FireClient(player, false, "Invalid potion.")
+            return
+        end
+
+        if potionUseLocks[player] then
+            usePotionRE:FireClient(player, false, "Potion is already working.")
+            return
+        end
+
+        local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+        if not itemDetail or itemDetail.ItemType ~= "MutationPotion" then
+            usePotionRE:FireClient(player, false, "This item cannot be used.")
+            return
+        end
+
+        if getEquippedItemId(player) ~= itemId then
+            usePotionRE:FireClient(player, false, "Please hold this potion first.")
+            return
+        end
+
+        local targetInfo, targetMessage = getPotionTargetInfo(player, targetPlant)
+        if not targetInfo then
+            usePotionRE:FireClient(player, false, targetMessage or "Select a plant first.")
+            return
+        end
+
+        local mutationLevel = math.max(1, math.floor(tonumber(itemDetail.MutationLevel) or 1))
+        if mutationLevel <= 1 then
+            usePotionRE:FireClient(player, false, "This potion has no mutation.")
+            return
+        end
+
+        if tonumber(targetInfo.CurrentMutation) == mutationLevel then
+            usePotionRE:FireClient(player, false, "This plant already has this mutation.")
+            return
+        end
+
+        if not PlayerDataManager.ConsumeItem(player, itemId, 1) then
+            usePotionRE:FireClient(player, false, "You do not have this potion.")
+            return
+        end
+
+        potionUseLocks[player] = true
+        local willMutate = math.random() < POTION_MUTATION_CHANCE
+        usePotionRE:FireClient(player, "AnimatePotionMutation", {
+            Target = targetInfo.Target,
+            SeedId = targetInfo.SeedId,
+            PlantId = targetInfo.PlantId,
+            DurationSeconds = POTION_MUTATION_ANIMATION_SECONDS,
+        })
+        usePotionRE:FireClient(player, false, "Potion used.")
+
+        task.delay(POTION_MUTATION_ANIMATION_SECONDS, function()
+            potionUseLocks[player] = nil
+            if not player or not player.Parent then
+                return
+            end
+
+            if not willMutate then
+                usePotionRE:FireClient(player, false, "Mutation failed.")
+                return
+            end
+
+            local success, message = applyPotionMutation(player, targetInfo, mutationLevel)
+            if success then
+                usePotionRE:FireClient(player, true, "Mutation succeeded!")
+            else
+                usePotionRE:FireClient(player, false, message or "Mutation failed.")
+            end
+        end)
     end)
 
     giftItemRE.OnServerEvent:Connect(function(player, action, arg1, arg2)
@@ -728,6 +996,15 @@ function InventoryService.Init()
             if data.Inventory.Chests then
                 for _, chestData in ipairs(data.Inventory.Chests) do
                     if chestData.ID == realId and chestData.Quantity > 0 then
+                        hasItem = true
+                        break
+                    end
+                end
+            end
+        elseif itemType == "Item" then
+            if data.Inventory.Items then
+                for _, itemData in ipairs(data.Inventory.Items) do
+                    if itemData.ID == realId and itemData.Quantity > 0 and ItemConfig.Items and ItemConfig.Items[realId] then
                         hasItem = true
                         break
                     end

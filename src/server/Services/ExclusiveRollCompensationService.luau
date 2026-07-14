@@ -96,9 +96,9 @@ local function markChecked(player, data)
     end
 
     data[CHECK_FLAG] = true
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if not saved and saveErr ~= "stale_session" then
-        warn("[ExclusiveRollCompensation] Failed to save checked flag for " .. player.Name .. ": " .. tostring(saveErr))
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "exclusive roll compensation check")
+    if not saveQueued and saveErr ~= "stale_session" then
+        warn("[ExclusiveRollCompensation] Failed to queue checked flag save for " .. player.Name .. ": " .. tostring(saveErr))
     end
 end
 

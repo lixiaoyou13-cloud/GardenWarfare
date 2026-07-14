@@ -335,9 +335,21 @@ function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, new
                     local data = PlayerDataManager.GetPlayerData(player)
                     local maxLevel = data and data.UnlockedLevel or 1
                     local maxPossibleId = math.clamp(maxLevel + 1, 1, #ItemConfig.IdToSeedKey)
+                    local randomSeedCandidates = {}
 
-                    local randomNum = math.random(1, maxPossibleId)
-                    finalPlantId = ItemConfig.IdToSeedKey[randomNum]
+                    for index = 1, maxPossibleId do
+                        local candidateSeedId = ItemConfig.IdToSeedKey[index]
+                        local candidateDetail = candidateSeedId and ItemConfig.Seeds[candidateSeedId]
+                        if candidateDetail and not candidateDetail.ExcludeFromRandomSeedRewards then
+                            table.insert(randomSeedCandidates, candidateSeedId)
+                        end
+                    end
+
+                    if #randomSeedCandidates > 0 then
+                        finalPlantId = randomSeedCandidates[math.random(1, #randomSeedCandidates)]
+                    else
+                        finalPlantId = "Peashooter"
+                    end
                     finalItemDetail = ItemConfig.Seeds[finalPlantId]
 
                     if data and not data.UnlockedSeeds[finalPlantId] then

@@ -166,19 +166,19 @@ function FreeRewardService.Init()
         data[CLAIM_DATA_KEY] = true
         player:SetAttribute(CLAIM_ATTRIBUTE, true)
 
-        local saved, saveErr = PDManager.ForceSave(player)
-        if not saved then
-            warn("[FreeRewardService] Save failed after free reward claim for " .. player.Name .. ": " .. tostring(saveErr))
+        local saveQueued, saveErr = PDManager.RequestSave(player, "free reward claim")
+        if not saveQueued then
+            warn("[FreeRewardService] Save queue failed after free reward claim for " .. player.Name .. ": " .. tostring(saveErr))
             restoreFreeRewardState(data, snapshot)
             player:SetAttribute(CLAIM_ATTRIBUTE, data[CLAIM_DATA_KEY] == true)
             fireInventoryUpdate(player, data)
 
-            local rollbackSaved, rollbackErr = PDManager.ForceSave(player)
+            local rollbackSaved, rollbackErr = PDManager.RequestSave(player, "free reward rollback")
             if not rollbackSaved and rollbackErr ~= "stale_session" then
-                warn("[FreeRewardService] Rollback save failed for " .. player.Name .. ": " .. tostring(rollbackErr))
+                warn("[FreeRewardService] Rollback save queue failed for " .. player.Name .. ": " .. tostring(rollbackErr))
             end
 
-            claimRE:FireClient(player, false, "Claim failed to save. Please try again.", "SaveFailed")
+            claimRE:FireClient(player, false, "Claim failed. Please try again.", "SaveFailed")
             return
         end
 

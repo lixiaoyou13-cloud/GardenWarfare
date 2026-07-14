@@ -8,20 +8,36 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 
 -- 专门用来追踪所有玩家的基地向日葵，方便实时更新
 local activeSunflowers = {}
+local BASE_SUNFLOWER_MIN_SCALE = 1
+local BASE_SUNFLOWER_MAX_SCALE = 50
+local BASE_SUNFLOWER_SCALE_THRESHOLD = 1000000
+local BASE_SUNFLOWER_SCALE_EPSILON = 0.01
+
+local function sanitizeSunAmount(value)
+    local amount = tonumber(value)
+    if not amount or amount ~= amount or amount == math.huge or amount == -math.huge then
+        return 0
+    end
+
+    return math.max(0, math.floor(amount))
+end
+
+local function getBaseSunflowerScale(totalSun)
+    local safeTotalSun = math.clamp(sanitizeSunAmount(totalSun), 0, BASE_SUNFLOWER_SCALE_THRESHOLD)
+    return (BASE_SUNFLOWER_MIN_SCALE
+        + (safeTotalSun / BASE_SUNFLOWER_SCALE_THRESHOLD)
+        * (BASE_SUNFLOWER_MAX_SCALE - BASE_SUNFLOWER_MIN_SCALE))
+end
 
 -- 算法 计算缩放并更新悬浮 UI
 local function UpdateSunflowerScale(sunflower, totalSun)
     if not sunflower or not sunflower:IsA("Model") then return end
-    local minScale = 1
-    local maxScale = 50
-    local threshold = 1000000
+    local safeTotalSun = sanitizeSunAmount(totalSun)
+    local scale = getBaseSunflowerScale(safeTotalSun)
 
     -- 太阳数量为0时间，自转动缩回1倍
-    local scale = minScale + (math.min(totalSun, threshold) / threshold) * (maxScale - minScale)
-
     local lastScale = sunflower:GetAttribute("LastSunflowerScale")
-    if sunflower.PrimaryPart and (typeof(lastScale) ~= "number" or math.abs(lastScale - scale) > 0.01) then
-        sunflower:ScaleTo(scale)
+    if typeof(lastScale) ~= "number" or math.abs(lastScale - scale) > BASE_SUNFLOWER_SCALE_EPSILON then
         sunflower:SetAttribute("LastSunflowerScale", scale)
     end
 
@@ -46,12 +62,12 @@ local function UpdateSunflowerScale(sunflower, totalSun)
                     local container = gui:FindFirstChild("Container")
                     local textLabel = container and container:FindFirstChild("SunText")
                     if textLabel then
-                        local displaySun = totalSun
+                        local displaySun = safeTotalSun
                         -- 大数值转换 (K, M)
-                        if totalSun >= 1000000 then
-                            displaySun = string.format("%.1fM", totalSun / 1000000)
-                        elseif totalSun >= 1000 then
-                            displaySun = string.format("%.1fK", totalSun / 1000)
+                        if safeTotalSun >= 1000000 then
+                            displaySun = string.format("%.1fM", safeTotalSun / 1000000)
+                        elseif safeTotalSun >= 1000 then
+                            displaySun = string.format("%.1fK", safeTotalSun / 1000)
                         end
                         local displayText = tostring(displaySun)
                         if textLabel.Text ~= displayText then
@@ -221,27 +237,19 @@ function BaseSunflowerService.SpawnSunflower(player, plot)
                             isHarvesting = true
                             local amount = pData.TotalSun
                             pData.TotalSun = 0
+                            UpdateSunflowerScale(sunflower, 0)
                             local boostedAmount = PlayerDataManager.ApplyFriendSunBoost(player, amount)
 
                             local finalReward = PlayerDataManager.GiveCoins(player, boostedAmount) or boostedAmount
+                            PlayerDataManager.FireDataPatch(player, {
+                                Coins = pData.Coins,
+                                TotalSun = pData.TotalSun,
+                            })
                             local isX2Sun = finalReward == boostedAmount * 2
 
                             if harvestRE then
                                 harvestRE:FireClient(player, boostedAmount, collectSunPart.Position, isX2Sun)
                             end
-
-                            local AnalyticsService = game:GetService("AnalyticsService")
-                            pcall(function()
-                                AnalyticsService:LogEconomyEvent(
-                                    player,
-                                    Enum.AnalyticsEconomyFlowType.Source,
-                                    "Coins",
-                                    finalReward,
-                                    pData.Coins,
-                                    Enum.AnalyticsEconomyTransactionType.Gameplay.Name,
-                                    "Sunflower_Collect"
-                                )
-                            end)
 
                             task.wait(0.75)
                             isHarvesting = false

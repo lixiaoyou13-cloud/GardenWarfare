@@ -184,7 +184,6 @@ local function runSettlement()
     end
 
     if RunService:IsStudio() and RankingSeasonConfig.RunSettlementInStudio ~= true then
-        warn("[LeaderboardSettlement] Skipped in Studio. Set RunSettlementInStudio=true only for isolated test stores.")
         return
     end
 

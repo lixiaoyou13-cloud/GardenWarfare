@@ -11,6 +11,7 @@ local GENERATED_ATTRIBUTE = "NoticeGenerated"
 local BLUR_OVERLAY_NAME = "NoticeBlurOverlay"
 local BLUR_OVERLAY_Z_INDEX = 1
 local NOTICE_PANEL_MIN_Z_INDEX = 2
+local forceCloseForBossImpl = nil
 
 local function warnMissing(path)
     warn("[NoticeController] Missing UI object: " .. tostring(path))
@@ -30,6 +31,32 @@ local function setGuiOpen(gui, isOpen)
             gui.Enabled = isOpen
         end)
     end
+end
+
+local function hideOverlayInstant(overlay)
+    if overlay and overlay:IsA("GuiObject") then
+        overlay.BackgroundTransparency = 1
+        overlay.Visible = false
+        overlay.Active = false
+    end
+end
+
+function NoticeController.ForceCloseForBoss()
+    if forceCloseForBossImpl then
+        forceCloseForBossImpl()
+        return
+    end
+
+    local player = Players.LocalPlayer
+    local playerGui = player and player:FindFirstChild("PlayerGui")
+    local basicGui = playerGui and playerGui:FindFirstChild("BasicGui")
+    local noticeGui = basicGui and basicGui:FindFirstChild("NoticeGui")
+    if not noticeGui then
+        return
+    end
+
+    hideOverlayInstant(noticeGui:FindFirstChild(BLUR_OVERLAY_NAME, true))
+    setGuiOpen(noticeGui, false)
 end
 
 local function findButton(root)
@@ -759,6 +786,13 @@ function NoticeController.Init()
         UIEffectUtil.SetScreenBlur(false, blurOverlay)
         setGuiOpen(noticeGui, false)
     end
+
+    local function forceCloseForBoss()
+        closeNotice()
+        hideOverlayInstant(blurOverlay)
+    end
+
+    forceCloseForBossImpl = forceCloseForBoss
 
     if not openButton:GetAttribute("NoticeOpenBound") then
         openButton:SetAttribute("NoticeOpenBound", true)

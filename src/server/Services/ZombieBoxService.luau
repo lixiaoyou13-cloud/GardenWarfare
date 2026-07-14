@@ -4,6 +4,7 @@ local ZombieBoxService = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local PhysicsService = game:GetService("PhysicsService")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local itemModels = ReplicatedStorage:WaitForChild("ItemModels")
@@ -16,10 +17,20 @@ if not zombieBoxRE then
     zombieBoxRE.Parent = ReplicatedStorage
 end
 
+local directBoxRewardRE = ReplicatedStorage:FindFirstChild("SetZombieBoxDirectRewardRE")
+if not directBoxRewardRE then
+    directBoxRewardRE = Instance.new("RemoteEvent")
+    directBoxRewardRE.Name = "SetZombieBoxDirectRewardRE"
+    directBoxRewardRE.Parent = ReplicatedStorage
+end
+
 local pendingBoxRewards = {}
 local AUTO_OPEN_DISTANCE = 8
 local PICKUP_ENABLE_DELAY = 0.9
 local LEVEL_CHEST_REWARD_CHANCE = 1
+local DIRECT_BOX_REWARD_ATTRIBUTE = "DirectZombieBoxRewardEnabled"
+local ZOMBIE_BOX_COLLISION_GROUP = "ZombieRewardBoxes"
+local PLAYER_COLLISION_GROUP = "Players"
 
 local REWARD_SAVE_FIELDS = {
     "Coins",
@@ -27,6 +38,20 @@ local REWARD_SAVE_FIELDS = {
     "Hotbar",
     "UnlockedMutations",
 }
+
+local function setupZombieBoxCollisionGroup()
+    pcall(function()
+        PhysicsService:RegisterCollisionGroup(ZOMBIE_BOX_COLLISION_GROUP)
+    end)
+    pcall(function()
+        PhysicsService:RegisterCollisionGroup(PLAYER_COLLISION_GROUP)
+    end)
+    pcall(function()
+        PhysicsService:CollisionGroupSetCollidable(ZOMBIE_BOX_COLLISION_GROUP, PLAYER_COLLISION_GROUP, false)
+    end)
+end
+
+setupZombieBoxCollisionGroup()
 
 local function cloneValue(value)
     if type(value) ~= "table" then
@@ -76,9 +101,9 @@ local function rollbackRewardGrant(player, data, snapshot, context)
     restoreRewardState(data, snapshot)
     fireInventoryUpdate(player, data)
 
-    local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "reward rollback " .. tostring(context))
     if not rollbackSaved and rollbackErr ~= "stale_session" then
-        warn("[ZombieBoxService] Failed to save rollback after " .. tostring(context)
+        warn("[ZombieBoxService] Failed to queue rollback save after " .. tostring(context)
             .. " for " .. tostring(player and player.Name or "unknown") .. ": " .. tostring(rollbackErr))
     end
 end
@@ -128,6 +153,11 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
     pendingBoxRewards[player.UserId] = nil
+    player:SetAttribute(DIRECT_BOX_REWARD_ATTRIBUTE, nil)
+end)
+
+directBoxRewardRE.OnServerEvent:Connect(function(player, enabled)
+    player:SetAttribute(DIRECT_BOX_REWARD_ATTRIBUTE, enabled == true)
 end)
 
 local function getLevelChestId(levelId)
@@ -163,11 +193,14 @@ local function buildRewardPool()
         if not configDict then return end
         categorizedPool[typeName] = {}
         for id, data in pairs(configDict) do
-            if typeName == "Plant" and data.ExcludeFromRandomPlantRewards then
-                continue
-            end
+			if typeName == "Plant" and data.ExcludeFromRandomPlantRewards then
+				continue
+			end
+			if typeName == "Seed" and data.ExcludeFromRandomSeedRewards then
+				continue
+			end
 
-            local quality = data.Quality or 1
+			local quality = data.Quality or 1
             if not categorizedPool[typeName][quality] then
                 categorizedPool[typeName][quality] = {}
             end
@@ -342,6 +375,14 @@ function ZombieBoxService.SpawnBox(player, dropPos)
         -- 极致兜底
     local finalItem = ZombieBoxService.RollRewardItem()
 
+    if player and player:GetAttribute(DIRECT_BOX_REWARD_ATTRIBUTE) == true then
+        local granted, message = grantRewardItem(player, finalItem, "direct zombie box reward")
+        if not granted then
+            sendTip(player, message or "Reward failed. Please try again.")
+        end
+        return granted
+    end
+
     local boxTemplate = itemModels:FindFirstChild("Box")
     if not boxTemplate then
         warn("[ZombieBoxService] ReplicatedStorage.ItemModels.Box is missing; cannot spawn scene box")
@@ -386,8 +427,17 @@ function ZombieBoxService.SpawnBox(player, dropPos)
             descendant.CanCollide = true
             descendant.CanTouch = true
             descendant.CanQuery = true
+            descendant.CollisionGroup = ZOMBIE_BOX_COLLISION_GROUP
             weldToPromptPart(descendant)
         end
+    end
+
+    if promptPart:IsA("BasePart") then
+        promptPart.Anchored = false
+        promptPart.CanCollide = true
+        promptPart.CanTouch = true
+        promptPart.CanQuery = true
+        promptPart.CollisionGroup = ZOMBIE_BOX_COLLISION_GROUP
     end
 
     promptPart.Anchored = false

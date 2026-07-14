@@ -69,9 +69,9 @@ local function rollbackMerchantPurchase(player, data, snapshot)
     restoreMerchantState(data, snapshot)
     fireInventoryUpdate(player, data)
 
-    local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "merchant purchase rollback")
     if not rollbackSaved and rollbackErr ~= "stale_session" then
-        warn("[BaseMerchantService] Failed to save rollback after merchant purchase for "
+        warn("[BaseMerchantService] Failed to queue rollback save after merchant purchase for "
             .. tostring(player and player.Name or "unknown") .. ": " .. tostring(rollbackErr))
     end
 end
@@ -331,12 +331,12 @@ local function SpawnMerchant(player, plot)
             -- 扣费成功，给种子
             PlayerDataManager.GiveSeed(player, currentShop.SeedId, 1)
 
-            local saved, saveErr = PlayerDataManager.ForceSave(player)
-            if not saved then
-                warn("[BaseMerchantService] Failed to save merchant purchase for "
+            local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "merchant purchase")
+            if not saveQueued then
+                warn("[BaseMerchantService] Failed to queue save after merchant purchase for "
                     .. player.Name .. ": " .. tostring(saveErr))
                 rollbackMerchantPurchase(player, data, snapshot)
-                notifyPlayer(player, "Purchase failed: save failed. Please try again.")
+                notifyPlayer(player, "Purchase failed: save unavailable. Please try again.")
                 return
             end
 

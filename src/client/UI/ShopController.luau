@@ -11,6 +11,7 @@ local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
 
 local SHOP_TIMER_UPDATE_INTERVAL = 1
 local DISTANCE_CHECK_INTERVAL = 0.2
+local GENERATED_SHOP_SLOT_ATTRIBUTE = "ShopGeneratedSlot"
 
 local function GetConfiguredProductId(itemDetail)
     if type(itemDetail.ProductId) == "number" and itemDetail.ProductId > 0 then
@@ -70,8 +71,8 @@ function ShopController.Init()
     local currentInteractingDave = nil
     local MAX_DISTANCE = 15
 
-    local shopSlotTemplate = itemList:WaitForChild("ShopSlot")
-    shopSlotTemplate.Visible = false
+    local uiTemplates = ReplicatedStorage:WaitForChild("UITemplates")
+    local shopSlotTemplate = uiTemplates:WaitForChild("ShopSlot")
 
     local currentStockData = {}
     local targetRefreshTime = 0
@@ -81,7 +82,11 @@ function ShopController.Init()
     local function RenderShop()
         if not localPlayerData or not currentStockData then return end
         for _, child in pairs(itemList:GetChildren()) do
-            if child:IsA("Frame") and child ~= shopSlotTemplate then child:Destroy() end
+            if child:GetAttribute(GENERATED_SHOP_SLOT_ATTRIBUTE) == true then
+                child:Destroy()
+            elseif child:IsA("GuiObject") and child.Name == "ShopSlot" then
+                child.Visible = false
+            end
         end
 
         for i = 1, #currentStockData do
@@ -89,6 +94,7 @@ function ShopController.Init()
             local slot = shopSlotTemplate:Clone()
             slot.Name = string.format("%02d_Slot", i)
             slot.LayoutOrder = i
+            slot:SetAttribute(GENERATED_SHOP_SLOT_ATTRIBUTE, true)
 
             if not slotData or not slotData.SeedId then
                 slot.Visible = true
@@ -222,6 +228,23 @@ function ShopController.Init()
     end)
 
     -- 主动关闭页面时间，重置 currentInteractingDave
+    local playerDataPatchRE = ReplicatedStorage:WaitForChild("PlayerDataPatchRE", 10)
+    if playerDataPatchRE then
+        playerDataPatchRE.OnClientEvent:Connect(function(patch)
+            if type(patch) ~= "table" then
+                return
+            end
+
+            localPlayerData = localPlayerData or {}
+            for key, value in pairs(patch) do
+                localPlayerData[key] = value
+            end
+            if shopGui.Enabled or shopDialog.Visible then
+                RenderShop()
+            end
+        end)
+    end
+
     closeBtn.Activated:Connect(function()
         shopGui.Enabled = false
         currentInteractingDave = nil

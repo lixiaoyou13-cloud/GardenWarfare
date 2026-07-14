@@ -66,6 +66,179 @@ local function getCombatEditCost(player, fallbackPlot)
     return 100 + (currentLevel - 1) * 100
 end
 
+local function getPotionItemId(equippedItem)
+    if type(equippedItem) ~= "string" or string.sub(equippedItem, 1, 5) ~= "Item_" then
+        return nil
+    end
+
+    local itemId = string.sub(equippedItem, 6)
+    local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+    if itemDetail and itemDetail.ItemType == "MutationPotion" then
+        return itemId, itemDetail
+    end
+
+    return nil
+end
+
+local function isPotionEquipped(equippedItem)
+    return getPotionItemId(equippedItem) ~= nil
+end
+
+local function setModelLocalHidden(model, hidden)
+    local changedParts = {}
+
+    local function applyToPart(part)
+        table.insert(changedParts, {
+            Part = part,
+            LocalTransparencyModifier = part.LocalTransparencyModifier,
+        })
+        part.LocalTransparencyModifier = hidden and 1 or 0
+    end
+
+    if model:IsA("BasePart") then
+        applyToPart(model)
+    end
+
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            applyToPart(descendant)
+        end
+    end
+
+    return function()
+        for _, record in ipairs(changedParts) do
+            if record.Part and record.Part.Parent then
+                record.Part.LocalTransparencyModifier = record.LocalTransparencyModifier or 0
+            end
+        end
+    end
+end
+
+local function paintBlackMutationClone(clone)
+    local nodes = {}
+    table.insert(nodes, clone)
+    for _, descendant in ipairs(clone:GetDescendants()) do
+        table.insert(nodes, descendant)
+    end
+
+    for _, node in ipairs(nodes) do
+        if node:IsA("BasePart") then
+            node.Anchored = true
+            node.CanCollide = false
+            node.CanTouch = false
+            node.CanQuery = false
+            node.Material = Enum.Material.SmoothPlastic
+            node.Color = Color3.fromRGB(0, 0, 0)
+            if node.Transparency < 0.95 then
+                node.Transparency = 0
+            end
+        elseif node:IsA("ParticleEmitter") or node:IsA("Beam") or node:IsA("Trail") or node:IsA("Light") or node:IsA("Highlight") then
+            node.Enabled = false
+        elseif node:IsA("Decal") or node:IsA("Texture") then
+            node.Transparency = 1
+        elseif node:IsA("BillboardGui") or node:IsA("SurfaceGui") then
+            node.Enabled = false
+        elseif node:IsA("BaseScript") then
+            node.Disabled = true
+        end
+    end
+end
+
+local function findPotionVisualTemplate(seedId, plantId, useSeed)
+    local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
+    if not itemModelsFolder then
+        return nil
+    end
+
+    if useSeed then
+        local seedConfig = seedId and ItemConfig.Seeds and ItemConfig.Seeds[seedId]
+        local seedModelName = seedConfig and seedConfig.SeedId
+        return (seedModelName and itemModelsFolder:FindFirstChild(seedModelName))
+            or (seedId and itemModelsFolder:FindFirstChild(seedId .. "_Seed"))
+            or (seedId and itemModelsFolder:FindFirstChild(seedId))
+            or itemModelsFolder:FindFirstChild("PlantSeed")
+    end
+
+    return (plantId and itemModelsFolder:FindFirstChild(plantId .. "_Plant"))
+        or (plantId and itemModelsFolder:FindFirstChild(plantId))
+end
+
+local function pivotCloneToTarget(clone, target)
+    local pivotCFrame = nil
+    if target and target.Parent then
+        if target:IsA("Model") then
+            local ok, pivot = pcall(function()
+                return target:GetPivot()
+            end)
+            if ok then
+                pivotCFrame = pivot
+            end
+        elseif target:IsA("BasePart") then
+            pivotCFrame = target.CFrame
+        end
+    end
+
+    pivotCFrame = pivotCFrame or CFrame.new()
+
+    if clone:IsA("Model") then
+        clone:PivotTo(pivotCFrame)
+    elseif clone:IsA("BasePart") then
+        clone.CFrame = pivotCFrame
+    end
+end
+
+local function showPotionMutationAnimation(payload)
+    if type(payload) ~= "table" then
+        return
+    end
+
+    local target = payload.Target
+    if typeof(target) ~= "Instance" or not target.Parent then
+        return
+    end
+
+    local seedId = payload.SeedId
+    local plantId = payload.PlantId
+    local seedTemplate = findPotionVisualTemplate(seedId, plantId, true)
+    local plantTemplate = findPotionVisualTemplate(seedId, plantId, false)
+    if not seedTemplate and not plantTemplate then
+        return
+    end
+
+    task.spawn(function()
+        local restoreTarget = setModelLocalHidden(target, true)
+        local duration = math.max(0.6, tonumber(payload.DurationSeconds) or 2.1)
+        local stepCount = 8
+        local stepTime = duration / stepCount
+        local currentClone = nil
+
+        for index = 1, stepCount do
+            if currentClone then
+                currentClone:Destroy()
+                currentClone = nil
+            end
+
+            local useSeed = index % 2 == 1
+            local template = (useSeed and seedTemplate) or plantTemplate or seedTemplate or plantTemplate
+            if template then
+                currentClone = template:Clone()
+                currentClone.Name = "PotionMutationPreview"
+                paintBlackMutationClone(currentClone)
+                pivotCloneToTarget(currentClone, target)
+                currentClone.Parent = Workspace
+            end
+
+            task.wait(stepTime)
+        end
+
+        if currentClone then
+            currentClone:Destroy()
+        end
+
+        restoreTarget()
+    end)
+end
+
 function ToolController.Init()
     local player = Players.LocalPlayer
     local mouse = player:GetMouse()
@@ -79,6 +252,7 @@ function ToolController.Init()
 
     -- 樱桃炸弹：爆炸范围指示球设置
    local throwBombRE = ReplicatedStorage:WaitForChild("ThrowBombRE", 10)
+    local usePotionRE = ReplicatedStorage:WaitForChild("UsePotionRE", 10)
 
     if not weaponAttackRE then
         warn("[ToolController] WeaponAttackRE was not created by the server; weapon attacks are temporarily unavailable")
@@ -88,6 +262,24 @@ function ToolController.Init()
     end
     if not throwBombRE then
         warn("[ToolController] ThrowBombRE was not created by the server; Cherry Bomb is temporarily unavailable")
+    end
+    if not usePotionRE then
+        warn("[ToolController] UsePotionRE was not created by the server; potion use is temporarily unavailable")
+    else
+        usePotionRE.OnClientEvent:Connect(function(action, message)
+            if action == "AnimatePotionMutation" then
+                showPotionMutationAnimation(message)
+                return
+            end
+
+            if message == nil and type(action) == "string" then
+                message = action
+            end
+
+            if message and message ~= "" then
+                UIEffectUtil.ShowTip(tostring(message))
+            end
+        end)
     end
 
     -- 恢复为红点色的警示球，加深颜色
@@ -159,6 +351,8 @@ function ToolController.Init()
         local isMature = plant:GetAttribute("IsMature")
 
         local actionName = nil
+        local promptKeyCode = Enum.KeyCode.E
+        local potionItemId = nil
 
         -- 判定：手里拿的是铲子 还是 植物？
         if equippedItem == "Tool_Shovel" then
@@ -172,13 +366,19 @@ function ToolController.Init()
             if isCombat and not string.match(equippedItem, "Plant_CherryBomb") then
                 actionName = "Swap Plant"
             end
+        else
+            potionItemId = getPotionItemId(equippedItem)
+            if potionItemId and (isCombat or isFarm) then
+                actionName = "Use Potion"
+                promptKeyCode = Enum.KeyCode.F
+            end
         end
 
         if actionName then
             local prompt = Instance.new("ProximityPrompt")
             prompt.ActionText = actionName
             prompt.ObjectText = plant.Name or "Plant"
-            prompt.KeyboardKeyCode = Enum.KeyCode.E
+            prompt.KeyboardKeyCode = promptKeyCode
             prompt.HoldDuration = 0.2 -- 稍微加一点击长按时间，防止误触
             prompt.MaxActivationDistance = 12
             prompt.RequiresLineOfSight = false
@@ -189,6 +389,39 @@ function ToolController.Init()
                 activePrompts[plant] = prompt
 
                 prompt.Triggered:Connect(function()
+                    if actionName == "Use Potion" then
+                        if usePotionRE and potionItemId then
+                            usePotionRE:FireServer(potionItemId, plant)
+                        else
+                            UIEffectUtil.ShowTip("Potion service is not ready")
+                        end
+
+                        if activePrompts[plant] then
+                            local currentPrompt = activePrompts[plant]
+                            currentPrompt.Enabled = false
+                            activePrompts[plant] = nil
+
+                            task.delay(0.1, function()
+                                if currentPrompt and currentPrompt.Parent then
+                                    currentPrompt:Destroy()
+                                end
+                            end)
+                        end
+
+                        task.delay(2.6, function()
+                            if not plant or not plant.Parent or activePrompts[plant] then
+                                return
+                            end
+
+                            local char = player.Character
+                            local currentEquipped = char and char:GetAttribute("EquippedSeed")
+                            if isPotionEquipped(currentEquipped) then
+                                checkAndAddPrompt(plant, currentEquipped)
+                            end
+                        end)
+                        return
+                    end
+
                     if isCombat then
                         local lawnPart = plant.Parent
                         local plot = lawnPart and lawnPart.Parent and lawnPart.Parent.Parent
@@ -265,7 +498,7 @@ function ToolController.Init()
         clearAllPrompts()
 
         -- 如果拿起了铲子，或者举起了成熟的植物(Plant_开头)
-        if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) then
+        if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) or isPotionEquipped(equippedItem) then
             local plot = getLocalPlayerPlot(player)
             if not plot then return end
 
@@ -430,7 +663,7 @@ function ToolController.Init()
                 local char = player.Character
                 if char then
                     local equippedItem = char:GetAttribute("EquippedSeed")
-                    if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) then
+                    if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) or isPotionEquipped(equippedItem) then
                         local plot = getLocalPlayerPlot(player)
                         if plot and desc:IsDescendantOf(plot) and (desc:GetAttribute("IsCombatPlant") or desc:GetAttribute("PlantedOn")) then
                             checkAndAddPrompt(desc, equippedItem)
@@ -466,6 +699,15 @@ function ToolController.Init()
             if not char then return end
 
             local equippedItem = char:GetAttribute("EquippedSeed")
+
+            if type(equippedItem) == "string" and string.sub(equippedItem, 1, 5) == "Item_" then
+                local itemId = string.sub(equippedItem, 6)
+                local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+                if itemDetail and itemDetail.ItemType == "MutationPotion" then
+                    UIEffectUtil.ShowTip("Move near a plant and press F to use this potion.")
+                    return
+                end
+            end
 
             -- 行为 1：樱桃炸弹投掷动作 (支持连续投掷)
             if type(equippedItem) == "string" and string.match(equippedItem, "Plant_CherryBomb") then

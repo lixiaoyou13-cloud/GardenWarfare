@@ -2,10 +2,8 @@ local LuckyDropService = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
@@ -16,6 +14,14 @@ local EquipmentService = require(script.Parent.EquipmentService)
 
 local QUALITY_WEIGHTS = { [1] = 45, [2] = 30, [3] = 15, [4] = 8, [5] = 2 }
 local AIRDROP_DROP_DURATION = 20
+local nextDropId = 0
+
+local airdropVisualRE = ReplicatedStorage:FindFirstChild("AirdropVisualRE")
+if not airdropVisualRE then
+    airdropVisualRE = Instance.new("RemoteEvent")
+    airdropVisualRE.Name = "AirdropVisualRE"
+    airdropVisualRE.Parent = ReplicatedStorage
+end
 
 local AIRDROP_SAVE_FIELDS = {
     "Inventory",
@@ -72,9 +78,9 @@ local function rollbackAirdropReward(player, data, snapshot)
     restoreAirdropState(data, snapshot)
     fireInventoryUpdate(player, data)
 
-    local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "airdrop reward rollback")
     if not rollbackSaved and rollbackErr ~= "stale_session" then
-        warn("[LuckyDropService] Failed to save rollback after airdrop reward for "
+        warn("[LuckyDropService] Failed to queue rollback save after airdrop reward for "
             .. tostring(player and player.Name or "unknown") .. ": " .. tostring(rollbackErr))
     end
 end
@@ -247,12 +253,12 @@ function LuckyDropService.OnAirdropDelivered(player, dropPosition, luckyBox)
     PlayerDataManager.GivePlant(player, finalPlantId, 1, 1)
     PlayerDataManager.AddPassQuestProgress(player, PassQuestConfig.TaskIds.OpenAirdrop, 1)
 
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if not saved then
-        warn("[LuckyDropService] Failed to save airdrop reward for "
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "airdrop reward")
+    if not saveQueued then
+        warn("[LuckyDropService] Failed to queue save after airdrop reward for "
             .. player.Name .. ": " .. tostring(saveErr))
         rollbackAirdropReward(player, data, snapshot)
-        sendTip(player, "Airdrop reward failed: save failed. Please try again.")
+        sendTip(player, "Airdrop reward failed: save unavailable. Please try again.")
         return
     end
 
@@ -406,30 +412,32 @@ function LuckyDropService.SpawnDrop()
     for _, part in pairs(luckyBox:GetDescendants()) do
         if part:IsA("BasePart") then part.Anchored = true end
     end
-    luckyBox:PivotTo(startCFrame)
+    luckyBox:PivotTo(targetCFrame)
 
-    CollectionService:AddTag(luckyBox, "AirdropBox")
-    luckyBox.Parent = Workspace
+    nextDropId += 1
+    local dropId = tostring(os.clock()) .. "_" .. tostring(nextDropId)
+    airdropVisualRE:FireAllClients("Start", dropId, startCFrame, targetCFrame, AIRDROP_DROP_DURATION)
 
-    local tweenValue = Instance.new("NumberValue")
-    local dropTween = TweenService:Create(tweenValue, TweenInfo.new(AIRDROP_DROP_DURATION, Enum.EasingStyle.Linear), {Value = 1})
-
-    tweenValue:GetPropertyChangedSignal("Value"):Connect(function()
-        if luckyBox and luckyBox.Parent then luckyBox:PivotTo(startCFrame:Lerp(targetCFrame, tweenValue.Value)) end
-    end)
-
-    dropTween:Play()
-    dropTween.Completed:Connect(function()
+    task.delay(AIRDROP_DROP_DURATION, function()
         if luckyBox and luckyBox.Parent then
+            return
+        end
+
+        if luckyBox and luckyBox.PrimaryPart then
             local balloons = luckyBox:FindFirstChild("Balloons")
             if balloons then balloons:Destroy() end
 
             local head = luckyBox:FindFirstChild("Head")
             local smoke = head and head:FindFirstChild("Smoke")
             if smoke then smoke.Enabled = true end
+
+            luckyBox:PivotTo(targetCFrame)
+            CollectionService:AddTag(luckyBox, "AirdropBox")
+            luckyBox.Parent = Workspace
+            Debris:AddItem(luckyBox, 300)
         end
-        tweenValue:Destroy()
-        Debris:AddItem(luckyBox, 300)
+
+        airdropVisualRE:FireAllClients("Landed", dropId)
     end)
 end
 

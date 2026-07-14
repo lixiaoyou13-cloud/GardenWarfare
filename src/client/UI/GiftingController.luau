@@ -11,6 +11,7 @@ local BLUR_OVERLAY_NAME = "GiftingBlurOverlay"
 local BLUR_OVERLAY_Z_INDEX = 1
 local GIFTING_PANEL_MIN_Z_INDEX = 2
 local GIFT_CLONE_ATTRIBUTE = "GiftingRewardClone"
+local forceCloseForBossImpl = nil
 
 local function warnMissing(path)
     warn("[GiftingController] Missing UI object: " .. tostring(path))
@@ -181,6 +182,32 @@ local function setGuiOpen(giftingGui, isOpen)
     elseif target:IsA("GuiObject") then
         target.Visible = isOpen
     end
+end
+
+local function hideOverlayInstant(overlay)
+    if overlay and overlay:IsA("GuiObject") then
+        overlay.BackgroundTransparency = 1
+        overlay.Visible = false
+        overlay.Active = false
+    end
+end
+
+function GiftingController.ForceCloseForBoss()
+    if forceCloseForBossImpl then
+        forceCloseForBossImpl()
+        return
+    end
+
+    local player = Players.LocalPlayer
+    local playerGui = player and player:FindFirstChild("PlayerGui")
+    local basicGui = playerGui and playerGui:FindFirstChild("BasicGui")
+    local giftingGui = basicGui and basicGui:FindFirstChild("GiftingGui")
+    if not giftingGui then
+        return
+    end
+
+    hideOverlayInstant(giftingGui:FindFirstChild(BLUR_OVERLAY_NAME, true))
+    setGuiOpen(giftingGui, false)
 end
 
 local function raiseGuiTree(root, minZIndex)
@@ -430,6 +457,13 @@ function GiftingController.Init()
         UIEffectUtil.SetScreenBlur(false, blurOverlay)
         setGuiOpen(giftingGui, false)
     end
+
+    local function forceCloseForBoss()
+        closeGifting()
+        hideOverlayInstant(blurOverlay)
+    end
+
+    forceCloseForBossImpl = forceCloseForBoss
 
     setGuiOpen(giftingGui, false)
     hideGiftTemplates(mainFrame)

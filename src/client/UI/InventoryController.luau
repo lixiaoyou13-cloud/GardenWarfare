@@ -12,6 +12,7 @@ local PAGE_BY_TAB = {
     SeedTabBtn = "SeedPage",
     PlantTabBtn = "PlantPage",
     ChestTabBtn = "ChestPage",
+    ItemTabBtn = "ItemPage",
     titleTabBtn = "TitlePage",
 }
 
@@ -19,6 +20,7 @@ local TAB_BY_PAGE = {
     SeedPage = "SeedTabBtn",
     PlantPage = "PlantTabBtn",
     ChestPage = "ChestTabBtn",
+    ItemPage = "ItemTabBtn",
     TitlePage = "titleTabBtn",
 }
 
@@ -68,6 +70,10 @@ local function connectPress(guiObject, callback)
     end
 end
 
+local function isTextObject(instance)
+    return instance and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+end
+
 local function findTextObject(root, names)
     if not root then
         return nil
@@ -75,7 +81,7 @@ local function findTextObject(root, names)
 
     for _, name in ipairs(names) do
         local direct = root:FindFirstChild(name, true)
-        if direct and (direct:IsA("TextLabel") or direct:IsA("TextButton") or direct:IsA("TextBox")) then
+        if isTextObject(direct) then
             return direct
         end
     end
@@ -109,11 +115,44 @@ local function findTitleText(slot)
     return findTextObject(slot, { "Title", "ItemName", "Name" })
 end
 
+local function findQuantityDisplay(slot)
+    if not slot then
+        return nil, nil
+    end
+
+    local numberRoot = slot:FindFirstChild("Number", true)
+    if numberRoot then
+        if isTextObject(numberRoot) then
+            return numberRoot, numberRoot
+        end
+
+        if numberRoot:IsA("GuiObject") then
+            local numberText = findTextObject(numberRoot, { "Text", "Label", "Value", "Number", "Quantity", "Amount", "Count" })
+            if not numberText then
+                for _, desc in ipairs(numberRoot:GetDescendants()) do
+                    if isTextObject(desc) then
+                        numberText = desc
+                        break
+                    end
+                end
+            end
+
+            return numberRoot, numberText
+        end
+    end
+
+    local legacyText = findTextObject(slot, { "Quantity", "Amount", "Count" })
+    return legacyText, legacyText
+end
+
 local function setSlotTitleAndQuantity(slot, displayName, quantity)
     local title = findTitleText(slot)
-    local quantityText = findTextObject(slot, { "Quantity", "Amount", "Count" })
+    local quantityRoot, quantityText = findQuantityDisplay(slot)
 
     if quantity == nil then
+        if quantityRoot and quantityRoot:IsA("GuiObject") then
+            quantityRoot.Visible = false
+        end
         if quantityText then
             quantityText.Visible = false
         end
@@ -125,6 +164,9 @@ local function setSlotTitleAndQuantity(slot, displayName, quantity)
         if quantityText then
             quantityText.Text = amountText
             quantityText.Visible = true
+        end
+        if quantityRoot and quantityRoot:IsA("GuiObject") then
+            quantityRoot.Visible = true
         end
 
         if title then
@@ -148,9 +190,45 @@ local function setSlotIcon(slot, itemId, itemType, iconId, mutationLevel)
         return
     end
 
-    if icon:IsA("ViewportFrame") then
+    local itemImage = slot:FindFirstChild("ItemIconImage", true)
+    if itemType == "Item" and iconId and iconId ~= "" then
+        if icon:IsA("ViewportFrame") then
+            icon.Visible = false
+            if not itemImage or not itemImage:IsA("ImageLabel") then
+                itemImage = Instance.new("ImageLabel")
+                itemImage.Name = "ItemIconImage"
+                itemImage.BackgroundTransparency = 1
+                itemImage.ScaleType = Enum.ScaleType.Fit
+                itemImage.Active = false
+                itemImage.Parent = icon.Parent or slot
+            end
+
+            itemImage.Size = icon.Size
+            itemImage.Position = icon.Position
+            itemImage.AnchorPoint = icon.AnchorPoint
+            itemImage.ZIndex = icon.ZIndex
+            itemImage.Image = iconId
+            itemImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
+            itemImage.Visible = true
+        else
+            icon.Image = iconId
+            icon.ImageColor3 = Color3.fromRGB(255, 255, 255)
+            icon.Visible = true
+            if itemImage and itemImage:IsA("GuiObject") then
+                itemImage.Visible = false
+            end
+        end
+    elseif icon:IsA("ViewportFrame") then
+        if itemImage and itemImage:IsA("GuiObject") then
+            itemImage.Visible = false
+        end
+        icon.Visible = true
         UIEffectUtil.RenderToViewport(icon, itemId, itemType, mutationLevel)
     else
+        if itemImage and itemImage:IsA("GuiObject") then
+            itemImage.Visible = false
+        end
+        icon.Visible = true
         icon.Image = iconId or ""
         icon.ImageColor3 = Color3.fromRGB(255, 255, 255)
     end
@@ -439,7 +517,11 @@ function InventoryController.Init()
     local seedPage = waitChild(pages, "SeedPage", "BasicGui.InventoryGui.MainFrame.MainFrame.SeedPage")
     local plantPage = waitChild(pages, "PlantPage", "BasicGui.InventoryGui.MainFrame.MainFrame.PlantPage")
     local chestPage = pages:FindFirstChild("ChestPage")
+    local itemPage = pages:FindFirstChild("ItemPage")
     local titlePage = pages:FindFirstChild("TitlePage")
+    if not itemPage then
+        warnMissing("BasicGui.InventoryGui.MainFrame.MainFrame.ItemPage")
+    end
     if not titlePage then
         warnMissing("BasicGui.InventoryGui.MainFrame.MainFrame.TitlePage")
     end
@@ -670,7 +752,7 @@ function InventoryController.Init()
             UIEffectUtil.RollNumber(coinLabel, newData.Coins, "")
         end
 
-        local currentSeedItems, currentPlantItems, currentChestItems, currentTitleItems = {}, {}, {}, {}
+        local currentSeedItems, currentPlantItems, currentChestItems, currentItemItems, currentTitleItems = {}, {}, {}, {}, {}
 
         if newData.Inventory.Seeds then
             local seedEntries = {}
@@ -812,6 +894,54 @@ function InventoryController.Init()
             end
         end
 
+        if itemPage and newData.Inventory.Items then
+            local itemEntries = {}
+            for _, itemData in ipairs(newData.Inventory.Items) do
+                local itemId = itemData.ID
+                local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+                if itemDetail then
+                    currentItemItems[itemId] = true
+                    local quality = getInventoryQuality(ItemConfig, itemId, "Item", itemDetail)
+                    table.insert(itemEntries, {
+                        data = itemData,
+                        detail = itemDetail,
+                        displayName = itemDetail.Name or itemId,
+                        iconId = itemDetail.IconId,
+                        id = itemId,
+                        order = getInventoryOrder(ItemConfig, itemId, "Item", itemDetail),
+                        quality = quality,
+                        searchText = buildSearchText({
+                            itemDetail.Name,
+                            itemId,
+                            itemDetail.ItemType,
+                        }),
+                    })
+                end
+            end
+
+            table.sort(itemEntries, sortInventoryEntries)
+            for layoutOrder, entry in ipairs(itemEntries) do
+                refreshOrCreateSlot(itemPage, entry.id, function(slot)
+                    configureSlot(
+                        slot,
+                        entry.id,
+                        entry.displayName,
+                        entry.data.Quantity,
+                        entry.id,
+                        "Item",
+                        entry.iconId,
+                        entry.quality,
+                        "Item_" .. entry.id,
+                        1,
+                        entry.detail,
+                        FILTER_SPECIAL,
+                        layoutOrder,
+                        entry.searchText
+                    )
+                end)
+            end
+        end
+
         if titlePage and newData.Inventory.Titles then
             local ownedTitleMap = {}
             for _, titleData in ipairs(newData.Inventory.Titles) do
@@ -867,11 +997,17 @@ function InventoryController.Init()
         removeMissingSlots(seedPage, currentSeedItems)
         removeMissingSlots(plantPage, currentPlantItems)
         removeMissingSlots(chestPage, currentChestItems)
+        removeMissingSlots(itemPage, currentItemItems)
         removeMissingSlots(titlePage, currentTitleItems)
         applyCurrentFilter()
     end
 
     local function switchTab(targetPageName)
+        if not TAB_BY_PAGE[targetPageName] or not pages:FindFirstChild(targetPageName) then
+            warnMissing("BasicGui.InventoryGui.MainFrame.MainFrame." .. tostring(targetPageName))
+            targetPageName = currentPageName
+        end
+
         currentPageName = targetPageName
         currentFilter = FILTER_ALL
         for _, page in ipairs(pages:GetChildren()) do
@@ -904,6 +1040,18 @@ function InventoryController.Init()
     local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF")
     RefreshInventory(getPlayerDataRF:InvokeServer())
     ReplicatedStorage:WaitForChild("UpdateInventoryRE").OnClientEvent:Connect(RefreshInventory)
+    local playerDataPatchRE = ReplicatedStorage:WaitForChild("PlayerDataPatchRE", 10)
+    if playerDataPatchRE then
+        playerDataPatchRE.OnClientEvent:Connect(function(patch)
+            if type(patch) ~= "table" then
+                return
+            end
+
+            if patch.Coins ~= nil and coinLabel and (coinLabel:IsA("TextLabel") or coinLabel:IsA("TextButton")) then
+                UIEffectUtil.RollNumber(coinLabel, patch.Coins, "")
+            end
+        end)
+    end
 
     if sortList then
         for index = FILTER_ALL, FILTER_SPECIAL do
@@ -955,17 +1103,19 @@ function InventoryController.Init()
             local pageToOpen = targetPageName or "SeedPage"
             switchTab(pageToOpen)
 
-            local titleStr = (pageToOpen == "PlantPage") and "Deploy Notice" or "Plant Notice"
-            local textStr = (pageToOpen == "PlantPage")
-                and "Please select a combat plant from your inventory to deploy!"
-                or "Please select a seed from your inventory to plant!"
-            pcall(function()
-                game:GetService("StarterGui"):SetCore("SendNotification", {
-                    Title = titleStr,
-                    Text = textStr,
-                    Duration = 4,
-                })
-            end)
+            if pageToOpen == "SeedPage" or pageToOpen == "PlantPage" then
+                local titleStr = (pageToOpen == "PlantPage") and "Deploy Notice" or "Plant Notice"
+                local textStr = (pageToOpen == "PlantPage")
+                    and "Please select a combat plant from your inventory to deploy!"
+                    or "Please select a seed from your inventory to plant!"
+                pcall(function()
+                    game:GetService("StarterGui"):SetCore("SendNotification", {
+                        Title = titleStr,
+                        Text = textStr,
+                        Duration = 4,
+                    })
+                end)
+            end
         end)
     end
 

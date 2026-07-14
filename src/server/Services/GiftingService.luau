@@ -16,8 +16,10 @@ local DATA_KEY = GiftingConfig.DataKey or "PendingGifts"
 local CLAIMED_DATA_KEY = GiftingConfig.ClaimedDataKey or "ClaimedGiftIds"
 local INBOX_STORE_NAME = GiftingConfig.InboxStoreName or "GiftingInbox_v1"
 local ADMIN_COMMAND = GiftingConfig.AdminCommand or "!gift"
+local ADMIN_DEDUCT_SUN_COMMAND = GiftingConfig.AdminDeductSunCommand or "!deductsun"
 local ADMIN_GROUP_MIN_RANK = 250
 local InboxStore = DataStoreService:GetDataStore(INBOX_STORE_NAME)
+local DEDUCT_SUN_USAGE = "Usage: " .. ADMIN_DEDUCT_SUN_COMMAND .. " player amount reason"
 
 local claimingPlayers = {}
 local chatConnections = {}
@@ -126,6 +128,8 @@ local REWARD_TYPE_ALIASES = {
     exclusiveticket = GiftingConfig.RewardTypes.ExclusiveRollTicket,
     passshoptoken = GiftingConfig.RewardTypes.PassShopToken,
     passtoken = GiftingConfig.RewardTypes.PassShopToken,
+    taco = GiftingConfig.RewardTypes.Tacos,
+    tacos = GiftingConfig.RewardTypes.Tacos,
 }
 
 local function normalizeRewardType(value)
@@ -177,6 +181,10 @@ local function buildRewardText(reward)
         return "Pass Token x" .. tostring(amount)
     end
 
+    if rewardType == GiftingConfig.RewardTypes.Tacos then
+        return "Tacos x" .. tostring(amount)
+    end
+
     if rewardType == GiftingConfig.RewardTypes.Title then
         return tostring(getItemName(rewardType, reward.ItemId) or "Title")
     end
@@ -189,7 +197,8 @@ local function validateReward(reward)
     local rewardType = reward.RewardType
     if rewardType == GiftingConfig.RewardTypes.Coins
         or rewardType == GiftingConfig.RewardTypes.ExclusiveRollTicket
-        or rewardType == GiftingConfig.RewardTypes.PassShopToken then
+        or rewardType == GiftingConfig.RewardTypes.PassShopToken
+        or rewardType == GiftingConfig.RewardTypes.Tacos then
         return true
     end
 
@@ -437,11 +446,11 @@ local function importInboxGifts(player, data)
     end
 
     if importedCount > 0 then
-        local saved, saveErr = PlayerDataManager.ForceSave(player)
-        if not saved then
+        local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "gift inbox import")
+        if not saveQueued then
             restoreTable(data, snapshot)
             fireInventoryUpdate(player, data)
-            warn("[GiftingService] Failed to save imported gift inbox for "
+            warn("[GiftingService] Failed to queue save after imported gift inbox for "
                 .. tostring(player.Name) .. ": " .. tostring(saveErr))
             return false, saveErr
         end
@@ -566,6 +575,13 @@ local function grantReward(player, data, gift)
         return true, buildRewardText(gift)
     end
 
+    if rewardType == GiftingConfig.RewardTypes.Tacos then
+        data.Tacos = math.max(0, math.floor(tonumber(data.Tacos) or 0)) + amount
+        PlayerDataManager.FireDataPatch(player, { Tacos = data.Tacos })
+        fireInventoryUpdate(player, data)
+        return true, buildRewardText(gift)
+    end
+
     return false, "Gift failed: unknown reward type."
 end
 
@@ -588,11 +604,11 @@ local function queueGift(player, rawGift)
     local gifts = normalizePendingGifts(data)
     table.insert(gifts, gift)
 
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if not saved then
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "gift queue")
+    if not saveQueued then
         restoreTable(data, snapshot)
         fireInventoryUpdate(player, data)
-        return false, "Gift failed: save failed. " .. tostring(saveErr or "")
+        return false, "Gift failed: save unavailable. " .. tostring(saveErr or "")
     end
 
     fireGiftingUpdate(player, data)
@@ -637,7 +653,7 @@ local function claimGift(player, giftId)
 
     if claimedGiftIds[gift.Id] == true then
         table.remove(gifts, giftIndex)
-        PlayerDataManager.ForceSave(player)
+        PlayerDataManager.RequestSave(player, "stale gift cleanup")
         claimingPlayers[player] = nil
         fireGiftingUpdate(player, data)
         return false, "Gift is no longer available.", buildStateFromData(data)
@@ -656,14 +672,14 @@ local function claimGift(player, giftId)
 
     claimedGiftIds[gift.Id] = true
 
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if not saved then
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "gift claim")
+    if not saveQueued then
         restoreTable(data, snapshot)
-        PlayerDataManager.ForceSave(player)
+        PlayerDataManager.RequestSave(player, "gift claim rollback")
         claimingPlayers[player] = nil
         fireInventoryUpdate(player, data)
         fireGiftingUpdate(player, data)
-        return false, "Claim failed: save failed. Please try again.", buildStateFromData(data)
+        return false, "Claim failed: save unavailable. Please try again.", buildStateFromData(data)
     end
 
     claimingPlayers[player] = nil
@@ -705,6 +721,28 @@ local function splitWords(message)
     return words
 end
 
+local function joinWords(words, startIndex)
+    local parts = {}
+    for index = startIndex, #words do
+        table.insert(parts, words[index])
+    end
+    return table.concat(parts, " ")
+end
+
+local function parsePositiveIntegerText(value)
+    local text = tostring(value or "")
+    if not string.match(text, "^%d+$") then
+        return nil
+    end
+
+    local amount = tonumber(text)
+    if not amount or amount <= 0 or amount == math.huge then
+        return nil
+    end
+
+    return amount
+end
+
 local function findPlayerByToken(token)
     local normalized = string.lower(tostring(token or ""))
     if normalized == "" then
@@ -728,16 +766,110 @@ local function findPlayerByToken(token)
     return nil
 end
 
+local function findPlayerByUserId(userId)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.UserId == userId then
+            return player
+        end
+    end
+
+    return nil
+end
+
+local function findDeductTargetByToken(sender, token)
+    local normalized = string.lower(tostring(token or ""))
+    if normalized == "" then
+        return nil
+    end
+
+    if normalized == "me" then
+        return sender
+    end
+
+    if string.match(normalized, "^%d+$") then
+        local userId = tonumber(normalized)
+        if userId then
+            return findPlayerByUserId(userId)
+        end
+    end
+
+    return findPlayerByToken(token)
+end
+
+local function handleAdminDeductSunCommand(player, words)
+    if not isAdmin(player) then
+        sendTip(player, "You do not have permission to use deduct sun commands.")
+        return
+    end
+
+    if #words < 3 then
+        sendTip(player, DEDUCT_SUN_USAGE)
+        return
+    end
+
+    local targetToken = string.lower(tostring(words[2] or ""))
+    if targetToken == "all" then
+        sendTip(player, "Deduct failed: all target is not supported.")
+        return
+    end
+
+    local amount = parsePositiveIntegerText(words[3])
+    if not amount then
+        sendTip(player, "Deduct failed: amount must be a positive integer.")
+        return
+    end
+
+    local targetPlayer = findDeductTargetByToken(player, words[2])
+    if not targetPlayer then
+        sendTip(player, "Deduct failed: target player is not online.")
+        return
+    end
+
+    local data = PlayerDataManager.WaitForPlayerData(targetPlayer, 10)
+    if not data then
+        sendTip(player, "Deduct failed: target data is still loading.")
+        return
+    end
+
+    local reason = joinWords(words, 4)
+    if reason == "" then
+        reason = "no reason"
+    end
+
+    local success, resultOrMessage = PlayerDataManager.AdminDeductCoins(targetPlayer, amount, "admin deduct sun")
+    if not success then
+        sendTip(player, tostring(resultOrMessage or "Deduct failed."))
+        return
+    end
+
+    local result = resultOrMessage
+    warn("[AdminDeductSun] admin="
+        .. tostring(player.Name) .. "(" .. tostring(player.UserId) .. ")"
+        .. " target=" .. tostring(targetPlayer.Name) .. "(" .. tostring(targetPlayer.UserId) .. ")"
+        .. " requested=" .. tostring(result.RequestedAmount)
+        .. " deducted=" .. tostring(result.ActualDeducted)
+        .. " before=" .. tostring(result.BeforeCoins)
+        .. " after=" .. tostring(result.AfterCoins)
+        .. " reason=" .. tostring(reason)
+        .. " time=" .. tostring(os.time()))
+
+    sendTip(player, "Deducted " .. tostring(result.ActualDeducted)
+        .. " Sun from " .. tostring(targetPlayer.DisplayName or targetPlayer.Name)
+        .. ". Balance: " .. tostring(result.BeforeCoins) .. " -> " .. tostring(result.AfterCoins)
+        .. ". Requested: " .. tostring(result.RequestedAmount))
+end
+
 local function buildGiftFromCommand(sender, words)
     local rewardType = normalizeRewardType(words[3])
     if not rewardType then
-        return nil, "Usage: !gift player Sun amount | Seed seedId amount | Plant plantId amount mutation | Chest chestId amount | Title titleId"
+        return nil, "Usage: !gift player Sun amount | Tacos amount | Seed seedId amount | Plant plantId amount mutation | Chest chestId amount | Title titleId"
     end
 
     local title = "Gift from " .. tostring(sender.DisplayName or sender.Name)
     if rewardType == GiftingConfig.RewardTypes.Coins
         or rewardType == GiftingConfig.RewardTypes.ExclusiveRollTicket
-        or rewardType == GiftingConfig.RewardTypes.PassShopToken then
+        or rewardType == GiftingConfig.RewardTypes.PassShopToken
+        or rewardType == GiftingConfig.RewardTypes.Tacos then
         return normalizeGift({
             Title = title,
             RewardType = rewardType,
@@ -765,6 +897,11 @@ end
 
 local function handleAdminCommand(player, message)
     local words = splitWords(message)
+    if words[1] == ADMIN_DEDUCT_SUN_COMMAND then
+        handleAdminDeductSunCommand(player, words)
+        return
+    end
+
     if words[1] ~= ADMIN_COMMAND then
         return
     end
@@ -775,7 +912,7 @@ local function handleAdminCommand(player, message)
     end
 
     if #words < 4 then
-        sendTip(player, "Usage: !gift player Sun amount | Seed seedId amount | Plant plantId amount mutation | Chest chestId amount | Title titleId")
+        sendTip(player, "Usage: !gift player Sun amount | Tacos amount | Seed seedId amount | Plant plantId amount mutation | Chest chestId amount | Title titleId")
         return
     end
 

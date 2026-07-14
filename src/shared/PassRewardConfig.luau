@@ -1,5 +1,8 @@
 local PassRewardConfig = {}
 
+PassRewardConfig.ClientVisible = false
+PassRewardConfig.DisabledMessage = "Pass event has ended."
+
 PassRewardConfig.RemoteName = "ClaimPassRewardRF"
 PassRewardConfig.RegularMaxLevel = 10
 PassRewardConfig.RepeatTier = 11

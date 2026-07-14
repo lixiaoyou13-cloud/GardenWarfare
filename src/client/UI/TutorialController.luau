@@ -7,6 +7,101 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TutorialEffect = require(script.Parent.Parent.Utils.TutorialEffect)
 
+local function findFirstGuiObjectByName(root, names)
+    if not root then
+        return nil
+    end
+
+    for _, name in ipairs(names) do
+        local direct = root:FindFirstChild(name)
+        if direct and direct:IsA("GuiObject") then
+            return direct
+        end
+    end
+
+    for _, name in ipairs(names) do
+        local descendant = root:FindFirstChild(name, true)
+        if descendant and descendant:IsA("GuiObject") then
+            return descendant
+        end
+    end
+
+    return nil
+end
+
+local function waitForGuiDescendant(root, name, timeout)
+    if not root then
+        return nil
+    end
+
+    local existing = root:FindFirstChild(name, true)
+    if existing and existing:IsA("GuiObject") then
+        return existing
+    end
+
+    local expiresAt = os.clock() + (timeout or 10)
+    while os.clock() < expiresAt do
+        local descendant = root:FindFirstChild(name, true)
+        if descendant and descendant:IsA("GuiObject") then
+            return descendant
+        end
+
+        task.wait(0.1)
+    end
+
+    return nil
+end
+
+local function isPrimaryPointerInput(input)
+    return input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch
+end
+
+local function connectTutorialPress(root, callback)
+    local connections = {}
+    local completed = false
+
+    local function disconnectAll()
+        for _, connection in ipairs(connections) do
+            connection:Disconnect()
+        end
+        table.clear(connections)
+    end
+
+    local function fireOnce()
+        if completed then
+            return
+        end
+
+        completed = true
+        disconnectAll()
+        callback()
+    end
+
+    local function bind(guiObject)
+        if not guiObject or not guiObject:IsA("GuiObject") then
+            return
+        end
+
+        if guiObject:IsA("GuiButton") then
+            table.insert(connections, guiObject.Activated:Connect(fireOnce))
+        end
+
+        table.insert(connections, guiObject.InputBegan:Connect(function(input)
+            if isPrimaryPointerInput(input) then
+                fireOnce()
+            end
+        end))
+    end
+
+    bind(root)
+    for _, descendant in ipairs(root:GetDescendants()) do
+        bind(descendant)
+    end
+
+    return disconnectAll
+end
+
 function TutorialController.Init()
     local player = Players.LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui")
@@ -16,10 +111,15 @@ function TutorialController.Init()
     local inventoryMain = inventoryGui:WaitForChild("MainFrame")
     local inventoryPages = inventoryMain:WaitForChild("MainFrame")
     local seedPage = inventoryPages:WaitForChild("SeedPage")
-    local closeButton = inventoryMain:WaitForChild("Banner"):WaitForChild("Close")
+    local closeButton = findFirstGuiObjectByName(inventoryMain, { "Close", "CloseBtn", "CloseButton" })
     local playProperty = basicGui:WaitForChild("PlayProperty")
     local hotbarFrame = playProperty:WaitForChild("HotbarFrame")
     local battleBtn = playProperty:WaitForChild("StartBattle") -- 战斗按钮
+
+    local function getBackpackButton(timeout)
+        return waitForGuiDescendant(hotbarFrame, "System_Backpack", timeout or 2)
+            or findFirstGuiObjectByName(inventoryGui, { "OpenButton", "Backpack", "System_Backpack" })
+    end
 
     local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF")
     local playerData = getPlayerDataRF:InvokeServer()
@@ -185,8 +285,23 @@ function TutorialController.Init()
                 end
 
                 -- 等待战斗结束 (IsLevelActive 变回 false)
+                local startLevel = tonumber(targetPlot:GetAttribute("CurrentLevel")) or 1
+                local endBattleRE = ReplicatedStorage:FindFirstChild("EndBattleRE")
                 while targetPlot:GetAttribute("IsLevelActive") do
-                    targetPlot:GetAttributeChangedSignal("IsLevelActive"):Wait()
+                    local currentLevel = tonumber(targetPlot:GetAttribute("CurrentLevel")) or startLevel
+                    if currentLevel > startLevel then
+                        if endBattleRE then
+                            endBattleRE:FireServer()
+                        end
+
+                        local stopWait = 0
+                        while targetPlot:GetAttribute("IsLevelActive") and stopWait < 5 do
+                            stopWait += task.wait(0.2)
+                        end
+                        break
+                    end
+
+                    task.wait(0.2)
                 end
             end
 
@@ -394,8 +509,8 @@ function TutorialController.Init()
     -- ==========================================
     local function startStepThree()
         local removeTip = showTutorialTip("Click the Close button to exit.")
-        local stopFlash = TutorialEffect.AddFlash(closeButton)
-        local stopArrow = TutorialEffect.AddUIArrow(closeButton)
+        local stopFlash = closeButton and TutorialEffect.AddFlash(closeButton) or function() end
+        local stopArrow = closeButton and TutorialEffect.AddUIArrow(closeButton) or function() end
 
         local connection
         connection = inventoryGui:GetPropertyChangedSignal("Enabled"):Connect(function()
@@ -417,24 +532,50 @@ function TutorialController.Init()
    local function startStepTwo()
         local removeTip = showTutorialTip("Click a seed to equip it.")
 
-        local function getFirstSeed()
-            for _, child in ipairs(seedPage:GetChildren()) do
-                if child:IsA("Frame") or child:IsA("GuiButton") then return child end
+        local function looksLikeSeedSlot(guiObject)
+            if not guiObject or not guiObject:IsA("GuiObject") then
+                return false
             end
-            return nil
+            if guiObject.Name == "ActionList" or guiObject.Name == "SearchBoxFrame" then
+                return false
+            end
+
+            return guiObject:FindFirstChild("Icon", true) ~= nil
+                or guiObject:FindFirstChild("Icom", true) ~= nil
+                or guiObject:FindFirstChild("InfoHolder", true) ~= nil
+        end
+
+        local function getFirstSeed()
+            local bestSlot = nil
+            local fallbackSlot = nil
+            for _, descendant in ipairs(seedPage:GetDescendants()) do
+                if descendant:IsA("GuiObject") and descendant:GetAttribute("InventoryGeneratedItem") == true then
+                    if not bestSlot or descendant.LayoutOrder < bestSlot.LayoutOrder then
+                        bestSlot = descendant
+                    end
+                elseif looksLikeSeedSlot(descendant) then
+                    if not fallbackSlot or descendant.LayoutOrder < fallbackSlot.LayoutOrder then
+                        fallbackSlot = descendant
+                    end
+                end
+            end
+            return bestSlot or fallbackSlot
         end
 
         local targetSeed = getFirstSeed()
         if not targetSeed then
-            seedPage.ChildAdded:Wait()
-            targetSeed = getFirstSeed()
+            local expiresAt = os.clock() + 10
+            while not targetSeed and os.clock() < expiresAt do
+                task.wait(0.1)
+                targetSeed = getFirstSeed()
+            end
         end
 
         if targetSeed then
              local stopFlash = TutorialEffect.AddFlash(targetSeed)
             local stopArrow = TutorialEffect.AddUIArrow(targetSeed)
             local isStepCompleted = false
-            local connection
+            local disconnectPress
 
             local closeConn
             closeConn = inventoryGui:GetPropertyChangedSignal("Enabled"):Connect(function()
@@ -442,15 +583,20 @@ function TutorialController.Init()
                     removeTip()
                     if stopFlash then stopFlash() end
                     if stopArrow then stopArrow() end
-                    if connection then connection:Disconnect() end
+                    if disconnectPress then disconnectPress() end
                     closeConn:Disconnect()
 
                     local warningTip = showTutorialTip("Please open Inventory to continue!")
+                    local backpackButton = getBackpackButton()
+                    local stopBackpackFlash = backpackButton and TutorialEffect.AddFlash(backpackButton) or function() end
+                    local stopBackpackArrow = backpackButton and TutorialEffect.AddUIArrow(backpackButton) or function() end
 
                     local reopenConn
                     reopenConn = inventoryGui:GetPropertyChangedSignal("Enabled"):Connect(function()
                         if inventoryGui.Enabled then
                              reopenConn:Disconnect()
+                            stopBackpackFlash()
+                            stopBackpackArrow()
                             warningTip()
                             startStepTwo()
                         end
@@ -458,18 +604,15 @@ function TutorialController.Init()
                 end
             end)
 
-            connection = targetSeed.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                     isStepCompleted = true
-                    connection:Disconnect()
-                    if closeConn then closeConn:Disconnect() end
-                    stopFlash()
-                    stopArrow()
-                    removeTip()
-                    ReplicatedStorage.UpdateTutorialRE:FireServer(2)
-                    task.wait(0.5)
-                    startStepThree()
-                end
+            disconnectPress = connectTutorialPress(targetSeed, function()
+                isStepCompleted = true
+                if closeConn then closeConn:Disconnect() end
+                stopFlash()
+                stopArrow()
+                removeTip()
+                ReplicatedStorage.UpdateTutorialRE:FireServer(2)
+                task.wait(0.5)
+                startStepThree()
             end)
         end
     end
@@ -477,7 +620,12 @@ function TutorialController.Init()
     -- 第 1 步及恢复逻辑入口
     -- ==========================================
     if currentStep == 0 then
-        local backpackBtn = hotbarFrame:WaitForChild("System_Backpack")
+        local backpackBtn = getBackpackButton(10)
+        if not backpackBtn then
+            warn("Tutorial step 1: backpack button not found.")
+            return
+        end
+
         local removeTip = showTutorialTip("Click the flashing icon to open Inventory.")
         local stopFlash = TutorialEffect.AddFlash(backpackBtn)
         local stopArrow = TutorialEffect.AddUIArrow(backpackBtn)

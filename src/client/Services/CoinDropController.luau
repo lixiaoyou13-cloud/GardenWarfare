@@ -12,11 +12,14 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
 
 local COIN_IMAGE_ID = "rbxassetid://102426033120992"
+local TACO_IMAGE_ID = "rbxassetid://119494958086601"
 local EXPLOSION_IMAGE_ID = "rbxassetid://123456"
 local SUN_PICKUP_SOUND_ID = "rbxassetid://116731565409481"
 local X2_SUN_GAME_PASS_ID = 1856661235
 local ownsX2SunCache = false
 local MAX_HARVEST_SUN_VISUALS = 6
+local MAX_ZOMBOSS_TACO_VISUALS = 120
+local ZOMBOSS_TACO_FLY_DELAY_SECONDS = 1
 local HARVEST_SUN_POOL_LIMIT = 18
 local harvestSunPool = {}
 
@@ -77,14 +80,14 @@ local function getHarvestSunVisualCount(amountNumber)
     return 1
 end
 
-local function createLocalSunIcon(position)
+local function createLocalSunIcon(position, imageId, partName)
     local sunPart = table.remove(harvestSunPool)
     local gui = sunPart and sunPart:FindFirstChildOfClass("BillboardGui")
     local img = gui and gui:FindFirstChildOfClass("ImageLabel")
+    local iconImageId = imageId or COIN_IMAGE_ID
 
     if not sunPart then
         sunPart = Instance.new("Part")
-        sunPart.Name = "LocalHarvestSun"
         sunPart.Size = Vector3.new(1.3, 1.3, 1.3)
         sunPart.Shape = Enum.PartType.Ball
         sunPart.Transparency = 1
@@ -97,11 +100,11 @@ local function createLocalSunIcon(position)
         img = Instance.new("ImageLabel")
         img.Size = UDim2.new(1, 0, 1, 0)
         img.BackgroundTransparency = 1
-        img.Image = COIN_IMAGE_ID
         img.ScaleType = Enum.ScaleType.Fit
         img.Parent = gui
     end
 
+    sunPart.Name = partName or "LocalHarvestSun"
     sunPart.Anchored = true
     sunPart.CanCollide = false
     sunPart.CanQuery = false
@@ -111,7 +114,10 @@ local function createLocalSunIcon(position)
     sunPart.Position = position
     sunPart:SetAttribute("InHarvestSunPool", false)
     if gui then gui.Enabled = true end
-    if img then img.ImageTransparency = 0 end
+    if img then
+        img.Image = iconImageId
+        img.ImageTransparency = 0
+    end
     sunPart.Parent = workspace
 
     return sunPart, gui, img
@@ -135,6 +141,200 @@ local function releaseLocalSunIcon(sunPart)
     end
 
     table.insert(harvestSunPool, sunPart)
+end
+
+local function playTacoCollectPopup(amount)
+    amount = math.max(0, math.floor(tonumber(amount) or 0))
+    if amount <= 0 then
+        return
+    end
+
+    local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+    local screenGui = playerGui:FindFirstChild("TacoCollectGui") or Instance.new("ScreenGui")
+    screenGui.ResetOnSpawn = false
+    screenGui.Name = "TacoCollectGui"
+    screenGui.DisplayOrder = 101
+    screenGui.Parent = playerGui
+
+    local startX = math.random(35, 65) / 100
+    local startY = math.random(22, 48) / 100
+    local container = Instance.new("Frame")
+    container.BackgroundTransparency = 1
+    container.Position = UDim2.new(startX, 0, startY, 0)
+    container.Size = UDim2.new(0, 180, 0, 60)
+    container.AnchorPoint = Vector2.new(0.5, 0.5)
+    container.Parent = screenGui
+
+    local icon = Instance.new("ImageLabel")
+    icon.BackgroundTransparency = 1
+    icon.Image = TACO_IMAGE_ID
+    icon.ScaleType = Enum.ScaleType.Fit
+    icon.Size = UDim2.new(0, 60, 0, 60)
+    icon.Position = UDim2.new(0, 0, 0.5, 0)
+    icon.AnchorPoint = Vector2.new(0, 0.5)
+    icon.Parent = container
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = "+" .. UIEffectUtil.FormatNumber(amount)
+    textLabel.TextColor3 = Color3.fromRGB(255, 235, 140)
+    textLabel.TextStrokeColor3 = Color3.fromRGB(120, 65, 15)
+    textLabel.TextStrokeTransparency = 0
+    textLabel.Font = Enum.Font.GothamBlack
+    textLabel.TextScaled = true
+    textLabel.Size = UDim2.new(0, 110, 0, 50)
+    textLabel.Position = UDim2.new(0, 66, 0.5, 0)
+    textLabel.AnchorPoint = Vector2.new(0, 0.5)
+    textLabel.Parent = container
+
+    local popScale = Instance.new("UIScale")
+    popScale.Scale = 0
+    popScale.Parent = container
+    TweenService:Create(popScale, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1.1}):Play()
+    TweenService:Create(container, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Position = UDim2.new(startX + math.random(-4, 4) / 100, 0, startY - 0.04, 0),
+    }):Play()
+
+    task.delay(0.9, function()
+        if not container or not container.Parent then
+            return
+        end
+
+        TweenService:Create(container, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Position = UDim2.new(container.Position.X.Scale, container.Position.X.Offset, container.Position.Y.Scale - 0.08, container.Position.Y.Offset),
+        }):Play()
+        TweenService:Create(icon, TweenInfo.new(0.35), {ImageTransparency = 1}):Play()
+        TweenService:Create(textLabel, TweenInfo.new(0.35), {
+            TextTransparency = 1,
+            TextStrokeTransparency = 1,
+        }):Play()
+        Debris:AddItem(container, 0.45)
+    end)
+end
+
+local function finishZombossTacoCollect(amount)
+    playSunPickupSound()
+    playTacoCollectPopup(amount)
+end
+
+local function playZombossTacoDrop(payload)
+    if type(payload) ~= "table" then
+        return
+    end
+
+    local amount = math.max(0, math.floor(tonumber(payload.Amount) or 0))
+    if amount <= 0 then
+        return
+    end
+
+    local visualCount = math.max(1, math.floor(tonumber(payload.VisualCount) or amount))
+    visualCount = math.clamp(visualCount, 1, MAX_ZOMBOSS_TACO_VISUALS)
+
+    local origin = nil
+    if typeof(payload.OriginPosition) == "Vector3" then
+        origin = payload.OriginPosition
+    else
+        local root = getLocalRoot()
+        origin = root and root.Position
+    end
+
+    if not origin then
+        finishZombossTacoCollect(amount)
+        return
+    end
+
+    origin += Vector3.new(0, 3, 0)
+    local tacoParts = {}
+
+    for i = 1, visualCount do
+        local tacoPart, _, img = createLocalSunIcon(origin, TACO_IMAGE_ID, "LocalZombossTaco")
+        local angle = (i / visualCount) * math.pi * 2 + (math.random() - 0.5) * 0.55
+        local radius = 1.8 + math.random() * 4.2
+        local burstPos = origin + Vector3.new(
+            math.cos(angle) * radius,
+            1.2 + math.random() * 3.8,
+            math.sin(angle) * radius
+        )
+
+        table.insert(tacoParts, {
+            Part = tacoPart,
+            Image = img,
+        })
+
+        TweenService:Create(
+            tacoPart,
+            TweenInfo.new(0.24 + math.random() * 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            {Position = burstPos}
+        ):Play()
+    end
+
+    task.delay(ZOMBOSS_TACO_FLY_DELAY_SECONDS, function()
+        local root = getLocalRoot()
+        if not root then
+            for _, tacoInfo in ipairs(tacoParts) do
+                releaseLocalSunIcon(tacoInfo.Part)
+            end
+            finishZombossTacoCollect(amount)
+            return
+        end
+
+        local remaining = 0
+        local didFinish = false
+        local function finishOnce()
+            if didFinish then
+                return
+            end
+            didFinish = true
+            finishZombossTacoCollect(amount)
+        end
+
+        for _, tacoInfo in ipairs(tacoParts) do
+            local tacoPart = tacoInfo.Part
+            if tacoPart and tacoPart.Parent then
+                remaining += 1
+                local targetPos = root.Position + Vector3.new(
+                    (math.random() - 0.5) * 1.2,
+                    1 + math.random() * 1.2,
+                    (math.random() - 0.5) * 1.2
+                )
+                local flyTween = TweenService:Create(
+                    tacoPart,
+                    TweenInfo.new(0.32 + math.random() * 0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.In),
+                    {Position = targetPos}
+                )
+                if tacoInfo.Image then
+                    TweenService:Create(tacoInfo.Image, TweenInfo.new(0.35), {ImageTransparency = 1}):Play()
+                end
+
+                flyTween:Play()
+                flyTween.Completed:Connect(function()
+                    releaseLocalSunIcon(tacoPart)
+                    remaining -= 1
+                    if remaining <= 0 then
+                        finishOnce()
+                    end
+                end)
+            end
+        end
+
+        if remaining <= 0 then
+            finishOnce()
+            return
+        end
+
+        task.delay(1.4, function()
+            if didFinish then
+                return
+            end
+
+            for _, tacoInfo in ipairs(tacoParts) do
+                if tacoInfo.Part and tacoInfo.Part.Parent then
+                    releaseLocalSunIcon(tacoInfo.Part)
+                end
+            end
+            finishOnce()
+        end)
+    end)
 end
 
 function CoinDropController.Init()
@@ -237,6 +437,11 @@ function CoinDropController.Init()
             -- 如果没有获取到位置，作为兜底直接播放 UI 动画
             UIEffectUtil.Play2DCollectEffect(displayAmount, nil, displayText)
         end)
+    end
+
+    local tacoDropRE = ReplicatedStorage:WaitForChild("ZombossTacoDropRE", 10)
+    if tacoDropRE then
+        tacoDropRE.OnClientEvent:Connect(playZombossTacoDrop)
     end
 
     playDropRE.OnClientEvent:Connect(function(dropPosition, coinCount, totalValue)

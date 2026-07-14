@@ -55,12 +55,12 @@ local function fireInventoryUpdate(player, data)
 end
 
 local function saveShopTransaction(player, data, snapshot, stockSnapshot, context)
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if saved then
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, context)
+    if saveQueued then
         return true
     end
 
-    warn("[ShopService] Failed to save " .. tostring(context) .. " for "
+    warn("[ShopService] Failed to queue save after " .. tostring(context) .. " for "
         .. tostring(player and player.Name or "unknown") .. ": " .. tostring(saveErr))
 
     restoreShopTransactionState(data, snapshot)
@@ -75,9 +75,9 @@ local function saveShopTransaction(player, data, snapshot, stockSnapshot, contex
         updateShopRE:FireClient(player, playerSpecificStock[player.UserId], nextRefreshTime)
     end
 
-    local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "rollback " .. tostring(context))
     if not rollbackSaved and rollbackErr ~= "stale_session" then
-        warn("[ShopService] Failed to save rollback after " .. tostring(context) .. " for "
+        warn("[ShopService] Failed to queue rollback save after " .. tostring(context) .. " for "
             .. tostring(player and player.Name or "unknown") .. ": " .. tostring(rollbackErr))
     end
 
@@ -112,6 +112,7 @@ function ShopService.RefreshStock()
                     [17] = 3,
                     [18] = 2,
                     [19] = 1,
+                    [24] = 1,
 
                 }
 
@@ -222,16 +223,6 @@ function ShopService.Init()
                 player:SetAttribute("CurrentShopSessionId", nil)
             end
 
-            AnalyticsService:LogEconomyEvent(
-                player,
-                Enum.AnalyticsEconomyFlowType.Sink,
-                "Coins",
-                totalCost,
-                data.Coins,
-                Enum.AnalyticsEconomyTransactionType.Shop.Name,
-                tostring(slotData.SeedId)
-            )
-
             updateShopRE:FireClient(player, personalStock, nextRefreshTime)
 
             fireInventoryUpdate(player, data)
@@ -284,11 +275,6 @@ function ShopService.Init()
                 return false, "Save failed. Please try again."
             end
 
-            AnalyticsService:LogEconomyEvent(
-                player, Enum.AnalyticsEconomyFlowType.Source, "Coins", price,
-                data.Coins,
-                Enum.AnalyticsEconomyTransactionType.Shop.Name, "Sell_" .. equippedId
-            )
             return true, "Earned $" .. tostring(price)
         else
             return false, "Item not found in inventory"
@@ -370,11 +356,6 @@ function ShopService.Init()
             if shouldClearHeldItem then
                 ReplicatedStorage:WaitForChild("HoldItemRE"):FireClient(player, nil)
             end
-
-            AnalyticsService:LogEconomyEvent(
-                player, Enum.AnalyticsEconomyFlowType.Source, "Coins", totalEarned,
-                data.Coins, Enum.AnalyticsEconomyTransactionType.Shop.Name, "Sell_All_Hotbar"
-            )
 
             fireInventoryUpdate(player, data)
 

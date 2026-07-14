@@ -23,8 +23,12 @@ local GiftingController = require(script.UI.GiftingController)
 local NoticeController = require(script.UI.NoticeController)
 local FriendInviteController = require(script.UI.FriendInviteController)
 local EventUIManager = require(script.UI.EventUI.EventUIManager)
+local MutationPotionBuffController = require(script.Services.MutationPotionBuffController)
+local ZombossIntroController = require(script.Services.ZombossIntroController)
+local ZombossBossFightController = require(script.Services.ZombossBossFightController)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RankingSeasonConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RankingSeasonConfig"))
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
@@ -32,11 +36,74 @@ local Workspace = game:GetService("Workspace")
 local MarketplaceService = game:GetService("MarketplaceService")
 
 PlantAttackVisualController.Init()
+ZombossIntroController.Init()
+ZombossBossFightController.Init()
 
 local AnalyticsRE = ReplicatedStorage:WaitForChild("AnalyticsRE")
 local localPlayer = game:GetService("Players").LocalPlayer
 local initialCameraMaxZoomDistance = localPlayer.CameraMaxZoomDistance
 localPlayer.CameraMaxZoomDistance = initialCameraMaxZoomDistance
+
+local VISIBLE_TEXT_TRANSLATIONS = {
+    ["蓝色"] = "Blue",
+    ["假的"] = "Placeholder",
+    ["豌豆射手种子"] = "Peashooter Seed",
+    ["补货：03：55"] = "Restock: 03:55",
+    ["种子1号"] = "Seed 1",
+    ["变异效果"] = "Mutation",
+    ["达到100关即可获得奖励"] = "Reach Level 100 to earn rewards",
+    ["关卡1奖励"] = "Level 1 Reward",
+}
+local watchedTranslatedTextObjects = setmetatable({}, { __mode = "k" })
+
+local function translateTextObject(instance)
+    if not (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) then
+        return
+    end
+
+    local replacement = VISIBLE_TEXT_TRANSLATIONS[instance.Text]
+    if replacement then
+        instance.Text = replacement
+    end
+
+    if watchedTranslatedTextObjects[instance] then
+        return
+    end
+    watchedTranslatedTextObjects[instance] = true
+    instance:GetPropertyChangedSignal("Text"):Connect(function()
+        local updatedReplacement = VISIBLE_TEXT_TRANSLATIONS[instance.Text]
+        if updatedReplacement then
+            instance.Text = updatedReplacement
+        end
+    end)
+end
+
+local function translateVisibleText(root)
+    if not root then
+        return
+    end
+
+    translateTextObject(root)
+    for _, descendant in ipairs(root:GetDescendants()) do
+        translateTextObject(descendant)
+    end
+end
+
+local function watchVisibleText(root)
+    if not root then
+        return
+    end
+
+    translateVisibleText(root)
+    root.DescendantAdded:Connect(function(descendant)
+        task.defer(translateVisibleText, descendant)
+    end)
+end
+
+task.spawn(function()
+    watchVisibleText(localPlayer:WaitForChild("PlayerGui", 10))
+    watchVisibleText(ReplicatedStorage:WaitForChild("UITemplates", 10))
+end)
 
 local function disableDefaultBackpack()
     local success, err = pcall(function()
@@ -107,9 +174,13 @@ task.spawn(function()
     local shopGui = basicGui:WaitForChild("ShopGui", 10)
     local codexGui = basicGui:WaitForChild("Codex", 10)
     local playProperty = basicGui:WaitForChild("PlayProperty", 10)
+    local levelSelectGui = basicGui:WaitForChild("LevelSelect", 10)
     if not (inventoryGui and shopGui and codexGui and playProperty) then
         warn("[Client] One or more BasicGui children were not found; skipping global UI effect binding.")
         return
+    end
+    if levelSelectGui and levelSelectGui:IsA("ScreenGui") then
+        levelSelectGui.Enabled = false
     end
 
     local TWEEN_TIME = 0.4
@@ -337,7 +408,7 @@ task.spawn(function()
             battleProgressFill.Position = UDim2.new(0, 0, 0, 0)
             battleProgressFill.Size = UDim2.new(0, 0, 1, 0)
             battleProgressFill.BackgroundColor3 = Color3.fromRGB(90, 255, 90)
-            battleProgressFill.BackgroundTransparency = 0.15
+            battleProgressFill.BackgroundTransparency = 0
             battleProgressFill.BorderSizePixel = 0
             battleProgressFill.ZIndex = battleProgress.ZIndex + 1
 
@@ -443,42 +514,183 @@ task.spawn(function()
         local autoRed = ColorSequence.new(Color3.fromRGB(249, 0, 0), Color3.fromRGB(180, 0, 0))
         local autoGreen = ColorSequence.new(Color3.fromRGB(90, 255, 90), Color3.fromRGB(0, 180, 0))
 
-        local autoLabel = btnLevelSelect:FindFirstChild("TextLabel")
-        local autoGrad = btnLevelSelect:FindFirstChild("UIGradient")
+        local autoLabel = btnLevelSelect and btnLevelSelect:FindFirstChild("TextLabel")
+        local autoGrad = btnLevelSelect and btnLevelSelect:FindFirstChild("UIGradient")
         local UIEffectUtilForBattle = require(script.Utils.UIEffectUtil)
         local isLevelSelectConfirming = false
         local maxSelectableLevel = 1
         local hasMaxSelectableLevel = false
+        local currentPlayerData = nil
+        local levelInputFocusLostBound = false
+        local confirmSelectedLevel
 
         local function setLevelSelectText(text)
             if autoLabel then autoLabel.Text = text end
-            if btnLevelSelect:IsA("TextButton") then btnLevelSelect.Text = text end
+            if btnLevelSelect and btnLevelSelect:IsA("TextButton") then btnLevelSelect.Text = text end
+        end
+
+        local function closeLevelSelect()
+            if levelSelectGui and levelSelectGui:IsA("ScreenGui") then
+                levelSelectGui.Enabled = false
+            end
+        end
+
+        local function ensureLevelInputBox()
+            if not levelInputBox then
+                if not inBattleFrame then
+                    return false
+                end
+
+                local inputFrame = Instance.new("Frame")
+                inputFrame.Name = "InputBox"
+                inputFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+                inputFrame.Size = UDim2.new(0, 220, 0, 48)
+                if btnLevelSelect and btnLevelSelect:IsA("GuiObject") then
+                    inputFrame.Position = UDim2.new(
+                        btnLevelSelect.Position.X.Scale,
+                        btnLevelSelect.Position.X.Offset,
+                        btnLevelSelect.Position.Y.Scale,
+                        btnLevelSelect.Position.Y.Offset - 58
+                    )
+                    inputFrame.LayoutOrder = btnLevelSelect.LayoutOrder - 1
+                else
+                    inputFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+                end
+                inputFrame.BackgroundColor3 = Color3.fromRGB(30, 42, 54)
+                inputFrame.BackgroundTransparency = 0.05
+                inputFrame.BorderSizePixel = 0
+                inputFrame.Visible = false
+                inputFrame.Parent = inBattleFrame
+
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0, 8)
+                corner.Parent = inputFrame
+
+                local stroke = Instance.new("UIStroke")
+                stroke.Color = Color3.fromRGB(127, 214, 255)
+                stroke.Thickness = 2
+                stroke.Transparency = 0.15
+                stroke.Parent = inputFrame
+
+                local input = Instance.new("TextBox")
+                input.Name = "LevelTextBox"
+                input.AnchorPoint = Vector2.new(0.5, 0.5)
+                input.Position = UDim2.new(0.5, 0, 0.5, 0)
+                input.Size = UDim2.new(1, -20, 1, -10)
+                input.BackgroundTransparency = 1
+                input.ClearTextOnFocus = false
+                input.Font = Enum.Font.GothamBold
+                input.PlaceholderColor3 = Color3.fromRGB(180, 202, 215)
+                input.PlaceholderText = "Level number"
+                input.Text = ""
+                input.TextColor3 = Color3.fromRGB(255, 255, 255)
+                input.TextScaled = true
+                input.Parent = inputFrame
+
+                levelInputBox = inputFrame
+                levelTextBox = input
+            elseif not levelTextBox then
+                if levelInputBox:IsA("TextBox") then
+                    levelTextBox = levelInputBox
+                elseif levelInputBox:IsA("GuiObject") then
+                    levelTextBox = levelInputBox:FindFirstChildWhichIsA("TextBox", true)
+                    if not levelTextBox then
+                        local input = Instance.new("TextBox")
+                        input.Name = "LevelTextBox"
+                        input.AnchorPoint = Vector2.new(0.5, 0.5)
+                        input.Position = UDim2.new(0.5, 0, 0.5, 0)
+                        input.Size = UDim2.new(1, -12, 1, -8)
+                        input.BackgroundTransparency = 1
+                        input.ClearTextOnFocus = false
+                        input.Font = Enum.Font.GothamBold
+                        input.PlaceholderText = "Level number"
+                        input.Text = ""
+                        input.TextColor3 = Color3.fromRGB(255, 255, 255)
+                        input.TextScaled = true
+                        input.Parent = levelInputBox
+                        levelTextBox = input
+                    end
+                end
+            end
+
+            if levelTextBox then
+                levelTextBox.ClearTextOnFocus = false
+                if levelTextBox.PlaceholderText == "" then
+                    levelTextBox.PlaceholderText = "Level number"
+                end
+                if not levelInputFocusLostBound then
+                    levelInputFocusLostBound = true
+                    levelTextBox.FocusLost:Connect(function(enterPressed)
+                        if enterPressed and isLevelSelectConfirming and confirmSelectedLevel then
+                            confirmSelectedLevel()
+                        end
+                    end)
+                end
+            end
+
+            return levelTextBox ~= nil
         end
 
         local function setLevelSelectState(isConfirming)
             isLevelSelectConfirming = isConfirming
             setLevelSelectText(isConfirming and "Click Confirm" or "Level Select")
             if autoGrad then autoGrad.Color = isConfirming and autoGreen or autoRed end
-            if levelInputBox then
+
+            local hasInput = ensureLevelInputBox()
+            if levelInputBox and levelInputBox:IsA("GuiObject") then
                 levelInputBox.Visible = isConfirming
-                if isConfirming and levelTextBox then
+            end
+            if hasInput and levelTextBox then
+                if isConfirming then
                     levelTextBox.Text = ""
                     levelTextBox:CaptureFocus()
-                elseif levelTextBox then
+                else
                     levelTextBox:ReleaseFocus()
                 end
             end
         end
 
-        local function refreshMaxSelectableLevel(data)
-            if data and data.UnlockedLevel then
-                maxSelectableLevel = math.max(1, tonumber(data.UnlockedLevel) or maxSelectableLevel)
-                hasMaxSelectableLevel = true
+        local function refreshPlayerData(data)
+            if type(data) == "table" then
+                currentPlayerData = data
+                local ok, nextLevel = pcall(function()
+                    return RankingSeasonConfig.GetSeasonNextLevel(data)
+                end)
+                if ok then
+                    maxSelectableLevel = math.max(1, tonumber(nextLevel) or maxSelectableLevel)
+                    hasMaxSelectableLevel = true
+                end
             end
         end
 
+        local function applyPlayerDataPatch(patch)
+            if type(patch) ~= "table" then return end
+            currentPlayerData = currentPlayerData or {}
+            for key, value in pairs(patch) do
+                currentPlayerData[key] = value
+            end
+            refreshPlayerData(currentPlayerData)
+        end
+
+        local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF", 5)
+        local function fetchPlayerData()
+            if not getPlayerDataRF then
+                return currentPlayerData
+            end
+
+            local ok, data = pcall(function()
+                return getPlayerDataRF:InvokeServer()
+            end)
+            if ok then
+                refreshPlayerData(data)
+            else
+                warn("[LevelSelect] Failed to fetch player data: " .. tostring(data))
+            end
+            return currentPlayerData
+        end
+
         local function getLevelInputText()
-            if levelTextBox then
+            if ensureLevelInputBox() and levelTextBox then
                 return levelTextBox.Text or ""
             end
             if levelInputBox and (levelInputBox:IsA("TextLabel") or levelInputBox:IsA("TextButton")) then
@@ -487,41 +699,7 @@ task.spawn(function()
             return ""
         end
 
-        local getPlayerDataRF = ReplicatedStorage:WaitForChild("GetPlayerDataRF", 5)
-        if getPlayerDataRF then
-            local ok, data = pcall(function()
-                return getPlayerDataRF:InvokeServer()
-            end)
-            if ok then refreshMaxSelectableLevel(data) end
-        end
-
-        local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE", 5)
-        if updateInventoryRE then
-            updateInventoryRE.OnClientEvent:Connect(refreshMaxSelectableLevel)
-        end
-
-        setLevelSelectState(false)
-
-        startBattleBtn.Activated:Connect(function()
-            ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer()
-
-        end)
-
-        if endBattleBtn then
-            endBattleBtn.Activated:Connect(function()
-                setLevelSelectState(false)
-
-                ReplicatedStorage:WaitForChild("EndBattleRE"):FireServer()
-            end)
-        end
-
-        btnLevelSelect.Activated:Connect(function()
-            if not isLevelSelectConfirming then
-                AnalyticsRE:FireServer("Custom", "UI_Click_LevelSelect_Open")
-                setLevelSelectState(true)
-                return
-            end
-
+        confirmSelectedLevel = function()
             local rawText = getLevelInputText()
             local selectedLevel = tonumber(rawText)
             if not selectedLevel then
@@ -532,14 +710,64 @@ task.spawn(function()
             selectedLevel = math.max(1, math.floor(selectedLevel))
             if hasMaxSelectableLevel and selectedLevel > maxSelectableLevel then
                 selectedLevel = maxSelectableLevel
-                UIEffectUtilForBattle.ShowTip("Your max unlocked level is Level " .. tostring(maxSelectableLevel) .. ". Starting Level " .. tostring(maxSelectableLevel) .. ".")
+                UIEffectUtilForBattle.ShowTip("Your current season max level is Level " .. tostring(maxSelectableLevel) .. ". Starting Level " .. tostring(maxSelectableLevel) .. ".")
             end
 
             AnalyticsRE:FireServer("Custom", "UI_Click_LevelSelect_Confirm")
             setLevelSelectState(false)
             ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer(selectedLevel)
+        end
+
+        local updateInventoryRE = ReplicatedStorage:WaitForChild("UpdateInventoryRE", 5)
+        if updateInventoryRE then
+            updateInventoryRE.OnClientEvent:Connect(function(data)
+                refreshPlayerData(data)
+            end)
+        end
+
+        local playerDataPatchRE = ReplicatedStorage:WaitForChild("PlayerDataPatchRE", 5)
+        if playerDataPatchRE then
+            playerDataPatchRE.OnClientEvent:Connect(function(patch)
+                applyPlayerDataPatch(patch)
+            end)
+        end
+
+        fetchPlayerData()
+        setLevelSelectState(false)
+
+        startBattleBtn.Activated:Connect(function()
+            setLevelSelectState(false)
+            closeLevelSelect()
+            ReplicatedStorage:WaitForChild("StartBattleRE"):FireServer()
+
         end)
 
+        if endBattleBtn then
+            endBattleBtn.Activated:Connect(function()
+                setLevelSelectState(false)
+                closeLevelSelect()
+
+                ReplicatedStorage:WaitForChild("EndBattleRE"):FireServer()
+            end)
+        end
+
+        if btnLevelSelect then
+            btnLevelSelect.Activated:Connect(function()
+                if not isLevelSelectConfirming then
+                    fetchPlayerData()
+                    AnalyticsRE:FireServer("Custom", "UI_Click_LevelSelect_Open")
+                    if not ensureLevelInputBox() then
+                        UIEffectUtilForBattle.ShowTip("Level input is not ready.")
+                        return
+                    end
+                    closeLevelSelect()
+                    setLevelSelectState(true)
+                    return
+                end
+
+                confirmSelectedLevel()
+            end)
+        end
         local setSpeedRE = ReplicatedStorage:WaitForChild("SetSpeedRE")
         local currentSpeed = 1
         local grad4RotationConn = nil
@@ -584,12 +812,9 @@ task.spawn(function()
         local SPEED_PASS_ID = 1811835638 -- 请把这串数字替换成你刚才复制的 Game Pass ID
 
         btnSpeed1_5.Activated:Connect(function()
-            AnalyticsRE:FireServer("Custom", "UI_Click_Speed_1_5")
             setSpeedRE:FireServer(currentSpeed == 2 and 1 or 2)
         end)
         btnSpeed4.Activated:Connect(function()
-            AnalyticsRE:FireServer("Custom", "UI_Click_Speed_4")
-
             -- 检查玩家是否已经拥有该通行证
             local hasPass = false
             pcall(function()
@@ -639,6 +864,7 @@ task.spawn(function()
                 end
 
                 setLevelSelectState(false)
+                closeLevelSelect()
                 startBattleBtn.Visible = true
                 inBattleFrame.Visible = false
             end
@@ -687,6 +913,7 @@ OnlineRewardController.Init()
 PassController.Init()
 NoticeController.Init()
 FriendInviteController.Init()
+MutationPotionBuffController.Init()
 local AirdropUIController = require(script.Services.AirdropUIController)
 AirdropUIController.Init()
 local StealWarningUIController = require(script.Services.StealWarningUIController)
@@ -699,7 +926,6 @@ local RollController = require(script.UI.RollController)
 RollController.Init()
 local StealablePointerUIController = require(script.Services.StealablePointerUIController)
 StealablePointerUIController.Init()
-require(script.UI.EventUI.NewbieGiftController).Init()
 local FreeRewardClientController = require(script.Services.FreeRewardClientController)
 FreeRewardClientController.Init()
 GiftingController.Init()

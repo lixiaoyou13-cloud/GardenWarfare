@@ -14,6 +14,11 @@ local localPlayer = Players.LocalPlayer
 local PROJECTILE_SPEED = 25
 local HIT_EFFECT_POOL_LIMIT = 30
 local DAMAGE_TEXT_POOL_LIMIT = 80
+local GROUND_EFFECT_POOL_LIMIT_PER_TYPE = 12
+local LOCAL_OWNER_PROJECTILE_LIMIT = 120
+local OTHER_OWNER_PROJECTILE_LIMIT = 45
+local GLOBAL_PROJECTILE_LIMIT = 180
+local OTHER_OWNER_PROJECTILE_DISTANCE = 140
 local ATTACK_TRACK_CACHE_LIMIT = 24
 local ATTACK_TRACK_IDLE_CACHE_TARGET = 12
 local LOCAL_OWNER_ATTACK_ANIMATION_DISTANCE = 180
@@ -26,7 +31,16 @@ local warnedProjectileIssues = {}
 local warnedAnimationIssues = {}
 local failedAnimationIds = {}
 local hitEffectPools = {}
+local groundEffectPools = {}
 local damageTextPool = {}
+local visualCache = setmetatable({}, { __mode = "k" })
+local zombiePartCache = setmetatable({}, { __mode = "k" })
+local activeGroundEffects = {}
+local activeProjectileCounts = {
+    Self = 0,
+    Others = 0,
+    Total = 0,
+}
 local visualConnection = nil
 local visualSettings = {
     EffectsSelf = true,
@@ -76,10 +90,78 @@ local function getEmitCount(emitter, fallback)
     return emitCount
 end
 
+local function getVisualCache(instance)
+    if not instance then
+        return {
+            BaseParts = {},
+            Effects = {},
+            OriginalTransparencies = {},
+        }
+    end
+
+    local cached = visualCache[instance]
+    if cached then
+        return cached
+    end
+
+    cached = {
+        BaseParts = {},
+        Effects = {},
+        OriginalTransparencies = {},
+    }
+
+    if instance:IsA("BasePart") then
+        table.insert(cached.BaseParts, instance)
+        cached.OriginalTransparencies[instance] = instance.Transparency
+    end
+
+    for _, desc in ipairs(instance:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            table.insert(cached.BaseParts, desc)
+            cached.OriginalTransparencies[desc] = desc.Transparency
+        elseif desc:IsA("ParticleEmitter")
+            or desc:IsA("Trail")
+            or desc:IsA("Beam")
+            or desc:IsA("Light")
+            or desc:IsA("Highlight")
+        then
+            table.insert(cached.Effects, desc)
+        end
+    end
+
+    visualCache[instance] = cached
+    return cached
+end
+
+local function getCachedZombieParts(zombieModel)
+    if not zombieModel then
+        return {}
+    end
+
+    local parts = zombiePartCache[zombieModel]
+    if parts then
+        return parts
+    end
+
+    parts = {}
+    if zombieModel:IsA("BasePart") then
+        table.insert(parts, zombieModel)
+    end
+
+    for _, desc in ipairs(zombieModel:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            table.insert(parts, desc)
+        end
+    end
+
+    zombiePartCache[zombieModel] = parts
+    return parts
+end
+
 local function deactivateVisualEffects(instance)
     if not instance then return end
 
-    for _, desc in ipairs(instance:GetDescendants()) do
+    for _, desc in ipairs(getVisualCache(instance).Effects) do
         if desc:IsA("ParticleEmitter") then
             desc.Enabled = false
             pcall(function()
@@ -90,8 +172,28 @@ local function deactivateVisualEffects(instance)
             pcall(function()
                 desc:Clear()
             end)
-        elseif desc:IsA("Beam") or desc:IsA("Light") then
+        elseif desc:IsA("Beam") or desc:IsA("Light") or desc:IsA("Highlight") then
             desc.Enabled = false
+        end
+    end
+end
+
+local function setVisualPartsVisible(instance, visible)
+    if not instance then return end
+
+    local cached = getVisualCache(instance)
+    for _, part in ipairs(cached.BaseParts) do
+        if part and part.Parent then
+            if visible then
+                local originalTransparency = cached.OriginalTransparencies[part]
+                if originalTransparency == nil then
+                    originalTransparency = part.Transparency
+                    cached.OriginalTransparencies[part] = originalTransparency
+                end
+                part.Transparency = originalTransparency
+            else
+                part.Transparency = 1
+            end
         end
     end
 end
@@ -145,6 +247,66 @@ local function getInstancePosition(instance)
 
     local part = instance:FindFirstChildWhichIsA("BasePart", true)
     return part and part.Position or nil
+end
+
+local function getLocalRootPosition()
+    local character = localPlayer.Character
+    local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
+    return rootPart and rootPart.Position or nil
+end
+
+local function getProjectileOwnerBucket(ownerUserId)
+    if isLocalOwner(ownerUserId) then
+        return "Self"
+    end
+
+    return "Others"
+end
+
+local function shouldRenderProjectile(ownerUserId, firePosition)
+    if activeProjectileCounts.Total >= GLOBAL_PROJECTILE_LIMIT then
+        return nil
+    end
+
+    local bucket = getProjectileOwnerBucket(ownerUserId)
+    if bucket == "Self" then
+        if activeProjectileCounts.Self >= LOCAL_OWNER_PROJECTILE_LIMIT then
+            return nil
+        end
+
+        return bucket
+    end
+
+    if activeProjectileCounts.Others >= OTHER_OWNER_PROJECTILE_LIMIT then
+        return nil
+    end
+
+    local localRootPosition = getLocalRootPosition()
+    if localRootPosition and typeof(firePosition) == "Vector3" then
+        if (localRootPosition - firePosition).Magnitude > OTHER_OWNER_PROJECTILE_DISTANCE then
+            return nil
+        end
+    end
+
+    return bucket
+end
+
+local function incrementProjectileCount(bucket)
+    activeProjectileCounts.Total += 1
+    if bucket == "Self" then
+        activeProjectileCounts.Self += 1
+    else
+        activeProjectileCounts.Others += 1
+    end
+end
+
+local function decrementProjectileCount(bucket)
+    activeProjectileCounts.Total = math.max(0, activeProjectileCounts.Total - 1)
+    if bucket == "Self" then
+        activeProjectileCounts.Self = math.max(0, activeProjectileCounts.Self - 1)
+    else
+        activeProjectileCounts.Others = math.max(0, activeProjectileCounts.Others - 1)
+    end
 end
 
 local function isPlantAnimationImportant(plant, ownerUserId)
@@ -366,44 +528,19 @@ local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
 end
 
 local function getProjectileParts(projectile)
-    local parts = {}
-
-    if projectile:IsA("BasePart") then
-        table.insert(parts, projectile)
-    end
-
-    for _, desc in ipairs(projectile:GetDescendants()) do
-        if desc:IsA("BasePart") then
-            table.insert(parts, desc)
-        end
-    end
-
-    return parts
+    return getVisualCache(projectile).BaseParts
 end
 
 local function prepProjectile(projectile)
-    if projectile:IsA("BasePart") then
-        projectile.Anchored = true
-        projectile.CanCollide = false
-        projectile.CanTouch = false
-        projectile.CanQuery = false
-
-        for _, desc in ipairs(projectile:GetDescendants()) do
-            if desc:IsA("BasePart") then
-                desc.CanCollide = false
-                desc.CanTouch = false
-                desc.CanQuery = false
-            end
-        end
-
-        return
-    end
+    setVisualPartsVisible(projectile, true)
 
     for _, part in ipairs(getProjectileParts(projectile)) do
-        part.Anchored = true
-        part.CanCollide = false
-        part.CanTouch = false
-        part.CanQuery = false
+        if part and part.Parent then
+            part.Anchored = true
+            part.CanCollide = false
+            part.CanTouch = false
+            part.CanQuery = false
+        end
     end
 end
 
@@ -465,6 +602,25 @@ local function createProjectileVisual(template, projectileName)
     return createEffectCarrier(projectileName, clone)
 end
 
+local function acquireProjectileVisual(projectileName, template)
+    return createProjectileVisual(template, projectileName)
+end
+
+local function destroyProjectileVisual(projectile)
+    if not projectile then
+        return
+    end
+
+    deactivateVisualEffects(projectile)
+    setVisualPartsVisible(projectile, false)
+    visualCache[projectile] = nil
+
+    pcall(function()
+        projectile.Parent = nil
+        projectile:Destroy()
+    end)
+end
+
 local function activateProjectileEffects(projectile, projectileName, effectsEnabled)
     local hasVisiblePart = false
     local hasEffect = false
@@ -479,7 +635,7 @@ local function activateProjectileEffects(projectile, projectileName, effectsEnab
         return
     end
 
-    for _, desc in ipairs(projectile:GetDescendants()) do
+    for _, desc in ipairs(getVisualCache(projectile).Effects) do
         if desc:IsA("ParticleEmitter") then
             hasEffect = true
             desc.Enabled = true
@@ -488,7 +644,7 @@ local function activateProjectileEffects(projectile, projectileName, effectsEnab
             if emitCount and emitCount > 0 then
                 desc:Emit(emitCount)
             end
-        elseif desc:IsA("Trail") or desc:IsA("Beam") or desc:IsA("Light") then
+        elseif desc:IsA("Trail") or desc:IsA("Beam") or desc:IsA("Light") or desc:IsA("Highlight") then
             hasEffect = true
             desc.Enabled = true
         end
@@ -499,20 +655,63 @@ local function activateProjectileEffects(projectile, projectileName, effectsEnab
     end
 end
 
-local function getTargetRoot(targetZombieModel)
-    if not targetZombieModel or not targetZombieModel.Parent then return nil end
-    return targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart
+local function getProjectileVisualEndPosition(startPos, initialTargetPos, projectileVisualConfig)
+    local initialOffset = initialTargetPos - startPos
+    local initialDistance = initialOffset.Magnitude
+    if type(projectileVisualConfig) ~= "table" or projectileVisualConfig.ContinuePastTarget ~= true then
+        return initialTargetPos, false, initialDistance
+    end
+
+    local visualDirection = initialDistance > 0.001 and initialOffset.Unit or nil
+    if not visualDirection and typeof(projectileVisualConfig.Direction) == "Vector3" then
+        local configuredDirection = projectileVisualConfig.Direction
+        if configuredDirection.Magnitude > 0.001 then
+            visualDirection = configuredDirection.Unit
+        end
+    end
+
+    if not visualDirection then
+        return initialTargetPos, false, initialDistance
+    end
+
+    local maxDistance = math.max(initialDistance, tonumber(projectileVisualConfig.MaxDistance) or initialDistance)
+    if typeof(projectileVisualConfig.DestroyBeyondPosition) == "Vector3"
+        and typeof(projectileVisualConfig.Direction) == "Vector3"
+        and projectileVisualConfig.Direction.Magnitude > 0.001
+    then
+        local flatDirection = Vector3.new(projectileVisualConfig.Direction.X, 0, projectileVisualConfig.Direction.Z)
+        if flatDirection.Magnitude > 0.001 then
+            flatDirection = flatDirection.Unit
+            local flatStart = Vector3.new(startPos.X, 0, startPos.Z)
+            local flatDestroy = Vector3.new(projectileVisualConfig.DestroyBeyondPosition.X, 0, projectileVisualConfig.DestroyBeyondPosition.Z)
+            local destroyDistance = (flatDestroy - flatStart):Dot(flatDirection)
+            if destroyDistance > initialDistance and destroyDistance < maxDistance then
+                maxDistance = destroyDistance
+            end
+        end
+    end
+
+    return startPos + visualDirection * maxDistance, true, maxDistance
 end
 
-local function getTargetHumanoid(targetZombieModel)
-    if not targetZombieModel or not targetZombieModel.Parent then return nil end
-    return targetZombieModel:FindFirstChildOfClass("Humanoid")
+local function getTrajectoryPosition(startPos, endPos, arcHeight, alpha)
+    if arcHeight > 0 then
+        local controlPos = startPos:Lerp(endPos, 0.5) + Vector3.new(0, arcHeight, 0)
+        return (1 - alpha) ^ 2 * startPos + 2 * (1 - alpha) * alpha * controlPos + alpha ^ 2 * endPos
+    end
+
+    return startPos:Lerp(endPos, alpha)
 end
 
-local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPos, targetZombieModel, arcHeight, speedMult, ownerUserId, projectileVisualConfig)
+local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPos, _targetZombieModel, arcHeight, speedMult, ownerUserId, projectileVisualConfig)
     if type(projectileName) ~= "string" or projectileName == "" then return end
     if typeof(fireCFrame) ~= "CFrame" then return end
     if typeof(initialTargetPos) ~= "Vector3" then return end
+
+    ownerUserId = tonumber(ownerUserId)
+    if not isLocalOwner(ownerUserId) then
+        return
+    end
 
     local ammoFolder = ReplicatedStorage:FindFirstChild("Ammo") or ReplicatedStorage:WaitForChild("Ammo", 1)
     local template = ammoFolder and (ammoFolder:FindFirstChild(projectileName) or ammoFolder:WaitForChild(projectileName, 1))
@@ -521,122 +720,81 @@ local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPo
         return
     end
 
-    ownerUserId = tonumber(ownerUserId)
+    local bucket = shouldRenderProjectile(ownerUserId, fireCFrame.Position)
+    if not bucket then
+        return
+    end
 
-    local projectile = createProjectileVisual(template, projectileName)
+    local projectile = acquireProjectileVisual(projectileName, template)
     prepProjectile(projectile)
     setProjectileCFrame(projectile, fireCFrame)
     projectile.Parent = Workspace
+    incrementProjectileCount(bucket)
     activateProjectileEffects(projectile, projectileName, areEffectsEnabled(ownerUserId))
-    Debris:AddItem(projectile, 10)
 
     task.spawn(function()
-        speedMult = tonumber(speedMult) or 1
+        local finished = false
+        local function finishProjectile()
+            if finished then
+                return
+            end
+
+            finished = true
+            destroyProjectileVisual(projectile)
+            decrementProjectileCount(bucket)
+        end
+
+        speedMult = math.max(tonumber(speedMult) or 1, 0.01)
         arcHeight = tonumber(arcHeight) or 0
 
         local startPos = fireCFrame.Position
-        local targetRoot = getTargetRoot(targetZombieModel)
-
-        local initialDist = (initialTargetPos - startPos).Magnitude
-        local flightTime = math.max(0.05, initialDist / (PROJECTILE_SPEED * speedMult))
-        local elapsedTime = 0
-        local continuePastTarget = type(projectileVisualConfig) == "table" and projectileVisualConfig.ContinuePastTarget == true
-        local visualDirection = nil
-        local maxDistance = initialDist
-        local destroyBeyondPosition = nil
-
-        if continuePastTarget then
-            visualDirection = projectileVisualConfig.Direction
-            if typeof(visualDirection) ~= "Vector3" or visualDirection.Magnitude <= 0.001 then
-                visualDirection = initialTargetPos - startPos
-            end
-            if visualDirection.Magnitude > 0.001 then
-                visualDirection = visualDirection.Unit
-            else
-                visualDirection = fireCFrame.LookVector
-            end
-
-            maxDistance = math.max(initialDist, tonumber(projectileVisualConfig.MaxDistance) or initialDist)
-            if typeof(projectileVisualConfig.DestroyBeyondPosition) == "Vector3" then
-                destroyBeyondPosition = projectileVisualConfig.DestroyBeyondPosition
-            end
+        local visualEndPos, continuesPastTarget, visualDistance = getProjectileVisualEndPosition(startPos, initialTargetPos, projectileVisualConfig)
+        if not continuesPastTarget then
+            visualEndPos = initialTargetPos
         end
 
+        local flightTime = math.max(0.05, visualDistance / (PROJECTILE_SPEED * speedMult))
+        local maxLifetime = math.clamp(flightTime + 0.5, 0.25, 10)
+        local startedAt = os.clock()
+        local elapsedTime = 0
+
         while projectile and projectile.Parent do
-            local humanoid = getTargetHumanoid(targetZombieModel)
-            targetRoot = getTargetRoot(targetZombieModel)
-            if humanoid and humanoid.Health <= 0 and not continuePastTarget then
-                projectile:Destroy()
+            if os.clock() - startedAt >= maxLifetime then
+                finishProjectile()
                 break
             end
 
             local dt = RunService.Heartbeat:Wait()
-            local targetPos = targetRoot and (targetRoot.Position + Vector3.new(0, 1, 0)) or initialTargetPos
+            elapsedTime += dt
+            local t = math.clamp(elapsedTime / flightTime, 0, 1)
+            local currentPos = getTrajectoryPosition(startPos, visualEndPos, arcHeight, t)
+            local nextT = math.clamp(t + 0.03, 0, 1)
+            local nextPos = getTrajectoryPosition(startPos, visualEndPos, arcHeight, nextT)
 
-            if arcHeight > 0 then
-                elapsedTime += dt
-                local t = math.clamp(elapsedTime / flightTime, 0, 1)
-                local p0 = startPos
-                local p2 = targetPos
-                local p1 = p0:Lerp(p2, 0.5) + Vector3.new(0, arcHeight, 0)
-                local currentPos = (1 - t) ^ 2 * p0 + 2 * (1 - t) * t * p1 + t ^ 2 * p2
-                local nextT = math.clamp(t + 0.05, 0, 1)
-                local nextPos = (1 - nextT) ^ 2 * p0 + 2 * (1 - nextT) * nextT * p1 + nextT ^ 2 * p2
-
-                if (nextPos - currentPos).Magnitude > 0.001 then
-                    setProjectileCFrame(projectile, CFrame.lookAt(currentPos, nextPos))
-                else
-                    setProjectileCFrame(projectile, CFrame.new(currentPos))
-                end
-
-                if t >= 1 then
-                    projectile:Destroy()
-                    break
-                end
+            if (nextPos - currentPos).Magnitude > 0.001 then
+                setProjectileCFrame(projectile, CFrame.lookAt(currentPos, nextPos))
             else
-                local currentPos = getProjectilePosition(projectile)
-                if not currentPos then
-                    projectile:Destroy()
-                    break
-                end
+                setProjectileCFrame(projectile, CFrame.new(currentPos))
+            end
 
-                local moveStep = PROJECTILE_SPEED * speedMult * dt
-
-                if continuePastTarget then
-                    local nextPos = currentPos + visualDirection * moveStep
-                    setProjectileCFrame(projectile, CFrame.lookAt(nextPos, nextPos + visualDirection))
-
-                    local traveledDistance = (nextPos - startPos):Dot(visualDirection)
-                    local reachedMaxDistance = traveledDistance >= maxDistance
-                    local reachedBoundary = destroyBeyondPosition and (nextPos - destroyBeyondPosition):Dot(visualDirection) >= 0
-                    if reachedMaxDistance or reachedBoundary then
-                        projectile:Destroy()
-                        break
-                    end
-                else
-                    local direction = targetPos - currentPos
-                    local dist = direction.Magnitude
-
-                    if dist <= moveStep or dist <= 0.001 then
-                        projectile:Destroy()
-                        break
-                    end
-
-                    local nextPos = currentPos + direction.Unit * moveStep
-                    setProjectileCFrame(projectile, CFrame.lookAt(nextPos, targetPos))
-                end
+            if t >= 1 then
+                finishProjectile()
+                break
             end
         end
+
+        finishProjectile()
     end)
 end
 
 local function flashZombieRed(zombieModel)
     if not zombieModel or not zombieModel.Parent then return end
+    if zombieModel:GetAttribute("IsEventZomboss") == true then return end
     if flashingZombies[zombieModel] then return end
     flashingZombies[zombieModel] = true
 
     local originalColors = {}
-    for _, p in ipairs(zombieModel:GetDescendants()) do
+    for _, p in ipairs(getCachedZombieParts(zombieModel)) do
         if p:IsA("BasePart") then
             originalColors[p] = p.Color
             p.Color = Color3.fromRGB(255, 80, 80)
@@ -774,6 +932,7 @@ local function recycleHitEffect(key, effect)
     if not effect then return end
 
     deactivateVisualEffects(effect)
+    setVisualPartsVisible(effect, false)
 
     local ok = pcall(function()
         effect.Parent = nil
@@ -789,7 +948,7 @@ local function recycleHitEffect(key, effect)
 end
 
 local function emitHitEffect(effect)
-    for _, child in ipairs(effect:GetDescendants()) do
+    for _, child in ipairs(getVisualCache(effect).Effects) do
         if child:IsA("ParticleEmitter") then
             child.Enabled = true
             child:Emit(getEmitCount(child, 15))
@@ -852,13 +1011,290 @@ local function playHitEffect(hitPos, hitEffectTexture, hitEffectColor)
     end)
 end
 
+local function positionGroundEffect(effect, lawnCFrame, lawnSize)
+    if not effect or typeof(lawnCFrame) ~= "CFrame" or typeof(lawnSize) ~= "Vector3" then
+        return
+    end
+
+    local yOffset = lawnSize.Y * 0.5
+    if effect:IsA("BasePart") then
+        effect.CFrame = lawnCFrame * CFrame.new(0, yOffset + effect.Size.Y * 0.5, 0)
+    elseif effect:IsA("Model") then
+        local _, size = effect:GetBoundingBox()
+        effect:PivotTo(lawnCFrame * CFrame.new(0, yOffset + size.Y * 0.5, 0))
+    end
+end
+
+local function activateGroundEffect(effect)
+    for _, desc in ipairs(getVisualCache(effect).Effects) do
+        if desc:IsA("ParticleEmitter") or desc:IsA("Trail") or desc:IsA("Beam") or desc:IsA("Light") or desc:IsA("Highlight") then
+            desc.Enabled = true
+        end
+    end
+end
+
+local function acquireGroundEffect(effectName)
+    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
+    local template = hitFolder and hitFolder:FindFirstChild(effectName)
+    if not template then
+        warnProjectileOnce(effectName, "ReplicatedStorage.Hit ground effect not found on client")
+        return nil
+    end
+
+    local pool = getPool(groundEffectPools, effectName)
+    while #pool > 0 do
+        local effect = table.remove(pool)
+        if effect then
+            return effect
+        end
+    end
+
+    local effect = template:Clone()
+    prepProjectile(effect)
+    return effect
+end
+
+local function recycleGroundEffect(effectName, effect)
+    if not effect then
+        return
+    end
+
+    deactivateVisualEffects(effect)
+    setVisualPartsVisible(effect, false)
+
+    local ok = pcall(function()
+        effect.Parent = nil
+    end)
+    if not ok then
+        return
+    end
+
+    local pool = getPool(groundEffectPools, effectName)
+    if #pool < GROUND_EFFECT_POOL_LIMIT_PER_TYPE then
+        table.insert(pool, effect)
+    else
+        visualCache[effect] = nil
+        effect:Destroy()
+    end
+end
+
+local function stopGroundEffectVisual(visualId)
+    local state = activeGroundEffects[visualId]
+    if not state then
+        return
+    end
+
+    activeGroundEffects[visualId] = nil
+    recycleGroundEffect(state.EffectName, state.Effect)
+end
+
+local function startGroundEffectVisual(visualId, effectName, lawnCFrame, lawnSize, duration, ownerUserId)
+    if type(visualId) ~= "string" or type(effectName) ~= "string" or effectName == "" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    stopGroundEffectVisual(visualId)
+
+    local effect = acquireGroundEffect(effectName)
+    if not effect then
+        return
+    end
+
+    positionGroundEffect(effect, lawnCFrame, lawnSize)
+    deactivateVisualEffects(effect)
+    activateGroundEffect(effect)
+    effect.Parent = Workspace
+
+    local state = {
+        Effect = effect,
+        EffectName = effectName,
+        ExpiresAt = os.clock() + math.max(0.1, tonumber(duration) or 2),
+        Token = 0,
+    }
+    activeGroundEffects[visualId] = state
+
+    task.spawn(function()
+        while activeGroundEffects[visualId] == state do
+            if os.clock() >= state.ExpiresAt then
+                stopGroundEffectVisual(visualId)
+                break
+            end
+
+            task.wait(0.2)
+        end
+    end)
+end
+
+local function refreshGroundEffectVisual(visualId, duration)
+    local state = activeGroundEffects[visualId]
+    if not state then
+        return
+    end
+
+    state.ExpiresAt = os.clock() + math.max(0.1, tonumber(duration) or 2)
+end
+
+local function playEffectBurst(effectName, effectCFrame, ownerUserId)
+    if type(effectName) ~= "string" or effectName == "" or typeof(effectCFrame) ~= "CFrame" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
+    local template = hitFolder and hitFolder:FindFirstChild(effectName)
+    if not template then
+        warnProjectileOnce(effectName, "ReplicatedStorage.Hit burst effect not found on client")
+        return
+    end
+
+    local key = "burst:" .. effectName
+    local effect = acquireHitEffect(key, function()
+        local clone = template:Clone()
+        prepProjectile(clone)
+        return clone
+    end)
+
+    prepProjectile(effect)
+    deactivateVisualEffects(effect)
+    setProjectileCFrame(effect, effectCFrame)
+    effect.Parent = Workspace
+
+    task.defer(function()
+        emitHitEffect(effect)
+    end)
+
+    task.delay(2, function()
+        recycleHitEffect(key, effect)
+    end)
+end
+
+local function playExplosionBurst(position, explosionType, ownerUserId)
+    if typeof(position) ~= "Vector3" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    local effectPart = Instance.new("Part")
+    effectPart.Name = "LocalExplosionBurst"
+    effectPart.Anchored = true
+    effectPart.CanCollide = false
+    effectPart.CanQuery = false
+    effectPart.CanTouch = false
+    effectPart.Transparency = 1
+    effectPart.Parent = Workspace
+
+    if explosionType == "Row" then
+        effectPart.Size = Vector3.new(6, 1, 100)
+        effectPart.Position = position - Vector3.new(0, 1.5, 0)
+
+        local particles = Instance.new("ParticleEmitter")
+        particles.Texture = "rbxassetid://248625108"
+        particles.Color = ColorSequence.new(Color3.fromRGB(255, 85, 0))
+        particles.Lifetime = NumberRange.new(0.05, 0.12)
+        particles.LightEmission = 1
+        particles.EmissionDirection = Enum.NormalId.Top
+        particles.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 4),
+            NumberSequenceKeypoint.new(1, 10),
+        })
+        particles.Rate = 2000
+        particles.Speed = NumberRange.new(15, 30)
+        particles.Parent = effectPart
+
+        task.delay(0.5, function()
+            if particles then
+                particles.Enabled = false
+            end
+        end)
+    else
+        effectPart.Position = position
+
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = effectPart
+
+        local particles = Instance.new("ParticleEmitter")
+        particles.Texture = "rbxassetid://243098098"
+        particles.Color = ColorSequence.new(Color3.fromRGB(255, 100, 0))
+        particles.Size = NumberSequence.new(1, 15)
+        particles.Rate = 500
+        particles.Speed = NumberRange.new(10, 20)
+        particles.Lifetime = NumberRange.new(0.2, 0.4)
+        particles.SpreadAngle = Vector2.new(180, 180)
+        particles.Parent = attachment
+
+        task.delay(0.2, function()
+            if particles then
+                particles.Enabled = false
+            end
+        end)
+    end
+
+    Debris:AddItem(effectPart, 2)
+end
+
+local function playThrownPlantVisual(modelName, startPosition, targetPosition, height, duration, ownerUserId)
+    if type(modelName) ~= "string" or modelName == "" then
+        return
+    end
+    if typeof(startPosition) ~= "Vector3" or typeof(targetPosition) ~= "Vector3" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
+    local template = itemModels and (itemModels:FindFirstChild(modelName .. "_Plant") or itemModels:FindFirstChild(modelName))
+    if not template then
+        warnProjectileOnce(modelName, "ItemModels thrown plant visual not found on client")
+        return
+    end
+
+    local model = template:Clone()
+    prepProjectile(model)
+    setProjectileCFrame(model, CFrame.new(startPosition))
+    model.Parent = Workspace
+
+    task.spawn(function()
+        height = tonumber(height) or 15
+        duration = math.max(0.05, tonumber(duration) or 0.5)
+        local startTime = os.clock()
+
+        while model and model.Parent do
+            local alpha = math.clamp((os.clock() - startTime) / duration, 0, 1)
+            local currentPos = startPosition:Lerp(targetPosition, alpha) + Vector3.new(0, math.sin(alpha * math.pi) * height, 0)
+            setProjectileCFrame(model, CFrame.new(currentPos) * CFrame.Angles(math.rad(alpha * 360), 0, 0))
+
+            if alpha >= 1 then
+                break
+            end
+
+            RunService.Heartbeat:Wait()
+        end
+
+        if model then
+            visualCache[model] = nil
+            model:Destroy()
+        end
+    end)
+end
+
 local function playHitVisual(targetZombieModel, damage, hitPos, hitEffectTexture, hitEffectColor, ownerUserId)
     if not areEffectsEnabled(tonumber(ownerUserId)) then
         return
     end
 
     flashZombieRed(targetZombieModel)
-    showDamageText(targetZombieModel, damage)
+    if (tonumber(damage) or 0) > 0 then
+        showDamageText(targetZombieModel, damage)
+    end
     playHitEffect(hitPos, hitEffectTexture, hitEffectColor)
 end
 
@@ -869,6 +1305,21 @@ local function playDamageTextVisual(targetZombieModel, damage, ownerUserId)
 
     flashZombieRed(targetZombieModel)
     showDamageText(targetZombieModel, damage)
+end
+
+local function playDamageTextBatch(entries)
+    if type(entries) ~= "table" then
+        return
+    end
+
+    for _, entry in ipairs(entries) do
+        local targetZombieModel = entry.Target or entry[1]
+        local damage = entry.Damage or entry[2]
+        local ownerUserId = entry.OwnerUserId or entry[3]
+        if areEffectsEnabled(tonumber(ownerUserId)) then
+            showDamageText(targetZombieModel, damage)
+        end
+    end
 end
 
 function PlantAttackVisualController.SetVisualSettings(newSettings)
@@ -910,6 +1361,20 @@ function PlantAttackVisualController.Init()
             playHitVisual(...)
         elseif action == "DamageText" then
             playDamageTextVisual(...)
+        elseif action == "DamageTextBatch" then
+            playDamageTextBatch(...)
+        elseif action == "GroundEffectStart" then
+            startGroundEffectVisual(...)
+        elseif action == "GroundEffectRefresh" then
+            refreshGroundEffectVisual(...)
+        elseif action == "GroundEffectStop" then
+            stopGroundEffectVisual(...)
+        elseif action == "ThrownPlantVisual" then
+            playThrownPlantVisual(...)
+        elseif action == "EffectBurst" then
+            playEffectBurst(...)
+        elseif action == "ExplosionBurst" then
+            playExplosionBurst(...)
         end
     end)
 end

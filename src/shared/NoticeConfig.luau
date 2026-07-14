@@ -7,6 +7,102 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
     {
+        Id = "notice-2026-07-13",
+        TagText = "2026/7/13",
+        PublishedAt = "2026-07-13",
+        Title = "July 13 Update Notice",
+        Sections = {
+            {
+                Title = "Dr. Zomboss Schedule",
+                Content = "Zomboss now appears every 30 minutes. Check the Event button or Zomboss Shop for the countdown.",
+            },
+            {
+                Title = "Lucky Code Reward",
+                Content = "Enter code Lucky in Codes to claim 3 Thunder Potions.",
+            },
+            {
+                Title = "Pass Event Ended",
+                Content = "The Pass event has ended for now. The Pass entry is temporarily hidden.",
+            },
+            {
+                Title = "Boss Battle Improvements",
+                Content = "Fixed several Zomboss battle UI issues, including blur lock problems and missing Boss HP/DPS display when joining an ongoing fight.",
+            },
+            {
+                Title = "Shop and Balance Updates",
+                Content = "Improved shop item list rendering and adjusted Boss battle balance for a smoother combat experience.",
+            },
+        },
+    },
+    {
+        Id = "notice-2026-07-11",
+        TagText = "2026/7/11",
+        PublishedAt = "2026-07-11",
+        Title = "July 11 Dr. Zomboss Update",
+        Sections = {
+            {
+                Title = "Dr. Zomboss Event",
+                Content = "Zomboss now appears every 2 hours. You can check the countdown on the Event button or in the Zomboss Shop.",
+            },
+            {
+                Title = "Boss Battle Rewards",
+                Content = "Deal damage to Dr. Zomboss to earn Taco drops. You receive 1 Taco for every 1% of the boss HP you deal, and 120 bonus Tacos are shared by all players who damaged the boss when he is defeated.",
+            },
+            {
+                Title = "Zomboss Shop",
+                Content = "The Zomboss Shop has been updated. Spend Tacos or Robux to get special items, mutation potions, and limited plants such as Lightning Reed.",
+            },
+            {
+                Title = "New Mutation Potion Rules",
+                Content = "Mutation potions can now be used near eligible plants. Hold a potion, stand near a plant, and press F for a chance to trigger its mutation effect.",
+            },
+            {
+                Title = "Improvements",
+                Content = "Purchase and claim actions now respond faster. Tutorial guidance, sign-in timing, Boss UI, DPS display, and several combat effects have also been improved.",
+            },
+        },
+    },
+    {
+        Id = "notice-2026-07-09",
+        TagText = "2026/7/9",
+        PublishedAt = "2026-07-09",
+        Title = "July 9 Update Notice",
+        Sections = {
+            {
+                Title = "New Zombies",
+                Content = "Dancing Zombie and Gargantuar Zombie have appeared in battle scenes. Prepare for tougher enemies and new combat challenges.",
+            },
+            {
+                Title = "Skip Blind Box Option",
+                Content = "A new Skip Blind Box option has been added to Settings. When enabled, Blind Box rewards are granted directly without dropping the box or playing the opening animation.",
+            },
+            {
+                Title = "Bug Fixes",
+                Content = "Fixed several bugs and improved the overall game experience.",
+            },
+        },
+    },
+    {
+        Id = "notice-2026-07-08",
+        TagText = "2026/7/8",
+        PublishedAt = "2026-07-08",
+        Title = "July 8 Update Notice",
+        Sections = {
+            {
+                Title = "Leaderboard Reset",
+                Content = "The leaderboard has been reset. Leaderboard season rewards have already been sent to eligible players. Please check your gifts or inventory in game.",
+            },
+            {
+                Title = "Inventory Improvements",
+                Content = "The inventory has been optimized. Item quantities and inventory display are now clearer and easier to use.",
+            },
+            {
+                Title = "Sun Reset",
+                Content = "Sun has been reset in this update to keep the game balance healthy. Thank you for your understanding and support.",
+            },
+        },
+    },
+    {
         Id = "notice-2026-07-03",
         TagText = "2026/7/3",
         PublishedAt = "2026-07-03",

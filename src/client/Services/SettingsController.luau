@@ -19,7 +19,12 @@ local SETTINGS_INPUT_BLOCKER_NAME = "SettingsInputBlocker"
 local SETTINGS_BLOCK_JUMP_ACTION = "GardenWarfareSettingsBlockJump"
 local SETTINGS_DISPLAY_ORDER = 200
 local DISTURB_REMOTE_NAME = "SetRejectInteractionRE"
+local DIRECT_BOX_REMOTE_NAME = "SetZombieBoxDirectRewardRE"
 local DEFAULT_MUSIC_VOLUME = 1
+local BASE_SUNFLOWER_NAME = "BaseSunflower"
+local BASE_SUNFLOWER_DEFAULT_SCALE = 1
+local BASE_SUNFLOWER_MAX_SCALE = 50
+local BASE_SUNFLOWER_SCALE_EPSILON = 0.01
 
 local settings = {
     Music = true,
@@ -28,7 +33,9 @@ local settings = {
     EffectsOthers = true,
     PlantSelf = true,
     PlantOthers = true,
+    Sunflower = true,
     Disturb = false,
+    Box = false,
 }
 
 local started = false
@@ -38,6 +45,7 @@ local watchedPlantModels = setmetatable({}, { __mode = "k" })
 local watchedPlots = setmetatable({}, { __mode = "k" })
 local watchedPlantFolders = setmetatable({}, { __mode = "k" })
 local watchedLawnFolders = setmetatable({}, { __mode = "k" })
+local watchedBaseSunflowers = setmetatable({}, { __mode = "k" })
 local toggleButtonOnPositions = setmetatable({}, { __mode = "k" })
 local toggleUis = {}
 local musicSliderUi = nil
@@ -50,7 +58,9 @@ local TOGGLE_FRAME_NAMES = {
     EffectsOthers = { "EffectsOthersFrame", "EffectsOthers" },
     PlantSelf = { "PlantSelf", "PlantSelfFrame" },
     PlantOthers = { "PlantOthersFrame", "PlantOthers" },
+    Sunflower = { "Sunflower", "SunflowerFrame" },
     Disturb = { "Disturb", "DisturbFrame" },
+    Box = { "box", "Box", "BoxFrame" },
 }
 
 local EFFECT_CONTAINER_NAMES = {
@@ -208,8 +218,12 @@ local function isPlantModel(model)
         or model:GetAttribute("IsMature")
         or model:GetAttribute("PlantedOn") ~= nil
         or model:GetAttribute("YieldPlant") ~= nil
-        or model.Name == "BaseSunflower"
+        or model.Name == BASE_SUNFLOWER_NAME
         or string.match(model.Name, "^BaseMerchant_") ~= nil
+end
+
+local function isBaseSunflower(model)
+    return model and model:IsA("Model") and model.Name == BASE_SUNFLOWER_NAME
 end
 
 local function findPlantModelAncestor(instance)
@@ -494,6 +508,98 @@ local function applyDisturbSetting()
     remote:FireServer(settings.Disturb == true)
 end
 
+local function applyBoxSetting()
+    local remote = ReplicatedStorage:FindFirstChild(DIRECT_BOX_REMOTE_NAME)
+        or ReplicatedStorage:WaitForChild(DIRECT_BOX_REMOTE_NAME, 5)
+    if not remote or not remote:IsA("RemoteEvent") then
+        warn("[SettingsController] " .. DIRECT_BOX_REMOTE_NAME .. " was not found.")
+        return
+    end
+
+    remote:FireServer(settings.Box == true)
+end
+
+local function sanitizeBaseSunflowerScale(value)
+    local scale = tonumber(value)
+    if not scale or scale ~= scale or scale == math.huge or scale == -math.huge then
+        return BASE_SUNFLOWER_DEFAULT_SCALE
+    end
+
+    return math.clamp(scale, BASE_SUNFLOWER_DEFAULT_SCALE, BASE_SUNFLOWER_MAX_SCALE)
+end
+
+local function getBaseSunflowerTargetScale(sunflower)
+    if settings.Sunflower == false then
+        return BASE_SUNFLOWER_DEFAULT_SCALE
+    end
+
+    return sanitizeBaseSunflowerScale(sunflower:GetAttribute("LastSunflowerScale"))
+end
+
+local function applyBaseSunflowerScale(sunflower)
+    if not isBaseSunflower(sunflower) or not sunflower.Parent then
+        return
+    end
+
+    local targetScale = getBaseSunflowerTargetScale(sunflower)
+    if not targetScale then
+        return
+    end
+
+    local okGetScale, currentScale = pcall(function()
+        return sunflower:GetScale()
+    end)
+    if okGetScale and typeof(currentScale) == "number" and math.abs(currentScale - targetScale) <= BASE_SUNFLOWER_SCALE_EPSILON then
+        return
+    end
+
+    local ok, err = pcall(function()
+        sunflower:ScaleTo(targetScale)
+    end)
+    if not ok then
+        warn("[SettingsController] Failed to apply BaseSunflower scale: " .. tostring(err))
+    end
+end
+
+local function watchBaseSunflower(sunflower)
+    if not isBaseSunflower(sunflower) then
+        return
+    end
+
+    if not watchedBaseSunflowers[sunflower] then
+        watchedBaseSunflowers[sunflower] = true
+        sunflower:GetAttributeChangedSignal("LastSunflowerScale"):Connect(function()
+            task.defer(applyBaseSunflowerScale, sunflower)
+        end)
+    end
+
+    task.defer(applyBaseSunflowerScale, sunflower)
+end
+
+local function forEachBaseSunflower(callback)
+    local plotsFolder = Workspace:FindFirstChild("Plots")
+    if not plotsFolder then
+        return
+    end
+
+    local seen = {}
+    for _, plot in ipairs(plotsFolder:GetChildren()) do
+        for _, desc in ipairs(plot:GetDescendants()) do
+            if isBaseSunflower(desc) and not seen[desc] then
+                seen[desc] = true
+                callback(desc)
+            end
+        end
+    end
+end
+
+local function applyBaseSunflowerSettings()
+    forEachBaseSunflower(function(sunflower)
+        watchBaseSunflower(sunflower)
+        applyBaseSunflowerScale(sunflower)
+    end)
+end
+
 local function watchPlantsFolder(folder)
     if not folder or watchedPlantFolders[folder] then
         return
@@ -531,6 +637,9 @@ local function watchPlot(plot)
 
     for _, desc in ipairs(plot:GetDescendants()) do
         if desc:IsA("Model") and isPlantModel(desc) then
+            if isBaseSunflower(desc) then
+                watchBaseSunflower(desc)
+            end
             deferApplyPlantSettings(desc)
         elseif desc:IsA("Animator") then
             task.defer(function()
@@ -544,6 +653,9 @@ local function watchPlot(plot)
 
     plot.DescendantAdded:Connect(function(descendant)
         if descendant:IsA("Model") then
+            if isBaseSunflower(descendant) then
+                watchBaseSunflower(descendant)
+            end
             deferApplyPlantSettings(descendant)
         elseif descendant:IsA("Animator") then
             task.defer(function()
@@ -560,7 +672,10 @@ local function watchPlot(plot)
             watchPlantsFolder(child)
         elseif child.Name == "Lawn" then
             watchLawnFolder(child)
-        elseif (child.Name == "BaseSunflower" or string.match(child.Name, "^BaseMerchant_") ~= nil) and child:IsA("Model") then
+        elseif child.Name == BASE_SUNFLOWER_NAME and child:IsA("Model") then
+            watchBaseSunflower(child)
+            deferApplyPlantSettings(child)
+        elseif string.match(child.Name, "^BaseMerchant_") ~= nil and child:IsA("Model") then
             deferApplyPlantSettings(child)
         end
     end)
@@ -596,6 +711,10 @@ local function applySettingChange(key)
         applyMusicSettings()
     elseif key == "Disturb" then
         applyDisturbSetting()
+    elseif key == "Box" then
+        applyBoxSetting()
+    elseif key == "Sunflower" then
+        applyBaseSunflowerSettings()
     else
         applyExistingPlantsOnce()
     end
@@ -1031,10 +1150,13 @@ local function bindSettingsGui()
     bindToggle(frame, "EffectsOthers", "Other Effects")
     bindToggle(frame, "PlantSelf", "Self Plants")
     bindToggle(frame, "PlantOthers", "Other Plants")
+    bindToggle(frame, "Sunflower", "Sunflower")
     bindToggle(frame, "Disturb", "Reject Interaction")
+    bindToggle(frame, "Box", "Box")
     refreshToggleUis()
     setMusicSliderButtonPosition()
     applyDisturbSetting()
+    applyBoxSetting()
 end
 
 function SettingsController.Init()

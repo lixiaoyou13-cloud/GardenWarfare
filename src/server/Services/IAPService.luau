@@ -9,15 +9,18 @@ local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local ExclusiveRollConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ExclusiveRollConfig"))
 local PassRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("PassRewardConfig"))
+local ZombossShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ZombossShopConfig"))
 local InventoryService = require(script.Parent.InventoryService)
 
-local PRODUCT_NEWBIE_GIFT = 3594585526 -- 新手礼包 ID
 local PRODUCT_SEVEN_DAY = 3582734340 -- 七天签到一键领取的内购 ID
 local PRODUCT_RARE_ROLL_TICKET = 3599579545 -- 稀有抽奖次数 ID
 
 local PRODUCT_CHEST_OPEN = 3606175579
 local PRODUCT_PASS_EXP = PassRewardConfig.ExpProductId
 local PRODUCT_PASS_EXP_AMOUNT = PassRewardConfig.ExpProductAmount or 200
+local RETIRED_PRODUCT_IDS = {
+    [3594585526] = "newbie gift",
+}
 local receiptSaveStates = {}
 local exclusiveShopFreeRollStates = {}
 local exclusiveShopFreeRollLifecycleBound = false
@@ -73,6 +76,62 @@ local function GrantShopReward(player, reward)
     elseif reward.ItemType == "Plant" then
         PlayerDataManager.GivePlant(player, reward.ItemId, reward.Amount, reward.Mutation or 1, true)
         return true
+    end
+
+    return false
+end
+
+local function FindZombossShopRobuxRewardByProductId(productId)
+    for _, offerId in ipairs(ZombossShopConfig.OfferOrder or {}) do
+        local offer = ZombossShopConfig.GetOffer(offerId)
+        if offer and tonumber(offer.RobuxProductId) == productId then
+            local rewardType = tostring(offer.RewardType or "Item")
+            local rewardItemId = offer.RewardItemId
+            local rewardAmount = math.max(1, math.floor(tonumber(offer.RewardAmount) or 1))
+            local rewardMutation = math.max(1, math.floor(tonumber(offer.RewardMutation) or 1))
+
+            if rewardType == "Plant" then
+                local plantDetail = ItemConfig.Plants and ItemConfig.Plants[rewardItemId]
+                if not plantDetail then
+                    return nil
+                end
+
+                return {
+                    OfferId = offerId,
+                    ItemType = "Plant",
+                    ItemId = rewardItemId,
+                    Amount = rewardAmount,
+                    Mutation = rewardMutation,
+                    Name = plantDetail.Name or rewardItemId,
+                    Quality = plantDetail.Quality,
+                }
+            end
+
+            local itemDetail = ItemConfig.Items and ItemConfig.Items[rewardItemId]
+            if not itemDetail then
+                return nil
+            end
+
+            return {
+                OfferId = offerId,
+                ItemType = "Item",
+                ItemId = rewardItemId,
+                Amount = rewardAmount,
+                Name = itemDetail.Name or rewardItemId,
+                Quality = itemDetail.Quality,
+            }
+        end
+    end
+
+    return nil
+end
+
+local function GrantZombossShopRobuxReward(player, reward)
+    if reward.ItemType == "Plant" then
+        PlayerDataManager.GivePlant(player, reward.ItemId, reward.Amount, reward.Mutation or 1, true)
+        return true
+    elseif reward.ItemType == "Item" then
+        return PlayerDataManager.GiveItem(player, reward.ItemId, reward.Amount, false) == true
     end
 
     return false
@@ -474,20 +533,20 @@ local function useExclusiveRollTicket(player)
 
     fireInventoryUpdate(player, data)
 
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if not saved and saveErr ~= "stale_session" then
-        warn("[IAPService] Failed to save exclusive ticket roll for " .. player.Name .. ": " .. tostring(saveErr))
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "exclusive ticket roll")
+    if not saveQueued and saveErr ~= "stale_session" then
+        warn("[IAPService] Failed to queue save after exclusive ticket roll for " .. player.Name .. ": " .. tostring(saveErr))
     end
-    if not saved then
+    if not saveQueued then
         restoreExclusiveRollTicketState(data, rollbackSnapshot, ticketKey, pityKey)
         fireInventoryUpdate(player, data)
 
-        local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+        local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "exclusive ticket roll rollback")
         if not rollbackSaved and rollbackErr ~= "stale_session" then
-            warn("[IAPService] Failed to save exclusive ticket roll rollback for " .. player.Name .. ": " .. tostring(rollbackErr))
+            warn("[IAPService] Failed to queue exclusive ticket roll rollback save for " .. player.Name .. ": " .. tostring(rollbackErr))
         end
 
-        return false, "Exclusive roll save failed. Please try again.", data[ticketKey]
+        return false, "Exclusive roll save unavailable. Please try again.", data[ticketKey]
     end
 
     notifyExclusiveRollPurchase(player, payload, anyHighQuality)
@@ -652,21 +711,21 @@ local function useExclusiveShopFreeRoll(player, rollGroup, groupConfig)
 
     fireInventoryUpdate(player, data)
 
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if not saved then
-        warn("[IAPService] Failed to save exclusive shop free roll for " .. player.Name .. ": " .. tostring(saveErr))
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "exclusive shop free roll")
+    if not saveQueued then
+        warn("[IAPService] Failed to queue save after exclusive shop free roll for " .. player.Name .. ": " .. tostring(saveErr))
         restoreExclusiveShopFreeRollState(data, rollbackSnapshot, dataKey)
         fireInventoryUpdate(player, data)
 
-        local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+        local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "exclusive shop free roll rollback")
         if not rollbackSaved and rollbackErr ~= "stale_session" then
-            warn("[IAPService] Failed to save exclusive shop free roll rollback for " .. player.Name .. ": " .. tostring(rollbackErr))
+            warn("[IAPService] Failed to queue exclusive shop free roll rollback save for " .. player.Name .. ": " .. tostring(rollbackErr))
         end
 
         if sessionState then
             sessionState.InProgress = false
         end
-        return false, "Free roll save failed. Please try again.", 0
+        return false, "Free roll save unavailable. Please try again.", 0
     end
 
     if sessionState then
@@ -772,37 +831,10 @@ function IAPService.Init()
             return Enum.ProductPurchaseDecision.PurchaseGranted
         end
 
-        -- 1 判定是否购买了新手限时间礼包
-        if receiptInfo.ProductId == PRODUCT_NEWBIE_GIFT then
-            if receiptSaveState == "granted_pending_save" then
-                return finalizeReceiptSave(player, receiptKey, canPersistReceipt)
-            end
-
-            local data = PlayerDataManager.GetPlayerData(player)
-            if not data then
-                return Enum.ProductPurchaseDecision.NotProcessedYet
-            end
-
-            local grantedNewbieGift = false
-            if not data.NewbieGiftPurchased then
-                PlayerDataManager.GiveSeed(player, "CoconutTree", 6, true)
-                data.NewbieGiftPurchased = true
-                grantedNewbieGift = true
-            end
-            return finalizeReceiptSave(player, receiptKey, canPersistReceipt, function()
-                fireInventoryUpdate(player, PlayerDataManager.GetPlayerData(player) or data)
-
-                if not grantedNewbieGift then
-                    return
-                end
-
-                local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
-                if playObtainEffectRE then
-                    local itemDetail = ItemConfig.Seeds["CoconutTree"]
-                    local playFullEffect = (tonumber(itemDetail and itemDetail.Quality) or 0) >= 4
-                    playObtainEffectRE:FireClient(player, "Purchase Successful!\nObtained 6x CoconutTree!", playFullEffect)
-                end
-            end)
+        local retiredProductName = RETIRED_PRODUCT_IDS[receiptInfo.ProductId]
+        if retiredProductName then
+            warn("[IAPService] Retired product receipt ignored: " .. tostring(retiredProductName))
+            return finalizeReceiptSave(player, receiptKey, canPersistReceipt)
         end
 
         if receiptInfo.ProductId == PRODUCT_CHEST_OPEN then
@@ -963,6 +995,42 @@ function IAPService.Init()
 
             return finalizeReceiptSave(player, receiptKey, canPersistReceipt, function()
                 sendTip(player, "Pass EXP +" .. tostring(PRODUCT_PASS_EXP_AMOUNT))
+            end)
+        end
+
+        local zombossShopRobuxReward = FindZombossShopRobuxRewardByProductId(receiptInfo.ProductId)
+        if zombossShopRobuxReward then
+            if receiptSaveState == "granted_pending_save" then
+                return finalizeReceiptSave(player, receiptKey, canPersistReceipt)
+            end
+
+            local data = PlayerDataManager.GetPlayerData(player)
+            if not data then
+                return Enum.ProductPurchaseDecision.NotProcessedYet
+            end
+
+            local granted = GrantZombossShopRobuxReward(player, zombossShopRobuxReward)
+            if not granted then
+                warn("[IAPService] Failed to grant Zomboss shop Robux reward for productId: " .. tostring(receiptInfo.ProductId))
+                return Enum.ProductPurchaseDecision.NotProcessedYet
+            end
+
+            return finalizeReceiptSave(player, receiptKey, canPersistReceipt, function()
+                fireInventoryUpdate(player, PlayerDataManager.GetPlayerData(player) or data)
+
+                local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
+                if playObtainEffectRE then
+                    local playFullEffect = (tonumber(zombossShopRobuxReward.Quality) or 0) >= 4
+                    playObtainEffectRE:FireClient(
+                        player,
+                        "Purchase Successful!\nObtained "
+                            .. tostring(zombossShopRobuxReward.Amount)
+                            .. "x "
+                            .. tostring(zombossShopRobuxReward.Name)
+                            .. "!",
+                        playFullEffect
+                    )
+                end
             end)
         end
 

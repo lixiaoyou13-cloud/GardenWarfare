@@ -9,10 +9,14 @@ local Players = game:GetService("Players")
 local localPlayer = Players.LocalPlayer
 local itemModels = ReplicatedStorage:WaitForChild("ItemModels")
 local zombieBoxRE = ReplicatedStorage:WaitForChild("ZombieBoxRE")
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 
 -- 用于假抽奖滚动动画的模型库
 local fakeItemPool = {}
 local OWNED_BOX_HIGHLIGHT_NAME = "OwnedZombieBoxHighlight"
+local watchedRewardBoxes = setmetatable({}, { __mode = "k" })
+local originalLocalTransparencyModifiers = setmetatable({}, { __mode = "k" })
+local originalEffectEnabled = setmetatable({}, { __mode = "k" })
 
 local function setVisualPartsAnchored(instance)
     if instance:IsA("BasePart") then
@@ -79,28 +83,138 @@ local function refreshOwnedBoxHighlight(box)
     highlight.Parent = box
 end
 
-local function watchPotentialRewardBox(box)
-    if not (box:IsA("Model") or box:IsA("BasePart")) then return end
-    if box:GetAttribute("IsZombieRewardBox") ~= true and not string.find(box.Name, "ZombieRewardBox") then return end
+local function isPotentialRewardBox(box)
+    return box
+        and (box:IsA("Model") or box:IsA("BasePart"))
+        and (box:GetAttribute("IsZombieRewardBox") == true or string.find(box.Name, "ZombieRewardBox") ~= nil)
+end
+
+local function isOwnedRewardBox(box)
+    return isPotentialRewardBox(box) and box:GetAttribute("OwnerId") == localPlayer.UserId
+end
+
+local function setLocalEffectVisible(effect, isVisible)
+    if effect:IsA("BasePart") then
+        if originalLocalTransparencyModifiers[effect] == nil then
+            originalLocalTransparencyModifiers[effect] = effect.LocalTransparencyModifier
+        end
+        effect.LocalTransparencyModifier = isVisible and originalLocalTransparencyModifiers[effect] or 1
+    elseif effect:IsA("ParticleEmitter")
+        or effect:IsA("Light")
+        or effect:IsA("Beam")
+        or effect:IsA("Trail")
+        or effect:IsA("Highlight")
+    then
+        if originalEffectEnabled[effect] == nil then
+            originalEffectEnabled[effect] = effect.Enabled
+        end
+        effect.Enabled = isVisible and originalEffectEnabled[effect] or false
+    end
+end
+
+local function applyRewardBoxVisibility(box)
+    if not isPotentialRewardBox(box) then
+        return
+    end
+
+    local isVisible = isOwnedRewardBox(box)
+    setLocalEffectVisible(box, isVisible)
+    for _, descendant in ipairs(box:GetDescendants()) do
+        setLocalEffectVisible(descendant, isVisible)
+    end
 
     refreshOwnedBoxHighlight(box)
+end
+
+local function watchPotentialRewardBox(box)
+    if not isPotentialRewardBox(box) then return end
+
+    applyRewardBoxVisibility(box)
+    if watchedRewardBoxes[box] then
+        return
+    end
+    watchedRewardBoxes[box] = true
+
+    box.DescendantAdded:Connect(function()
+        task.defer(applyRewardBoxVisibility, box)
+    end)
 
     box:GetAttributeChangedSignal("OwnerId"):Connect(function()
-        refreshOwnedBoxHighlight(box)
+        applyRewardBoxVisibility(box)
     end)
 
     box:GetAttributeChangedSignal("IsZombieRewardBox"):Connect(function()
-        refreshOwnedBoxHighlight(box)
+        applyRewardBoxVisibility(box)
     end)
 end
 
-function ZombieBoxController.Init()
-    -- 初始化假抽奖池
-    for _, template in pairs(itemModels:GetChildren()) do
-        if template:IsA("Model") and template.Name ~= "Box" then
-            table.insert(fakeItemPool, template.Name)
+local function getSeedModelName(seedId)
+    local seedModelName = tostring(seedId) .. "_Seed"
+    if itemModels:FindFirstChild(seedModelName) then
+        return seedModelName
+    end
+    if itemModels:FindFirstChild("Seed") then
+        return "Seed"
+    end
+    return nil
+end
+
+local function getPlantModelName(plantId)
+    local plantModelName = tostring(plantId) .. "_Plant"
+    if itemModels:FindFirstChild(plantModelName) then
+        return plantModelName
+    end
+    if itemModels:FindFirstChild(tostring(plantId)) then
+        return tostring(plantId)
+    end
+    return nil
+end
+
+local function addFakeItemPoolEntry(itemType, itemId, modelName)
+    if not modelName then return end
+    table.insert(fakeItemPool, {
+        type = itemType,
+        id = itemId,
+        modelName = modelName,
+    })
+end
+
+local function rebuildFakeItemPool()
+    table.clear(fakeItemPool)
+
+    for seedId, seedDetail in pairs(ItemConfig.Seeds or {}) do
+        if not seedDetail.ExcludeFromRandomSeedRewards then
+            addFakeItemPoolEntry("Seed", seedId, getSeedModelName(seedId))
         end
     end
+
+    for plantId, plantDetail in pairs(ItemConfig.Plants or {}) do
+        if not plantDetail.ExcludeFromRandomPlantRewards then
+            addFakeItemPoolEntry("Plant", plantId, getPlantModelName(plantId))
+        end
+    end
+end
+
+local function getDisplayTemplateForReward(item)
+    if type(item) == "table" then
+        if item.type == "Plant" then
+            local plantModelName = getPlantModelName(item.id)
+            if plantModelName then
+                return itemModels:FindFirstChild(plantModelName)
+            end
+        elseif item.type == "Seed" then
+            local seedModelName = getSeedModelName(item.id)
+            if seedModelName then
+                return itemModels:FindFirstChild(seedModelName)
+            end
+        end
+    end
+
+    return itemModels:FindFirstChild("Seed")
+end
+
+function ZombieBoxController.Init()
+    rebuildFakeItemPool()
 
     -- 监听服务端要求生成盲盒的指令
     zombieBoxRE.OnClientEvent:Connect(function(action, dropPos, finalItem)
@@ -207,8 +321,8 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
         for i = 1, iterations do
             if displayModel then displayModel:Destroy() end
 
-            local randomName = fakeItemPool[math.random(1, #fakeItemPool)] or "Seed"
-            local template = itemModels:FindFirstChild(randomName) or itemModels:FindFirstChild("Seed")
+            local randomEntry = #fakeItemPool > 0 and fakeItemPool[math.random(1, #fakeItemPool)] or nil
+            local template = randomEntry and itemModels:FindFirstChild(randomEntry.modelName) or itemModels:FindFirstChild("Seed")
 
             if template then
                 displayModel = template:Clone()
@@ -227,8 +341,7 @@ function ZombieBoxController.SpawnLocalBox(dropPos, finalItem)
         end
         if displayModel then displayModel:Destroy() end
 
-        local templateName = finalItem.type == "Plant" and (finalItem.id .. "_Plant") or finalItem.id
-        local finalTemplate = itemModels:FindFirstChild(templateName) or itemModels:FindFirstChild("Seed")
+        local finalTemplate = getDisplayTemplateForReward(finalItem)
 
         if finalTemplate then
             local finalModel = finalTemplate:Clone()

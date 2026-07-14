@@ -261,6 +261,18 @@ function PassController.Init()
         return
     end
 
+    if PassRewardConfig.ClientVisible == false then
+        local playProperty = basicGui:WaitForChild("PlayProperty", 10)
+        local passGui = basicGui:FindFirstChild("PassGui") or basicGui:WaitForChild("PassGui", 10)
+        local passButtonRoot = playProperty and playProperty:FindFirstChild("Pass")
+        local passNotification = passButtonRoot and passButtonRoot:FindFirstChild("Notifications")
+
+        setGuiObjectVisible(passNotification, false)
+        setGuiObjectVisible(passButtonRoot, false)
+        setGuiOpen(passGui, false)
+        return
+    end
+
     local function promptPassExpPurchase()
         UIEffectUtil.ShowTip("Opening pass EXP purchase...")
         print("[PassController] Pass EXP purchase button clicked.")

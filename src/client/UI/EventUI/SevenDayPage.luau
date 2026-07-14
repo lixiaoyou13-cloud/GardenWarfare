@@ -32,13 +32,6 @@ local CLAIMED_STROKE = Color3.fromRGB(0, 50, 100)
 local BLACK_STROKE = Color3.new(0, 0, 0)
 local GREEN_STROKE = Color3.fromRGB(0, 100, 0)
 
-local function reportAnalytics(eventName, eventData)
-    local analyticsRE = ReplicatedStorage:FindFirstChild("AnalyticsRE")
-    if analyticsRE then
-        analyticsRE:FireServer("Custom", eventName, eventData)
-    end
-end
-
 local function getFormattedRemainingTime()
     local now = os.date("*t", os.time())
     local tomorrowMidnight = os.time({
@@ -262,22 +255,11 @@ local function renderUI(sevenDayFrame, playerData)
                 local attemptTier = SignInRewardConfig.NormalizeTier(claimBtn:GetAttribute("SignInTier") or 1)
                 local attemptDay = math.floor(tonumber(claimBtn:GetAttribute("SignInDay")) or i)
 
-                reportAnalytics("SignIn_ClaimAttempt", {
-                    DayIndex = attemptDay,
-                    Tier = attemptTier,
-                    IsPremium = false,
-                })
-
                 local claimSignInRF = ReplicatedStorage:WaitForChild("ClaimSignInRF")
                 local success, claimedTier, claimedDay = claimSignInRF:InvokeServer()
                 if success then
                     claimedTier = SignInRewardConfig.NormalizeTier(claimedTier or attemptTier)
                     claimedDay = math.floor(tonumber(claimedDay) or attemptDay)
-
-                    reportAnalytics("SignIn_ClaimSuccess", {
-                        DayIndex = claimedDay,
-                        Tier = claimedTier,
-                    })
 
                     local currentReward = SignInRewardConfig.GetReward(claimedTier, claimedDay)
                     UIEffectUtil.ShowTip((currentReward and currentReward.Tip) or "Claimed!")
@@ -295,8 +277,6 @@ function SevenDayPage.Init(sevenDayFrame)
     local closeBtn = sevenDayFrame:FindFirstChild("CloseBtn", true)
     local timeText = sevenDayFrame:FindFirstChild("TimeText", true)
     local claimAllBtn = sevenDayFrame:FindFirstChild("ClaimAllBattle", true)
-
-    sevenDayFrame.Visible = true
 
     if closeBtn then
         closeBtn.Activated:Connect(function()
@@ -342,31 +322,9 @@ function SevenDayPage.Init(sevenDayFrame)
                 return
             end
 
-            reportAnalytics("SignIn_PurchaseClick", {
-                ProductId = PRODUCT_ID,
-                Price = 4,
-            })
-
             MarketplaceService:PromptProductPurchase(Players.LocalPlayer, PRODUCT_ID)
         end)
     end
-
-    MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, isPurchased)
-        if userId ~= Players.LocalPlayer.UserId or productId ~= PRODUCT_ID then
-            return
-        end
-
-        reportAnalytics("SignIn_PurchaseResult", {
-            ProductId = productId,
-            Status = isPurchased and "Success" or "Cancelled/Failed",
-        })
-
-        if isPurchased then
-            reportAnalytics("SignIn_BatchUnlockSuccess", {
-                UnlockType = "CurrentRoundRemainingDays",
-            })
-        end
-    end)
 
     ReplicatedStorage:WaitForChild("UpdateInventoryRE").OnClientEvent:Connect(function(newData)
         if sevenDayFrame.Visible then

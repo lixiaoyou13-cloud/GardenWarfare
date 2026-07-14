@@ -117,6 +117,8 @@ function UIEffectUtil.RenderToViewport(viewport, modelName, itemType, mutationLe
     elseif itemType == "Chest" then
         local chestFolder = ReplicatedStorage:FindFirstChild("Chest")
         targetModel = chestFolder and chestFolder:FindFirstChild(modelName)
+    elseif itemType == "Item" then
+        targetModel = itemModelsFolder:FindFirstChild(modelName)
     elseif itemType == "Tool" or itemType == "System" then targetModel = itemModelsFolder:FindFirstChild(modelName) end
 
     if targetModel then
@@ -178,6 +180,31 @@ function UIEffectUtil.SetScreenBlur(enabled, overlayFrame)
                 if targetTrans == 1 then overlayFrame.Visible = false end
             end)
         end
+    end
+end
+
+local function forceHideOverlay(overlayFrame)
+    if typeof(overlayFrame) ~= "Instance" or not overlayFrame:IsA("GuiObject") then
+        return
+    end
+
+    overlayFrame.BackgroundTransparency = 1
+    overlayFrame.Visible = false
+    overlayFrame.Active = false
+end
+
+function UIEffectUtil.ForceClearScreenBlur(...)
+    UIEffectUtil.BlurRequests = 0
+    blurEffect.Size = 0
+    TweenService:Create(blurEffect, TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Size = 0}):Play()
+
+    local overlays = {...}
+    if #overlays == 1 and type(overlays[1]) == "table" and typeof(overlays[1]) ~= "Instance" then
+        overlays = overlays[1]
+    end
+
+    for _, overlayFrame in ipairs(overlays) do
+        forceHideOverlay(overlayFrame)
     end
 end
 

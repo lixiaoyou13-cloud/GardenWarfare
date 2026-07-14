@@ -48,8 +48,7 @@ Players.PlayerAdded:Connect(function(player)
                 if not data then task.wait(0.5) end
             end
 
-            -- 直接显示当前解锁层数
-            local maxCleared = data.UnlockedLevel or 1
+            local seasonCleared = PDManager.GetRankingSeasonClearedLevel(player)
 
             -- 清理旧头衔（防止角色重置时间重复生成）
             local oldTitle = head:FindFirstChild("PlayerTitleGui")
@@ -67,7 +66,7 @@ Players.PlayerAdded:Connect(function(player)
             local textLabel = Instance.new("TextLabel")
             textLabel.Size = UDim2.new(1, 0, 1, 0)
             textLabel.BackgroundTransparency = 1
-            textLabel.Text = "MAX  " .. tostring(maxCleared)
+            textLabel.Text = "MAX  " .. tostring(seasonCleared)
 
             textLabel.TextColor3 = Color3.fromRGB(255, 215, 0) -- 亮金色文字
             textLabel.TextStrokeTransparency = 0.2
@@ -102,6 +101,9 @@ EquipmentService.Init()
 
 local ShopService = require(script.Services.ShopService)
 ShopService.Init()
+
+local ZombossShopService = require(script.Services.ZombossShopService)
+ZombossShopService.Init()
 
 local PlotService = require(script.Services.PlotService)
 PlotService.Init()
@@ -155,5 +157,11 @@ ExclusiveRollCompensationService.Init()
 require(script.Services.BaseSunflowerService).Init()
 
 require(script.Services.ZombieBoxService)
+
+local ZombossBossFightService = require(script.Services.ZombossBossFightService)
+ZombossBossFightService.Init()
+
+local ZombossIntroService = require(script.Services.ZombossIntroService)
+ZombossIntroService.Init()
 
 print("All server modules loaded!")

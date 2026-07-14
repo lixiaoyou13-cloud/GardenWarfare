@@ -3,7 +3,6 @@ local CoinDropService = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
-local AnalyticsService = game:GetService("AnalyticsService")
 function CoinDropService.Init()
     local playDropRE = Instance.new("RemoteEvent")
     playDropRE.Name = "PlayCoinDropRE"
@@ -22,19 +21,6 @@ function CoinDropService.Init()
             else
                 -- 玩家手动捡起的，加金币
                 PlayerDataManager.GiveCoins(player, amount)
-
-                -- 埋点击代码
-                local data = PlayerDataManager.GetPlayerData(player)
-                local currentCoins = data and data.Coins or 0
-                AnalyticsService:LogEconomyEvent(
-                    player,
-                    Enum.AnalyticsEconomyFlowType.Source,
-                    "Coins",
-                    amount,
-                    currentCoins,
-                    Enum.AnalyticsEconomyTransactionType.Gameplay.Name,
-                    "ZombieDrop_Pickup"
-                )
             end
         end
     end)

@@ -3,10 +3,10 @@ local PlantCombatAI = {}
 
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+local CombatRegistry = require(script.Parent.CombatRegistry)
 
 local plantAttackVisualRE = ReplicatedStorage:FindFirstChild("PlantAttackVisualRE")
 if not plantAttackVisualRE then
@@ -20,12 +20,48 @@ local VISUAL_EVENT_RADIUS = 220
 local DEFAULT_PIERCING_RANGE = 100
 local DEFAULT_PIERCING_WIDTH = 4
 local DEFAULT_PIERCING_DAMAGE_SCALE = 0.6
+local DEFAULT_PIERCING_MAX_TARGETS = 5
+local DEFAULT_PIERCING_HIT_EFFECT_LIMIT = 3
+local DEFAULT_CHAIN_PROJECTILE_RANGE = 100
+local DEFAULT_CHAIN_PROJECTILE_EXTRA_TARGETS = 3
+local DEFAULT_CHAIN_PROJECTILE_DAMAGE_SCALE = 1
+local DEFAULT_CHAIN_PROJECTILE_SPEED_MULTIPLIER = 1
 local SHOOTER_TARGET_WIDTH = 6
+local NORMAL_PROJECTILE_TARGET_MIN_Y_OFFSET = 1.2
+local NORMAL_PROJECTILE_TARGET_MAX_Y_OFFSET = 1.8
+local EVENT_BOSS_PROJECTILE_MIN_HEIGHT_SCALE = 0.45
+local EVENT_BOSS_PROJECTILE_MAX_HEIGHT_SCALE = 0.7
+local EVENT_BOSS_PROJECTILE_XZ_JITTER_RADIUS = 1.75
+local DAMAGE_TEXT_BATCH_WINDOW = 0.05
 local warnedProjectileIssues = {}
 local warnedAnimationIssues = {}
 local failedAnimationIds = {}
 local animationLengthCache = {}
 local activeGroundEffects = {}
+local activeSlowRestores = setmetatable({}, { __mode = "k" })
+local pendingDamageTextByPlayer = setmetatable({}, { __mode = "k" })
+local nextGroundEffectId = 0
+local zombossBossFightServiceLoaded = false
+local zombossBossFightService = nil
+local warnedZombossBossFightServiceLoadFailure = false
+
+local function getZombossBossFightService()
+    if not zombossBossFightServiceLoaded then
+        local ok, serviceOrErr = pcall(function()
+            return require(script.Parent.ZombossBossFightService)
+        end)
+
+        if ok then
+            zombossBossFightService = serviceOrErr
+            zombossBossFightServiceLoaded = true
+        elseif not warnedZombossBossFightServiceLoadFailure then
+            warnedZombossBossFightServiceLoadFailure = true
+            warn("[PlantCombatAI] Failed to load ZombossBossFightService: " .. tostring(serviceOrErr))
+        end
+    end
+
+    return zombossBossFightService
+end
 
 local function warnProjectileOnce(projectileName, message)
     local key = tostring(projectileName) .. ":" .. message
@@ -105,11 +141,119 @@ local function getLawnRowFromGridName(gridName)
     return tonumber(string.match(gridName, "^Lawn(%d+)_"))
 end
 
-local function collectVisualRecipients(plot, originPosition)
+local function getLawnGridCoords(gridName)
+    if type(gridName) ~= "string" then
+        return nil, nil
+    end
+
+    local row, column = string.match(gridName, "^Lawn(%d+)_(%d+)$")
+    return tonumber(row), tonumber(column)
+end
+
+local function getAuraDamageMultiplier(auraConfig, mutationLevel)
+    if type(auraConfig) ~= "table" then
+        return 1
+    end
+
+    local baseDamageBonus = tonumber(auraConfig.BaseDamageBonus)
+    if baseDamageBonus and baseDamageBonus > 0 then
+        local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
+        local auraBuffMul = tonumber(stats and stats.AuraBuffMul) or 1
+        return 1 + baseDamageBonus * auraBuffMul
+    end
+
+    local multiplier = tonumber(auraConfig.DamageMultiplier)
+    if multiplier and multiplier > 0 then
+        return multiplier
+    end
+
+    local bonus = tonumber(auraConfig.DamageBonus)
+    if bonus and bonus > 0 then
+        return 1 + bonus
+    end
+
+    return 1
+end
+
+local function getPlantConfigForModel(plantModel)
+    if not plantModel then
+        return nil
+    end
+
+    local plantId = plantModel:GetAttribute("PlantId")
+        or plantModel:GetAttribute("YieldPlant")
+        or plantModel.Name
+    return ItemConfig.Plants[plantId]
+end
+
+local function getAttackBuffAuraMultiplier(plant, plot)
+    if not plant or not plot then
+        return 1
+    end
+
+    local plantRow, plantColumn = getLawnGridCoords(plant:GetAttribute("GridName"))
+    if not plantRow or not plantColumn then
+        return 1
+    end
+
+    local lawnFolder = plot:FindFirstChild("Lawn")
+    if not lawnFolder then
+        return 1
+    end
+
+    local bestMultiplier = 1
+    for _, lawnPart in ipairs(lawnFolder:GetChildren()) do
+        if not lawnPart:IsA("BasePart") then
+            continue
+        end
+
+        local auraRow, auraColumn = getLawnGridCoords(lawnPart.Name)
+        if not auraRow or not auraColumn then
+            continue
+        end
+
+        for _, auraPlant in ipairs(lawnPart:GetChildren()) do
+            if auraPlant:GetAttribute("IsCombatPlant") ~= true
+                or auraPlant:GetAttribute("IsDead") == true
+                or (tonumber(auraPlant:GetAttribute("Health")) or 0) <= 0
+            then
+                continue
+            end
+
+            local auraDetail = getPlantConfigForModel(auraPlant)
+            local auraConfig = auraDetail and auraDetail.AttackBuffAura
+            if type(auraConfig) ~= "table" then
+                continue
+            end
+
+            local gridRadius = math.max(0, math.floor(tonumber(auraConfig.GridRadius) or 1))
+            if math.abs(auraRow - plantRow) > gridRadius or math.abs(auraColumn - plantColumn) > gridRadius then
+                continue
+            end
+
+            local auraMutationLevel = tonumber(auraPlant:GetAttribute("MutationLevel")) or 1
+            bestMultiplier = math.max(bestMultiplier, getAuraDamageMultiplier(auraConfig, auraMutationLevel))
+        end
+    end
+
+    return bestMultiplier
+end
+
+local function applyAttackBuffAura(plant, plot, attackDamage)
+    attackDamage = math.max(0, tonumber(attackDamage) or 0)
+    local auraMultiplier = getAttackBuffAuraMultiplier(plant, plot)
+    if auraMultiplier <= 1 then
+        return attackDamage
+    end
+
+    return math.max(1, math.floor(attackDamage * auraMultiplier + 0.5))
+end
+
+local function collectVisualRecipients(plot, originPosition, ownerUserId)
     local recipients = {}
     local recipientSet = {}
 
-    local ownerId = plot and plot:GetAttribute("OwnerId")
+    local ownerId = ownerUserId or (plot and plot:GetAttribute("OwnerId"))
     if ownerId then
         addRecipient(recipients, recipientSet, Players:GetPlayerByUserId(ownerId))
     end
@@ -135,6 +279,77 @@ local function firePlantVisualEvent(plot, originPosition, ...)
     for _, player in ipairs(recipients) do
         plantAttackVisualRE:FireClient(player, ...)
     end
+end
+
+local function flushDamageTextBatch(player, batch)
+    if pendingDamageTextByPlayer[player] ~= batch then
+        return
+    end
+
+    pendingDamageTextByPlayer[player] = nil
+    if not player or not player.Parent then
+        return
+    end
+
+    local entries = {}
+    for zombieModel, entry in pairs(batch.Entries) do
+        if zombieModel and zombieModel.Parent and (tonumber(entry.Damage) or 0) > 0 then
+            table.insert(entries, {
+                Target = zombieModel,
+                Damage = entry.Damage,
+                OwnerUserId = entry.OwnerUserId,
+            })
+        end
+    end
+
+    if #entries > 0 then
+        plantAttackVisualRE:FireClient(player, "DamageTextBatch", entries)
+    end
+end
+
+local function queueDamageTextForRecipients(recipients, zombieModel, damage, ownerUserId)
+    damage = tonumber(damage) or 0
+    if damage <= 0 or not zombieModel or not zombieModel.Parent then
+        return
+    end
+
+    for _, player in ipairs(recipients) do
+        if player and player.Parent then
+            local batch = pendingDamageTextByPlayer[player]
+            if not batch then
+                batch = {
+                    Entries = {},
+                }
+                pendingDamageTextByPlayer[player] = batch
+                task.delay(DAMAGE_TEXT_BATCH_WINDOW, function()
+                    flushDamageTextBatch(player, batch)
+                end)
+            end
+
+            local entry = batch.Entries[zombieModel]
+            if not entry then
+                entry = {
+                    Damage = 0,
+                    OwnerUserId = ownerUserId,
+                }
+                batch.Entries[zombieModel] = entry
+            end
+
+            entry.Damage += damage
+            entry.OwnerUserId = ownerUserId or entry.OwnerUserId
+        end
+    end
+end
+
+local function queueDamageText(plot, zombieModel, damage, ownerUserId)
+    local rootPart = zombieModel and (zombieModel:FindFirstChild("HumanoidRootPart") or zombieModel.PrimaryPart)
+    if not rootPart then
+        return
+    end
+
+    local resolvedOwnerId = ownerUserId or (plot and plot:GetAttribute("OwnerId")) or zombieModel:GetAttribute("OwnerId")
+    local recipients = collectVisualRecipients(plot, rootPart.Position, resolvedOwnerId)
+    queueDamageTextForRecipients(recipients, zombieModel, damage, resolvedOwnerId)
 end
 
 local function findLawnForPosition(plot, position)
@@ -255,18 +470,86 @@ local function getLivingZombieParts(zombieModel)
     return humanoid, rootPart
 end
 
-local function collectPiercingTargets(plant, firePosition, shotDirection, itemDetail, plot, primaryTarget)
+local function randomRange(minValue, maxValue)
+    return minValue + (maxValue - minValue) * math.random()
+end
+
+local function getRandomXZOffset(radius)
+    radius = math.max(0, tonumber(radius) or 0)
+    if radius <= 0 then
+        return Vector3.zero
+    end
+
+    local angle = math.random() * math.pi * 2
+    local distance = math.random() * radius
+    return Vector3.new(math.cos(angle) * distance, 0, math.sin(angle) * distance)
+end
+
+local function getProjectileTargetPosition(zombieModel, rootPart)
+    if not rootPart then
+        return nil
+    end
+
+    if zombieModel
+        and zombieModel:IsA("Model")
+        and zombieModel:GetAttribute("IsEventZomboss") == true
+    then
+        local ok, boundingCFrame, boundingSize = pcall(function()
+            return zombieModel:GetBoundingBox()
+        end)
+
+        if ok and typeof(boundingCFrame) == "CFrame" and typeof(boundingSize) == "Vector3" and boundingSize.Y > 0 then
+            local bottomY = boundingCFrame.Position.Y - boundingSize.Y * 0.5
+            local targetY = bottomY + boundingSize.Y * randomRange(
+                EVENT_BOSS_PROJECTILE_MIN_HEIGHT_SCALE,
+                EVENT_BOSS_PROJECTILE_MAX_HEIGHT_SCALE
+            )
+            return Vector3.new(rootPart.Position.X, targetY, rootPart.Position.Z)
+                + getRandomXZOffset(EVENT_BOSS_PROJECTILE_XZ_JITTER_RADIUS)
+        end
+    end
+
+    return rootPart.Position
+        + Vector3.new(0, randomRange(NORMAL_PROJECTILE_TARGET_MIN_Y_OFFSET, NORMAL_PROJECTILE_TARGET_MAX_Y_OFFSET), 0)
+end
+
+local function getActiveEventBossTarget(plot)
+    local service = getZombossBossFightService()
+    if not service or type(service.GetActiveBossTargetForPlot) ~= "function" then
+        return nil, nil, nil
+    end
+
+    local ok, bossModel, bossHumanoid, bossRoot = pcall(function()
+        return service.GetActiveBossTargetForPlot(plot)
+    end)
+
+    if not ok then
+        warn("[PlantCombatAI] Failed to read active Zomboss target: " .. tostring(bossModel))
+        return nil, nil, nil
+    end
+
+    if bossModel and bossHumanoid and bossRoot then
+        return bossModel, bossHumanoid, bossRoot
+    end
+
+    return nil, nil, nil
+end
+
+local function getPiercingMaxTargets(itemDetail)
+    local maxTargets = math.floor(tonumber(itemDetail and itemDetail.PiercingMaxTargets) or DEFAULT_PIERCING_MAX_TARGETS)
+    return math.max(1, maxTargets)
+end
+
+local function getPiercingHitEffectLimit(itemDetail)
+    local effectLimit = math.floor(tonumber(itemDetail and itemDetail.PiercingHitEffectLimit) or DEFAULT_PIERCING_HIT_EFFECT_LIMIT)
+    return math.max(0, effectLimit)
+end
+
+local function collectPiercingTargets(plant, firePosition, shotDirection, itemDetail, plot, primaryTarget, maxTargets)
     local range = math.max(1, tonumber(itemDetail.PiercingRange) or DEFAULT_PIERCING_RANGE)
     local width = math.max(1, tonumber(itemDetail.PiercingWidth) or DEFAULT_PIERCING_WIDTH)
-    local height = math.max(2, tonumber(itemDetail.PiercingHeight) or 8)
+    maxTargets = math.max(1, math.floor(tonumber(maxTargets) or DEFAULT_PIERCING_MAX_TARGETS))
     local flatDir = getFlatUnit(shotDirection, plant and plant:GetPivot().LookVector)
-    local center = firePosition + flatDir * (range * 0.5)
-    local checkCFrame = CFrame.lookAt(center, center + flatDir)
-    local checkSize = Vector3.new(width, height, range)
-
-    local overlapParams = OverlapParams.new()
-    overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-    overlapParams.FilterDescendantsInstances = plant and { plant } or {}
 
     local targetMap = {}
     local targets = {}
@@ -300,22 +583,64 @@ local function collectPiercingTargets(plant, firePosition, shotDirection, itemDe
         addTarget(primaryTarget)
     end
 
-    for _, part in ipairs(Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)) do
-        local zombieModel = part:FindFirstAncestorOfClass("Model")
-        if zombieModel and zombieModel:GetAttribute("IsZombie") then
-            addTarget(zombieModel)
-        end
+    for _, target in ipairs(CombatRegistry.CollectZombiesInBox(plot, nil, firePosition, flatDir, range, width, maxTargets)) do
+        addTarget(target.Model)
     end
 
     table.sort(targets, function(a, b)
         return a.Distance < b.Distance
     end)
 
-    return targets
+    while #targets > maxTargets do
+        table.remove(targets)
+    end
+
+	return targets
+end
+
+local function getChainProjectileConfig(itemDetail)
+	local config = itemDetail and itemDetail.ChainProjectile
+	if type(config) ~= "table" then
+		return nil
+	end
+
+	local extraTargets = math.max(0, math.floor(tonumber(config.ExtraTargets) or DEFAULT_CHAIN_PROJECTILE_EXTRA_TARGETS))
+	if extraTargets <= 0 then
+		return nil
+	end
+
+	return {
+		ExtraTargets = extraTargets,
+		Range = math.max(1, tonumber(config.Range) or DEFAULT_CHAIN_PROJECTILE_RANGE),
+		DamageScale = math.max(0, tonumber(config.DamageScale) or DEFAULT_CHAIN_PROJECTILE_DAMAGE_SCALE),
+		SpeedMultiplier = math.max(0.01, tonumber(config.SpeedMultiplier) or DEFAULT_CHAIN_PROJECTILE_SPEED_MULTIPLIER),
+	}
+end
+
+local function findNextChainProjectileTarget(plot, fromPosition, hitTargets, range)
+	if typeof(fromPosition) ~= "Vector3" then
+		return nil
+	end
+
+	for _, target in ipairs(CombatRegistry.CollectZombiesInRadius(plot, fromPosition, range)) do
+		local zombieModel = target.Model
+		if zombieModel and not hitTargets[zombieModel] and isZombieOwnedByPlot(zombieModel, plot) then
+			local humanoid, rootPart = getLivingZombieParts(zombieModel)
+			if humanoid and rootPart then
+				return {
+					Model = zombieModel,
+					Humanoid = humanoid,
+					RootPart = rootPart,
+				}
+			end
+		end
+	end
+
+	return nil
 end
 
 local function isFrontAreaAttack(itemDetail)
-    return itemDetail and (itemDetail.AttackMode == "FrontArea" or type(itemDetail.FrontArea) == "table")
+	return itemDetail and (itemDetail.AttackMode == "FrontArea" or type(itemDetail.FrontArea) == "table")
 end
 
 local function getPlantLawnPart(plant, plot)
@@ -344,14 +669,8 @@ local function collectFrontAreaTargets(plant, rootPart, itemDetail, plot)
     local range = stepDistance * gridRange
     local centerOffset = stepDistance * (tonumber(config.CenterGridOffset) or gridRange)
     local center = rootPart.Position + flatDir * centerOffset
-    local checkCFrame = CFrame.lookAt(center, center + flatDir)
     local width = math.max(1, tonumber(config.Width) or getLawnSideWidth(lawnPart, flatDir))
-    local height = math.max(2, tonumber(config.Height) or 8)
-    local checkSize = Vector3.new(width, height, range)
-
-    local overlapParams = OverlapParams.new()
-    overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-    overlapParams.FilterDescendantsInstances = { plant }
+    local queryOrigin = center - flatDir * (range * 0.5)
 
     local targetMap = {}
     local targets = {}
@@ -382,13 +701,8 @@ local function collectFrontAreaTargets(plant, rootPart, itemDetail, plot)
         })
     end
 
-    for _, part in ipairs(Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)) do
-        if part.CollisionGroup == "Zombies" then
-            local zombieModel = part:FindFirstAncestorOfClass("Model")
-            if zombieModel then
-                addTarget(zombieModel)
-            end
-        end
+    for _, target in ipairs(CombatRegistry.CollectZombiesInBox(plot, plantRowNum, queryOrigin, flatDir, range, width)) do
+        addTarget(target.Model)
     end
 
     table.sort(targets, function(a, b)
@@ -401,6 +715,9 @@ end
 local function applyKnockbackOnHit(zombieModel, rootPart, itemDetail, plot, shotDirection)
     local knockback = itemDetail and itemDetail.KnockbackOnHit
     if type(knockback) ~= "table" or not zombieModel or not zombieModel.Parent or not rootPart then
+        return
+    end
+    if zombieModel:GetAttribute("IsEventZomboss") == true then
         return
     end
 
@@ -427,60 +744,8 @@ local function applyKnockbackOnHit(zombieModel, rootPart, itemDetail, plot, shot
     end
 end
 
-local function prepGroundEffect(effect)
-    if not effect then
-        return
-    end
-
-    local function prepPart(part)
-        part.Anchored = true
-        part.CanCollide = false
-        part.CanQuery = false
-    end
-
-    if effect:IsA("BasePart") then
-        prepPart(effect)
-    end
-
-    for _, desc in ipairs(effect:GetDescendants()) do
-        if desc:IsA("BasePart") then
-            prepPart(desc)
-        elseif desc:IsA("ParticleEmitter") or desc:IsA("Beam") or desc:IsA("Trail") then
-            desc.Enabled = true
-        elseif desc:IsA("Light") then
-            desc.Enabled = true
-        end
-    end
-end
-
-local function positionGroundEffect(effect, lawnPart)
-    if not effect or not lawnPart then
-        return
-    end
-
-    local yOffset = lawnPart.Size.Y * 0.5
-    if effect:IsA("BasePart") then
-        effect.CFrame = lawnPart.CFrame * CFrame.new(0, yOffset + effect.Size.Y * 0.5, 0)
-    elseif effect:IsA("Model") then
-        local _, size = effect:GetBoundingBox()
-        effect:PivotTo(lawnPart.CFrame * CFrame.new(0, yOffset + size.Y * 0.5, 0))
-    end
-end
-
-local function showGroundDamageText(plot, zombieModel, damage)
-    local rootPart = zombieModel and (zombieModel:FindFirstChild("HumanoidRootPart") or zombieModel.PrimaryPart)
-    if not rootPart then
-        return
-    end
-
-    firePlantVisualEvent(
-        plot,
-        rootPart.Position,
-        "DamageText",
-        zombieModel,
-        damage,
-        plot and plot:GetAttribute("OwnerId")
-    )
+local function showGroundDamageText(plot, zombieModel, damage, ownerUserId)
+    queueDamageText(plot, zombieModel, damage, ownerUserId)
 end
 
 local function damageZombiesInLawn(lawnPart, plot, damage)
@@ -488,27 +753,18 @@ local function damageZombiesInLawn(lawnPart, plot, damage)
         return
     end
 
-    local boxCFrame = lawnPart.CFrame * CFrame.new(0, 4, 0)
-    local boxSize = Vector3.new(lawnPart.Size.X, 8, lawnPart.Size.Z)
-    local hitParts = Workspace:GetPartBoundsInBox(boxCFrame, boxSize)
-    local processedZombies = {}
-    local plotOwnerId = plot and plot:GetAttribute("OwnerId")
+    local rowNum = getLawnRowFromGridName(lawnPart.Name)
+    local flatDir = getFlatUnit(lawnPart.CFrame.LookVector, Vector3.new(0, 0, -1))
+    local range = math.max(0.1, lawnPart.Size.Z)
+    local width = math.max(0.1, lawnPart.Size.X)
+    local origin = lawnPart.Position - flatDir * (range * 0.5)
 
-    for _, part in ipairs(hitParts) do
-        local targetModel = part:FindFirstAncestorOfClass("Model")
-        if targetModel and targetModel:GetAttribute("IsZombie") and not processedZombies[targetModel] then
-            local zombieOwnerId = targetModel:GetAttribute("OwnerId")
-            if zombieOwnerId and plotOwnerId and zombieOwnerId ~= plotOwnerId then
-                continue
-            end
-
-            processedZombies[targetModel] = true
-
-            local targetHum = targetModel:FindFirstChildOfClass("Humanoid")
-            if targetHum and targetHum.Health > 0 then
-                targetHum.Health = math.max(0, targetHum.Health - damage)
-                showGroundDamageText(plot, targetModel, damage)
-            end
+    for _, target in ipairs(CombatRegistry.CollectZombiesInBox(plot, rowNum, origin, flatDir, range, width)) do
+        local targetHum = target.Humanoid
+        local targetModel = target.Model
+        if targetHum and targetHum.Health > 0 then
+            targetHum.Health = math.max(0, targetHum.Health - damage)
+            showGroundDamageText(plot, targetModel, damage)
         end
     end
 end
@@ -536,33 +792,37 @@ local function spawnGroundEffect(plot, position, itemDetail, attackDamage)
     local now = os.clock()
     local active = activeGroundEffects[lawnPart]
 
-    if groundEffect.MaxOnePerGrid and active and active.effect and active.effect.Parent then
+    if groundEffect.MaxOnePerGrid and active then
         active.expiresAt = now + duration
         active.damagePerTick = math.max(active.damagePerTick or 0, damagePerTick)
+        firePlantVisualEvent(plot, lawnPart.Position, "GroundEffectRefresh", active.visualId, duration)
         return
     end
 
-    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
-    local template = hitFolder and hitFolder:FindFirstChild(effectName)
-    if not template then
-        warnProjectileOnce(effectName, "ReplicatedStorage.Hit ground effect not found on server")
-        return
-    end
-
-    local effect = template:Clone()
-    prepGroundEffect(effect)
-    positionGroundEffect(effect, lawnPart)
-    effect.Name = effectName .. "_GroundEffect"
-    effect.Parent = Workspace
+    nextGroundEffectId += 1
+    local visualId = tostring(os.clock()) .. "_" .. tostring(nextGroundEffectId)
 
     local state = {
-        effect = effect,
+        visualId = visualId,
         expiresAt = now + duration,
         tickInterval = tickInterval,
         damagePerTick = damagePerTick,
         plot = plot,
+        lawnPart = lawnPart,
     }
     activeGroundEffects[lawnPart] = state
+
+    firePlantVisualEvent(
+        plot,
+        lawnPart.Position,
+        "GroundEffectStart",
+        visualId,
+        effectName,
+        lawnPart.CFrame,
+        lawnPart.Size,
+        duration,
+        plot and plot:GetAttribute("OwnerId")
+    )
 
     task.spawn(function()
         while activeGroundEffects[lawnPart] == state and os.clock() < state.expiresAt do
@@ -574,9 +834,7 @@ local function spawnGroundEffect(plot, position, itemDetail, attackDamage)
             activeGroundEffects[lawnPart] = nil
         end
 
-        if effect and effect.Parent then
-            effect:Destroy()
-        end
+        firePlantVisualEvent(state.plot, lawnPart.Position, "GroundEffectStop", state.visualId)
     end)
 end
 
@@ -633,52 +891,77 @@ local function applySlowOnHit(zombieModel, humanoid, itemDetail, speedMult)
     if not zombieModel or not zombieModel.Parent or not humanoid or humanoid.Health <= 0 then
         return
     end
+    if zombieModel:GetAttribute("IsEventZomboss") == true then
+        return
+    end
 
     local moveMultiplier = math.clamp(tonumber(slowConfig.MoveMultiplier) or 0.5, 0, 1)
     local duration = tonumber(slowConfig.Duration) or 2
     local adjustedDuration = duration / math.max(tonumber(speedMult) or 1, 0.01)
     local tintColor = slowConfig.Color or Color3.fromRGB(80, 180, 255)
-    local token = (zombieModel:GetAttribute("IceSlowToken") or 0) + 1
+    local now = os.clock()
+    local expiresAt = now + adjustedDuration
+    local state = activeSlowRestores[zombieModel]
+    local currentMultiplier = tonumber(zombieModel:GetAttribute("SlowMultiplier")) or 1
+    local effectiveMultiplier = math.min(currentMultiplier, moveMultiplier)
 
-    zombieModel:SetAttribute("IceSlowToken", token)
-    zombieModel:SetAttribute("SlowMultiplier", moveMultiplier)
+    zombieModel:SetAttribute("SlowMultiplier", effectiveMultiplier)
+    zombieModel:SetAttribute("IceSlowExpiresAt", math.max(tonumber(zombieModel:GetAttribute("IceSlowExpiresAt")) or 0, expiresAt))
 
-    for _, part in ipairs(zombieModel:GetDescendants()) do
+    if state then
+        state.expiresAt = math.max(state.expiresAt or 0, expiresAt)
+        return
+    end
+
+    local originalColors = {}
+    local cachedParts = CombatRegistry.GetCachedParts(zombieModel)
+    for _, part in ipairs(cachedParts.BaseParts) do
         if part:IsA("BasePart") then
-            if part:GetAttribute("IceSlowOriginalColor") == nil then
-                part:SetAttribute("IceSlowOriginalColor", part.Color)
+            originalColors[part] = part.Color
+            if not zombieModel:GetAttribute("IsCharred") then
+                part.Color = tintColor
             end
-            part.Color = tintColor
         end
     end
 
     if humanoid.WalkSpeed > 0 then
-        humanoid.WalkSpeed *= moveMultiplier
+        humanoid.WalkSpeed *= effectiveMultiplier
     end
 
-    task.delay(adjustedDuration, function()
-        if not zombieModel or not zombieModel.Parent then
-            return
+    state = {
+        expiresAt = expiresAt,
+        originalColors = originalColors,
+    }
+    activeSlowRestores[zombieModel] = state
+
+    task.spawn(function()
+        while zombieModel and zombieModel.Parent and activeSlowRestores[zombieModel] == state do
+            local remaining = (tonumber(zombieModel:GetAttribute("IceSlowExpiresAt")) or state.expiresAt or 0) - os.clock()
+            if remaining <= 0 then
+                break
+            end
+            task.wait(math.min(remaining, 0.25))
         end
-        if zombieModel:GetAttribute("IceSlowToken") ~= token then
+
+        if not zombieModel or not zombieModel.Parent or activeSlowRestores[zombieModel] ~= state then
             return
         end
 
+        activeSlowRestores[zombieModel] = nil
         zombieModel:SetAttribute("SlowMultiplier", nil)
-        zombieModel:SetAttribute("IceSlowToken", nil)
+        zombieModel:SetAttribute("IceSlowExpiresAt", nil)
 
         local currentHumanoid = zombieModel:FindFirstChildOfClass("Humanoid")
         if not currentHumanoid or currentHumanoid.Health <= 0 or zombieModel:GetAttribute("IsCharred") then
             return
         end
 
-        for _, part in ipairs(zombieModel:GetDescendants()) do
-            if part:IsA("BasePart") then
-                local originalColor = part:GetAttribute("IceSlowOriginalColor")
-                if originalColor then
-                    part.Color = originalColor
+        for part, originalColor in pairs(state.originalColors) do
+            if part and part.Parent then
+                part.Color = originalColor
+                if part:GetAttribute("IceSlowOriginalColor") ~= nil then
+                    part:SetAttribute("IceSlowOriginalColor", nil)
                 end
-                part:SetAttribute("IceSlowOriginalColor", nil)
             end
         end
     end)
@@ -697,74 +980,26 @@ local function applySplashDamage(primaryZombieModel, centerPosition, itemDetail,
         return
     end
 
-    local overlapParams = OverlapParams.new()
-    overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-    overlapParams.FilterDescendantsInstances = primaryZombieModel and { primaryZombieModel } or {}
+    for _, target in ipairs(CombatRegistry.CollectZombiesInRadius(plot, centerPosition, radius, primaryZombieModel)) do
+        local targetModel = target.Model
+        local targetHum = target.Humanoid
+        if targetHum and targetHum.Health > 0 then
+            targetHum.Health = math.max(0, targetHum.Health - splashDamage)
+            showGroundDamageText(plot, targetModel, splashDamage)
 
-    local hitParts = Workspace:GetPartBoundsInRadius(centerPosition, radius, overlapParams)
-    local processedZombies = {}
-    if primaryZombieModel then
-        processedZombies[primaryZombieModel] = true
-    end
-
-    for _, part in ipairs(hitParts) do
-        local targetModel = part:FindFirstAncestorOfClass("Model")
-        if targetModel and targetModel:GetAttribute("IsZombie") and not processedZombies[targetModel] then
-            processedZombies[targetModel] = true
-
-            if not isZombieOwnedByPlot(targetModel, plot) then
-                continue
-            end
-
-            local targetHum, targetRoot = getLivingZombieParts(targetModel)
-            if targetHum and targetRoot and (targetRoot.Position - centerPosition).Magnitude <= radius then
-                targetHum.Health = math.max(0, targetHum.Health - splashDamage)
-                showGroundDamageText(plot, targetModel, splashDamage)
-
-                if itemDetail.SplashAppliesSlow then
-                    applySlowOnHit(targetModel, targetHum, itemDetail, speedMult)
-                end
+            if itemDetail.SplashAppliesSlow then
+                applySlowOnHit(targetModel, targetHum, itemDetail, speedMult)
             end
         end
     end
 end
 
 function PlantCombatAI.ShowDamageText(zombieModel, damage)
-    local rootPart = zombieModel:FindFirstChild("HumanoidRootPart") or zombieModel.PrimaryPart
-    local head = zombieModel:FindFirstChild("Head") or rootPart
-    if not head then return end
+    if not zombieModel or not zombieModel.Parent then
+        return
+    end
 
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "DamageText"
-    billboard.Size = UDim2.new(0, 60, 0, 25)
-
-    local rx = math.random(-10, 10) / 10
-    local ry = math.random(5, 15) / 10
-    local rz = math.random(-10, 10) / 10
-    billboard.StudsOffset = Vector3.new(rx, 1.5 + ry, rz)
-    billboard.AlwaysOnTop = true
-    billboard.MaxDistance = 150
-
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Text = "-" .. tostring(damage)
-    textLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
-    textLabel.TextScaled = true
-    textLabel.Font = Enum.Font.FredokaOne
-    textLabel.TextStrokeTransparency = 0
-    textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    textLabel.Parent = billboard
-
-    billboard.Parent = head
-
-    local tweenInfo = TweenInfo.new(1.0, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-    local tween = TweenService:Create(billboard, tweenInfo, { StudsOffset = billboard.StudsOffset + Vector3.new(0, 1.5, 0) })
-    local textTween = TweenService:Create(textLabel, tweenInfo, { TextTransparency = 1, TextStrokeTransparency = 1 })
-
-    tween:Play()
-    textTween:Play()
-    Debris:AddItem(billboard, 1.0)
+    queueDamageText(nil, zombieModel, damage, zombieModel:GetAttribute("OwnerId"))
 end
 
 local function getReactiveEmitCount(node, fallback)
@@ -824,6 +1059,18 @@ local function enableReactiveEffectDescendants(effect)
     end
 end
 
+local function destroyExistingReactiveEffects(plant, effectInstanceName)
+    if not plant or type(effectInstanceName) ~= "string" or effectInstanceName == "" then
+        return
+    end
+
+    for _, desc in ipairs(plant:GetDescendants()) do
+        if desc.Name == effectInstanceName then
+            desc:Destroy()
+        end
+    end
+end
+
 local function attachReactiveEffectToPlant(plant, rootPart, reactiveConfig)
     local effectFolderName = tostring(reactiveConfig.EffectFolder or "Hit")
     local effectName = tostring(reactiveConfig.EffectName or "Lightning")
@@ -838,8 +1085,11 @@ local function attachReactiveEffectToPlant(plant, rootPart, reactiveConfig)
         return
     end
 
+    local effectInstanceName = effectName .. "_ReactiveEffect"
+    destroyExistingReactiveEffects(plant, effectInstanceName)
+
     local effect = template:Clone()
-    effect.Name = effectName .. "_ReactiveEffect"
+    effect.Name = effectInstanceName
     effect.Parent = plant
 
     if effect:IsA("BasePart") then
@@ -922,25 +1172,12 @@ function PlantCombatAI.TriggerDamagedReactiveAttack(plant, itemDetail, mutationL
             return
         end
 
-        local overlapParams = OverlapParams.new()
-        overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-        overlapParams.FilterDescendantsInstances = { plant }
-
-        local damagedZombies = {}
-        for _, part in ipairs(Workspace:GetPartBoundsInRadius(currentRootPart.Position, radius, overlapParams)) do
-            local zombieModel = part:FindFirstAncestorOfClass("Model")
-            if zombieModel and zombieModel:GetAttribute("IsZombie") and not damagedZombies[zombieModel] then
-                damagedZombies[zombieModel] = true
-
-                if not isZombieOwnedByPlot(zombieModel, plot) then
-                    continue
-                end
-
-                local targetHum, targetRoot = getLivingZombieParts(zombieModel)
-                if targetHum and targetRoot and (targetRoot.Position - currentRootPart.Position).Magnitude <= radius then
-                    targetHum.Health = math.max(0, targetHum.Health - damage)
-                    showGroundDamageText(plot, zombieModel, damage)
-                end
+        for _, target in ipairs(CombatRegistry.CollectZombiesInRadius(plot, currentRootPart.Position, radius)) do
+            local zombieModel = target.Model
+            local targetHum = target.Humanoid
+            if targetHum and targetHum.Health > 0 then
+                targetHum.Health = math.max(0, targetHum.Health - damage)
+                showGroundDamageText(plot, zombieModel, damage)
             end
         end
     end
@@ -953,33 +1190,47 @@ function PlantCombatAI.TriggerDamagedReactiveAttack(plant, itemDetail, mutationL
 end
 
 -- 2. 子弹开火与命中逻辑
-local function applyProjectileHit(plant, zombieModel, itemDetail, attackDamage, plot, speedMult, ownerUserId, shotDirection)
+local function applyProjectileHit(plant, zombieModel, itemDetail, attackDamage, plot, speedMult, ownerUserId, shotDirection, visualAction)
     local targetHum, targetRoot = getLivingZombieParts(zombieModel)
     if not targetHum or not targetRoot then
         return false
     end
 
-    targetHum.Health = targetHum.Health - attackDamage
+    local healthBefore = targetHum.Health
+    local newHealth = math.max(0, healthBefore - attackDamage)
+    local actualDamage = math.max(0, healthBefore - newHealth)
+    if actualDamage > 0 and zombieModel:GetAttribute("IsEventZomboss") == true then
+        local service = getZombossBossFightService()
+        if service and type(service.RecordPlayerDamage) == "function" then
+            service.RecordPlayerDamage(zombieModel, ownerUserId, actualDamage)
+        end
+    end
+    targetHum.Health = newHealth
     applySlowOnHit(zombieModel, targetHum, itemDetail, speedMult)
 
-    local zombieChestPos = targetRoot.Position + Vector3.new(0, 1, 0)
-    local currentRootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
-    local toPlantDir = currentRootPart and (currentRootPart.Position - targetRoot.Position) or Vector3.new(1, 0, 0)
-    local flatDir = Vector3.new(toPlantDir.X, 0, toPlantDir.Z)
-    if flatDir.Magnitude > 0.001 then flatDir = flatDir.Unit else flatDir = Vector3.new(1, 0, 0) end
-    local hitPos = zombieChestPos + flatDir * 1.2
+    if visualAction == "DamageText" then
+        showGroundDamageText(plot, zombieModel, attackDamage, ownerUserId)
+    elseif visualAction ~= "None" then
+        showGroundDamageText(plot, zombieModel, attackDamage, ownerUserId)
+        local zombieChestPos = targetRoot.Position + Vector3.new(0, 1, 0)
+        local currentRootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+        local toPlantDir = currentRootPart and (currentRootPart.Position - targetRoot.Position) or Vector3.new(1, 0, 0)
+        local flatDir = Vector3.new(toPlantDir.X, 0, toPlantDir.Z)
+        if flatDir.Magnitude > 0.001 then flatDir = flatDir.Unit else flatDir = Vector3.new(1, 0, 0) end
+        local hitPos = zombieChestPos + flatDir * 1.2
 
-    firePlantVisualEvent(
-        plot,
-        hitPos,
-        "Hit",
-        zombieModel,
-        attackDamage,
-        hitPos,
-        itemDetail.HitEffectTexture,
-        itemDetail.HitEffectColor,
-        ownerUserId
-    )
+        firePlantVisualEvent(
+            plot,
+            hitPos,
+            "Hit",
+            zombieModel,
+            nil,
+            hitPos,
+            itemDetail.HitEffectTexture,
+            itemDetail.HitEffectColor,
+            ownerUserId
+        )
+    end
 
     spawnGroundEffect(plot, targetRoot.Position, itemDetail, attackDamage)
     applySplashDamage(zombieModel, targetRoot.Position, itemDetail, attackDamage, plot, speedMult)
@@ -1000,10 +1251,74 @@ local function FireFrontAreaAttack(plant, itemDetail, attackDamage, plot)
 
     for _, target in ipairs(targets) do
         applyProjectileHit(plant, target.Model, itemDetail, attackDamage, plot, speedMult, ownerUserId, shotDirection)
-    end
+	end
 end
 
-local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, attackDamage, plot)
+local function fireProjectileVisualSegment(plot, projectileName, fireCFrame, targetPosition, targetZombieModel, arcHeight, speedMult, ownerUserId, projectileVisualConfig)
+	firePlantVisualEvent(
+		plot,
+		fireCFrame.Position,
+		"Projectile",
+		projectileName,
+		fireCFrame,
+		targetPosition,
+		targetZombieModel,
+		arcHeight,
+		speedMult,
+		ownerUserId,
+		projectileVisualConfig
+	)
+end
+
+local function runChainProjectile(plant, itemDetail, attackDamage, plot, speedMult, ownerUserId, projectileName, arcHeight, hitTargets, startPosition)
+	local chainConfig = getChainProjectileConfig(itemDetail)
+	if not chainConfig then
+		return
+	end
+
+	local currentPosition = startPosition
+	local chainDamage = math.max(1, math.floor((tonumber(attackDamage) or 0) * chainConfig.DamageScale + 0.5))
+	local chainSpeedMult = math.max(0.01, speedMult * chainConfig.SpeedMultiplier)
+
+	for _ = 1, chainConfig.ExtraTargets do
+		if not plant.Parent or (plant:GetAttribute("Health") or 0) <= 0 or plant:GetAttribute("IsDead") then
+			return
+		end
+
+		local nextTarget = findNextChainProjectileTarget(plot, currentPosition, hitTargets, chainConfig.Range)
+		if not nextTarget then
+			return
+		end
+
+		local targetPosition = getProjectileTargetPosition(nextTarget.Model, nextTarget.RootPart)
+		local offset = targetPosition - currentPosition
+		local fireCFrame = offset.Magnitude > 0.001 and CFrame.lookAt(currentPosition, targetPosition) or CFrame.new(currentPosition)
+		local flightTime = math.max(0.05, offset.Magnitude / (PROJECTILE_SPEED * chainSpeedMult))
+
+		hitTargets[nextTarget.Model] = true
+		fireProjectileVisualSegment(plot, projectileName, fireCFrame, targetPosition, nextTarget.Model, arcHeight, chainSpeedMult, ownerUserId)
+		task.wait(flightTime)
+
+		if not plant.Parent or (plant:GetAttribute("Health") or 0) <= 0 or plant:GetAttribute("IsDead") then
+			return
+		end
+
+		local currentHumanoid, currentRoot = getLivingZombieParts(nextTarget.Model)
+		if not currentHumanoid or not currentRoot then
+			return
+		end
+
+		local shotDirection = getFlatUnit(targetPosition - currentPosition, currentRoot.CFrame.LookVector)
+		local didHit = applyProjectileHit(plant, nextTarget.Model, itemDetail, chainDamage, plot, speedMult, ownerUserId, shotDirection)
+		if not didHit then
+			return
+		end
+
+		currentPosition = getProjectileTargetPosition(nextTarget.Model, currentRoot)
+	end
+end
+
+local function FireProjectile(plant, targetZombieModel, _targetHum, itemDetail, attackDamage, plot)
     local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
     local targetRoot = targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart
     if not rootPart or not targetRoot then return end
@@ -1027,7 +1342,7 @@ local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, a
 
     local speedMult = GetSafeGameSpeed(plot)
     local ownerUserId = plot and plot:GetAttribute("OwnerId")
-    local initialTargetPos = targetRoot.Position + Vector3.new(0, 1, 0)
+    local initialTargetPos = getProjectileTargetPosition(targetZombieModel, targetRoot)
     local initialDist = (initialTargetPos - fireCFrame.Position).Magnitude
     local flightTime = math.max(0.05, initialDist / (PROJECTILE_SPEED * speedMult))
     local arcHeight = itemDetail.ArcHeight or 0
@@ -1046,25 +1361,15 @@ local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, a
         }
     end
 
-    firePlantVisualEvent(
-        plot,
-        fireCFrame.Position,
-        "Projectile",
-        projName,
-        fireCFrame,
-        initialTargetPos,
-        targetZombieModel,
-        arcHeight,
-        speedMult,
-        ownerUserId,
-        projectileVisualConfig
-    )
+	fireProjectileVisualSegment(plot, projName, fireCFrame, initialTargetPos, targetZombieModel, arcHeight, speedMult, ownerUserId, projectileVisualConfig)
 
     task.delay(flightTime, function()
         if not plant.Parent or (plant:GetAttribute("Health") or 0) <= 0 or plant:GetAttribute("IsDead") then return end
 
         if itemDetail.Piercing then
-            local targets = collectPiercingTargets(plant, fireCFrame.Position, shotDirection, itemDetail, plot, targetZombieModel)
+            local maxTargets = getPiercingMaxTargets(itemDetail)
+            local hitEffectLimit = getPiercingHitEffectLimit(itemDetail)
+            local targets = collectPiercingTargets(plant, fireCFrame.Position, shotDirection, itemDetail, plot, targetZombieModel, maxTargets)
             for index, target in ipairs(targets) do
                 local hitDamage = attackDamage
                 if index > 1 then
@@ -1072,18 +1377,73 @@ local function FireProjectile(plant, targetZombieModel, targetHum, itemDetail, a
                     hitDamage = math.max(1, math.floor(attackDamage * damageScale + 0.5))
                 end
 
-                applyProjectileHit(plant, target.Model, itemDetail, hitDamage, plot, speedMult, ownerUserId, shotDirection)
+                local visualAction = index > hitEffectLimit and "DamageText" or "Hit"
+                applyProjectileHit(plant, target.Model, itemDetail, hitDamage, plot, speedMult, ownerUserId, shotDirection, visualAction)
             end
 
             return
         end
 
-        if not targetZombieModel.Parent or not targetHum or not targetHum.Parent or targetHum.Health <= 0 then return end
-        applyProjectileHit(plant, targetZombieModel, itemDetail, attackDamage, plot, speedMult, ownerUserId, shotDirection)
-    end)
+		local currentTargetHum, currentTargetRoot = getLivingZombieParts(targetZombieModel)
+		if not currentTargetHum or not currentTargetRoot then return end
+
+		local hitPosition = getProjectileTargetPosition(targetZombieModel, currentTargetRoot)
+		local didHit = applyProjectileHit(plant, targetZombieModel, itemDetail, attackDamage, plot, speedMult, ownerUserId, shotDirection)
+		if not didHit then return end
+
+		local hitTargets = { [targetZombieModel] = true }
+		runChainProjectile(plant, itemDetail, attackDamage, plot, speedMult, ownerUserId, projName, arcHeight, hitTargets, hitPosition)
+	end)
 end
 
 -- 3. 射手类植物 AI
+local function FireEventBossAttack(plant, targetZombieModel, targetHum, itemDetail, attackDamage, plot)
+    local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+    local targetRoot = targetZombieModel and (targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart)
+    if not rootPart or not targetRoot then
+        return
+    end
+
+    local speedMult = GetSafeGameSpeed(plot)
+    local ownerUserId = plot and plot:GetAttribute("OwnerId")
+    local targetPosition = getProjectileTargetPosition(targetZombieModel, targetRoot)
+    local shotDirection = getFlatUnit(targetPosition - rootPart.Position, rootPart.CFrame.LookVector)
+    local projectileName = itemDetail.ProjectileName
+
+    if type(projectileName) == "string" and projectileName ~= "" then
+        local fireCFrame = rootPart.CFrame * CFrame.new(0, 1.5, -1.5)
+        local posNode = plant:FindFirstChild("pos", true) or plant:FindFirstChild("Pos", true)
+        if posNode then
+            if posNode:IsA("Attachment") then
+                fireCFrame = posNode.WorldCFrame
+            elseif posNode:IsA("BasePart") then
+                fireCFrame = posNode.CFrame
+            end
+        end
+
+        local ammoFolder = ReplicatedStorage:FindFirstChild("Ammo")
+        if ammoFolder and ammoFolder:FindFirstChild(projectileName) then
+            local arcHeight = itemDetail.ArcHeight or 0
+            local distance = (targetPosition - fireCFrame.Position).Magnitude
+            local flightTime = math.max(0.05, distance / (PROJECTILE_SPEED * speedMult))
+            fireProjectileVisualSegment(plot, projectileName, fireCFrame, targetPosition, targetZombieModel, arcHeight, speedMult, ownerUserId)
+
+            task.delay(flightTime, function()
+                if not plant.Parent or (plant:GetAttribute("Health") or 0) <= 0 or plant:GetAttribute("IsDead") then
+                    return
+                end
+
+                applyProjectileHit(plant, targetZombieModel, itemDetail, attackDamage, plot, speedMult, ownerUserId, shotDirection)
+            end)
+            return
+        end
+
+        warnProjectileOnce(projectileName, "ReplicatedStorage.Ammo template not found on server")
+    end
+
+    applyProjectileHit(plant, targetZombieModel, itemDetail, attackDamage, plot, speedMult, ownerUserId, shotDirection)
+end
+
 function PlantCombatAI.StartIdleAnimation(plant, itemDetail)
     if plant:GetAttribute("PlantCombatIdleStarted") then
         return
@@ -1122,8 +1482,6 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
     task.spawn(function()
         local attackInterval = itemDetail.AttackInterval or 1.5
         local baseAttackDamage = itemDetail.Attack or 20
-        local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
-        local attackDamage = math.floor(baseAttackDamage * stats.DamageMul)
         local plantRowNum = getLawnRowFromGridName(plant:GetAttribute("GridName"))
         local usesFrontAreaAttack = isFrontAreaAttack(itemDetail)
 
@@ -1143,21 +1501,15 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
             local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
             if not rootPart then task.wait(0.5); continue end
 
-            local hitParts = {}
-            if not usesFrontAreaAttack then
-                local overlapParams = OverlapParams.new()
-                overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-                overlapParams.FilterDescendantsInstances = {plant}
-
-                local checkCFrame = rootPart.CFrame * CFrame.new(0, 0, -50)
-                local checkSize = Vector3.new(SHOOTER_TARGET_WIDTH, 5, 100)
-                hitParts = Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)
-            end
-
             local targetZombieModel, targetHum = nil, nil
-            local minDistance = math.huge
+            local isEventBossTarget = false
 
-            if usesFrontAreaAttack then
+            local eventBossModel, eventBossHum, eventBossRoot = getActiveEventBossTarget(plot)
+            if eventBossModel and eventBossHum and eventBossRoot then
+                targetZombieModel = eventBossModel
+                targetHum = eventBossHum
+                isEventBossTarget = true
+            elseif usesFrontAreaAttack then
                 local frontTargets = collectFrontAreaTargets(plant, rootPart, itemDetail, plot)
                 local firstTarget = frontTargets[1]
                 if firstTarget then
@@ -1165,38 +1517,20 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                     targetHum = firstTarget.Humanoid
                 end
             else
-            for _, part in ipairs(hitParts) do
-                if part.CollisionGroup == "Zombies" then
-                    local zModel = part:FindFirstAncestorOfClass("Model")
-                    if zModel then
-                        -- 1：对比僵尸和地块的主人 ID
-                        local zombieOwnerId = zModel:GetAttribute("OwnerId")
-                        local plotOwnerId = plot and plot:GetAttribute("OwnerId")
-
-                        -- 如果僵尸有主人，地块也有主人，且两者不是同一个人，说明是别人家的僵尸！忽略
-                        if zombieOwnerId and plotOwnerId and zombieOwnerId ~= plotOwnerId then
-                            continue
-                        end
-
-                        local zombieRowNum = tonumber(zModel:GetAttribute("LaneRow"))
-                        if plantRowNum and zombieRowNum and plantRowNum ~= zombieRowNum then
-                            continue
-                        end
-
-                        local zHum = zModel:FindFirstChildOfClass("Humanoid")
-                        local zRoot = zModel:FindFirstChild("HumanoidRootPart") or zModel.PrimaryPart
-
-                        if zHum and zHum.Health > 0 and zRoot then
-                            local dist = (zRoot.Position - rootPart.Position).Magnitude
-                            if dist < minDistance then
-                                minDistance = dist
-                                targetZombieModel = zModel
-                                targetHum = zHum
-                            end
-                        end
-                    end
+                local targetRoot
+                targetZombieModel, targetHum, targetRoot = CombatRegistry.FindNearestZombieInLane(
+                    plot,
+                    plantRowNum,
+                    rootPart.Position,
+                    rootPart.CFrame.LookVector,
+                    100,
+                    SHOOTER_TARGET_WIDTH
+                )
+                if not targetRoot then
+                    targetZombieModel = nil
+                    targetHum = nil
                 end
-            end
+
             end
 
             if targetZombieModel and targetHum then
@@ -1207,11 +1541,17 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                 local windUpTime = math.min(0.3, attackInterval * 0.2) / speedMult
                 task.wait(windUpTime)
 
-                if plant.Parent and (plant:GetAttribute("Health") or 0) > 0 then
-                    if usesFrontAreaAttack then
-                        FireFrontAreaAttack(plant, itemDetail, attackDamage, plot)
-                    else
-                        FireProjectile(plant, targetZombieModel, targetHum, itemDetail, attackDamage, plot)
+	                if plant.Parent and (plant:GetAttribute("Health") or 0) > 0 then
+	                    local currentMutationLevel = tonumber(plant:GetAttribute("MutationLevel")) or mutationLevel or 1
+	                    local stats = ItemConfig.MutationStats[currentMutationLevel] or ItemConfig.MutationStats[1]
+	                    local attackDamage = math.floor(baseAttackDamage * stats.DamageMul)
+	                    local buffedAttackDamage = applyAttackBuffAura(plant, plot, attackDamage)
+	                    if isEventBossTarget then
+	                        FireEventBossAttack(plant, targetZombieModel, targetHum, itemDetail, buffedAttackDamage, plot)
+	                    elseif usesFrontAreaAttack then
+	                        FireFrontAreaAttack(plant, itemDetail, buffedAttackDamage, plot)
+	                    else
+	                        FireProjectile(plant, targetZombieModel, targetHum, itemDetail, buffedAttackDamage, plot)
                     end
                 end
 
@@ -1240,7 +1580,42 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
 end
 
 -- 4. 爆炸类植物 AI ( 已重构：纯起爆逻辑)
+local function charZombieModel(zombieModel)
+    if not zombieModel or not zombieModel.Parent then
+        return
+    end
+
+    zombieModel:SetAttribute("IsCharred", true)
+    local cachedParts = CombatRegistry.GetCachedParts(zombieModel)
+
+    for _, part in ipairs(cachedParts.BaseParts) do
+        if part and part.Parent then
+            part.Color = Color3.fromRGB(30, 30, 30)
+            part.Material = Enum.Material.Slate
+        end
+    end
+
+    for _, meshPart in ipairs(cachedParts.MeshParts) do
+        if meshPart and meshPart.Parent then
+            meshPart.TextureID = ""
+        end
+    end
+
+    for _, surface in ipairs(cachedParts.SurfaceDetails) do
+        if surface and surface.Parent then
+            surface.Transparency = 1
+        end
+    end
+
+    for _, item in ipairs(cachedParts.DestroyOnChar) do
+        if item and item.Parent then
+            item:Destroy()
+        end
+    end
+end
+
 function PlantCombatAI.TriggerExplosion(plant, itemDetail, mutationLevel)
+    if plant:GetAttribute("Exploded") then return end
     -- 防多次数起爆锁
     if plant:GetAttribute("Exploded") then return end
     plant:SetAttribute("Exploded", true)
@@ -1248,99 +1623,55 @@ function PlantCombatAI.TriggerExplosion(plant, itemDetail, mutationLevel)
     local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
     if not rootPart then return end
 
-    local checkCFrame = rootPart.CFrame
-    local checkSize = Vector3.new(14, 10, 14)
-    if itemDetail.ExplosionType == "Row" then checkSize = Vector3.new(4, 15, 100) end
+    local myPlot = plant.Parent and plant.Parent.Parent and plant.Parent.Parent.Parent
+    local flatDir = getFlatUnit(rootPart.CFrame.LookVector, Vector3.new(0, 0, -1))
+    local queryRow = nil
+    local queryWidth = 14
+    local queryRange = 14
+    local queryOrigin = rootPart.Position - flatDir * (queryRange * 0.5)
+    if itemDetail.ExplosionType == "Row" then
+        queryRow = getLawnRowFromGridName(plant:GetAttribute("GridName"))
+        queryWidth = 4
+        queryRange = 100
+        queryOrigin = rootPart.Position - flatDir * (queryRange * 0.5)
+    end
 
-    local overlapParams = OverlapParams.new()
-    local hitParts = Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)
+    local registryTargets = CombatRegistry.CollectZombiesInBox(myPlot, queryRow, queryOrigin, flatDir, queryRange, queryWidth)
     local damagedZombies = {}
 
-    for _, part in ipairs(hitParts) do
-        if part.CollisionGroup == "Zombies" then
-            local zModel = part:FindFirstAncestorOfClass("Model")
-            if zModel and not damagedZombies[zModel] then
-                -- 不炸别人家的僵尸
-                local myPlot = plant.Parent and plant.Parent.Parent and plant.Parent.Parent.Parent
-                local plotOwnerId = myPlot and myPlot:GetAttribute("OwnerId")
-                local zombieOwnerId = zModel:GetAttribute("OwnerId")
+    for _, target in ipairs(registryTargets) do
+        local zModel = target.Model
+        local zHum = target.Humanoid
+        if zModel and zHum and zHum.Health > 0 and not damagedZombies[zModel] then
+            damagedZombies[zModel] = true
 
-                if zombieOwnerId and plotOwnerId and zombieOwnerId ~= plotOwnerId then
-                    continue
-                end
+            local baseExplosionDamage = itemDetail.ExplosionDamage or 1800
+            local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
+            local explosionDamage = math.floor(baseExplosionDamage * stats.DamageMul)
 
-                damagedZombies[zModel] = true
-                local zHum = zModel:FindFirstChildOfClass("Humanoid")
-
-                if zHum and zHum.Health > 0 then
-                    local baseExplosionDamage = itemDetail.ExplosionDamage or 1800
-                    local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
-                    local explosionDamage = math.floor(baseExplosionDamage * stats.DamageMul)
-
-                    zHum.Health = zHum.Health - explosionDamage
-
-                    PlantCombatAI.ShowDamageText(zModel, explosionDamage)
-
-                    -- 瞬间变黑，不再调用 FlashZombieRed
-                    zModel:SetAttribute("IsCharred", true)
-
-                    for _, p in pairs(zModel:GetDescendants()) do
-                        if p:IsA("BasePart") then
-                            p.Color = Color3.fromRGB(30, 30, 30)
-                            p.Material = Enum.Material.Slate -- 变成粗糙的焦炭质感
-                        end
-                        if p:IsA("MeshPart") then
-                            p.TextureID = "" -- 剥离模型自转带的彩色贴图片
-                        end
-                        if p:IsA("Decal") or p:IsA("Texture") then
-                            p.Transparency = 1 -- 隐藏脸部/表面贴图片
-                        end
-                        if p:IsA("Clothing") or p:IsA("Shirt") or p:IsA("Pants") or p:IsA("ShirtGraphic") or p:IsA("CharacterMesh") then
-                            p:Destroy() -- 把衣服瞬间烧光
-                        end
-                    end
-                end
-            end
+            zHum.Health = zHum.Health - explosionDamage
+            showGroundDamageText(myPlot, zModel, explosionDamage)
+            charZombieModel(zModel)
         end
     end
 
-    local effectPart = Instance.new("Part")
-    effectPart.Anchored = true; effectPart.CanCollide = false; effectPart.Transparency = 1
-    effectPart.Parent = Workspace
+    firePlantVisualEvent(
+        myPlot,
+        rootPart.Position,
+        "ExplosionBurst",
+        rootPart.Position,
+        itemDetail.ExplosionType,
+        myPlot and myPlot:GetAttribute("OwnerId")
+    )
 
-    if itemDetail.ExplosionType == "Row" then
-        effectPart.Size = Vector3.new(6, 1, 100)
-        effectPart.Position = rootPart.Position - Vector3.new(0, 1.5, 0)
-        local particles = Instance.new("ParticleEmitter", effectPart)
-        particles.Texture = "rbxassetid://248625108"
-        particles.Color = ColorSequence.new(Color3.fromRGB(255, 85, 0))
-        particles.Lifetime = NumberRange.new(0.05, 0.12)
-        particles.LightEmission = 1
-        particles.EmissionDirection = Enum.NormalId.Top
-        particles.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 4), NumberSequenceKeypoint.new(1, 10)})
-        particles.Rate = 2000
-        particles.Speed = NumberRange.new(15, 30)
-        task.delay(0.5, function() particles.Enabled = false end)
-    else
-        effectPart.Position = rootPart.Position
-        local attachment = Instance.new("Attachment", effectPart)
-        local particles = Instance.new("ParticleEmitter", attachment)
-        particles.Texture = "rbxassetid://243098098"
-        particles.Color = ColorSequence.new(Color3.fromRGB(255, 100, 0))
-        particles.Size = NumberSequence.new(1, 15)
-        particles.Rate = 500
-        particles.Speed = NumberRange.new(10, 20)
-        particles.Lifetime = NumberRange.new(0.2, 0.4)
-        particles.SpreadAngle = Vector2.new(180, 180)
-        task.delay(0.2, function() particles.Enabled = false end)
-    end
-
-    Debris:AddItem(effectPart, 2)
-
-    for _, p in pairs(plant:GetDescendants()) do
-        if p:IsA("BasePart") then
+    local cachedPlantParts = CombatRegistry.GetCachedParts(plant)
+    for _, p in ipairs(cachedPlantParts.BaseParts) do
+        if p and p.Parent then
             p.Transparency = 1
-        elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
+        end
+    end
+    for _, p in ipairs(cachedPlantParts.VisualEffects) do
+        if p and p.Parent then
             p.Enabled = false
         end
     end

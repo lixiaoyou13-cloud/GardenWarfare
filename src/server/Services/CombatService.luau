@@ -9,6 +9,7 @@ local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
 local PlantCombatAI = require(script.Parent.PlantCombatAI)
+local CombatRegistry = require(script.Parent.CombatRegistry)
 
 -- 生成战斗植物
 function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLevel)
@@ -21,6 +22,7 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 
 	local newFighter = combatModel:Clone()
 	newFighter.Name = plantId
+	newFighter:SetAttribute("PlantId", plantId)
 	newFighter:SetAttribute("IsCombatPlant", true)
 	newFighter:SetAttribute("Health", currentHP)
 	newFighter:SetAttribute("MaxHealth", maxHP)
@@ -29,11 +31,23 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 
 	newFighter:SetAttribute("GridName", lawnPart.Name)
 	if newFighter.PrimaryPart then newFighter.PrimaryPart:SetAttribute("GridName", lawnPart.Name) end
+	local plot = lawnPart.Parent.Parent
+	local rowNum = tonumber(string.match(lawnPart.Name, "^Lawn(%d+)_"))
+
+	local function registerFighter()
+		if not newFighter.Parent or (newFighter:GetAttribute("Health") or 0) <= 0 or newFighter:GetAttribute("IsDead") then
+			return
+		end
+
+		local rootPart = newFighter.PrimaryPart or newFighter:FindFirstChildWhichIsA("BasePart")
+		CombatRegistry.RegisterPlant(plot, newFighter, rowNum, rootPart)
+	end
 
     -- 统一死亡结算中枢
     -- 所有的死亡、复活标签记、爆炸起爆全部在这里完成
 	newFighter:GetAttributeChangedSignal("Health"):Connect(function()
 		if (newFighter:GetAttribute("Health") or 0) <= 0 then
+			CombatRegistry.UnregisterPlant(newFighter)
             -- 1. 标签记需要重建（防跨关卡假死）
 			newFighter:SetAttribute("NeedsRebuild", true)
 
@@ -41,6 +55,18 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
             if itemDetail.ExplosionType then
                 PlantCombatAI.TriggerExplosion(newFighter, itemDetail, mutationLevel)
             end
+		else
+			registerFighter()
+		end
+	end)
+
+	newFighter.Destroying:Connect(function()
+		CombatRegistry.UnregisterPlant(newFighter)
+	end)
+
+	newFighter.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			CombatRegistry.UnregisterPlant(newFighter)
 		end
 	end)
 
@@ -57,7 +83,8 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 	local MUTATION_TAGS = { Glow = true, Lightning = true, HolyLight = true }
 	local hasAnyAnim = itemDetail.IdleAnimId or itemDetail.AttackAnimation or itemDetail.RiseAnimation
 
-	for _, part in pairs(newFighter:GetDescendants()) do
+	local cachedParts = CombatRegistry.GetCachedParts(newFighter)
+	for _, part in pairs(cachedParts.BaseParts) do
 		if part:IsA("BasePart") then
 			-- 记录原始透明度
 			if not part:GetAttribute("OriginalTransparency") then
@@ -75,13 +102,14 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 	end
 
 	EffectUtil.ApplyMutationEffects(newFighter, mutationLevel)
+	CombatRegistry.RefreshCachedParts(newFighter)
 	newFighter.Parent = lawnPart
 	lawnPart:SetAttribute("OccupiedBy", plantId)
 
 	local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
 	if prompt then prompt.Enabled = false end
 
-	local plot = lawnPart.Parent.Parent
+	registerFighter()
 
 	-- 动画统一交给 PlantCombatAI 管理，避免 CombatService 和 AI 重复 LoadAnimation
 	if itemDetail.CanAttack then
@@ -186,24 +214,6 @@ function CombatService.Init()
 
 					if PlayerDataManager.ConsumePlant(player, plantId, 1, targetMutation) then
 						local AnalyticsService = game:GetService("AnalyticsService")
-						local data = PlayerDataManager.GetPlayerData(player)
-						local remainingQuantity = 0
-						if data and data.Inventory and data.Inventory.Plants then
-							for _, pInfo in ipairs(data.Inventory.Plants) do
-								if pInfo.ID == plantId and (pInfo.Mutation or 1) == targetMutation then
-									remainingQuantity = pInfo.Quantity
-									break
-								end
-							end
-						end
-
-						-- 记录植物消耗
-						AnalyticsService:LogEconomyEvent(
-							player, Enum.AnalyticsEconomyFlowType.Sink, "Plants", 1, remainingQuantity,
-							Enum.AnalyticsEconomyTransactionType.Gameplay.Name, plantId
-						)
-
-						AnalyticsService:LogCustomEvent(player, "PlantDeployed_"..plantId, 1)
 						local itemDetail = ItemConfig.Plants[plantId]
 						local baseMaxHP = itemDetail.HP or 300
 						local stats = ItemConfig.MutationStats[targetMutation] or ItemConfig.MutationStats[1]

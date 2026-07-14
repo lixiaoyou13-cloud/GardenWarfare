@@ -177,9 +177,9 @@ local function rollbackOnlineRewardClaim(player, data, snapshot)
     restoreOnlineRewardState(data, snapshot)
     fireInventoryUpdate(player, data)
 
-    local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "online reward rollback")
     if not rollbackSaved and rollbackErr ~= "stale_session" then
-        warn("[OnlineRewardService] Rollback save failed for " .. player.Name .. ": " .. tostring(rollbackErr))
+        warn("[OnlineRewardService] Rollback save queue failed for " .. player.Name .. ": " .. tostring(rollbackErr))
     end
 end
 
@@ -341,12 +341,12 @@ local function claimReward(player, rewardIndex)
         setRewardCycle(data, os.time())
     end
 
-    local saved, saveErr = PlayerDataManager.ForceSave(player)
-    if not saved then
-        warn("[OnlineRewardService] Save failed after claim for " .. player.Name .. ": " .. tostring(saveErr))
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "online reward claim")
+    if not saveQueued then
+        warn("[OnlineRewardService] Save queue failed after claim for " .. player.Name .. ": " .. tostring(saveErr))
         rollbackOnlineRewardClaim(player, data, snapshot)
         claimingPlayers[player] = nil
-        return false, "Save failed. Please try again.", buildState(player)
+        return false, "Save unavailable. Please try again.", buildState(player)
     end
 
     if effectMessage then

@@ -4,11 +4,114 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local POINTER_UPDATE_INTERVAL = 0.2
 
 function AirdropUIController.Init()
     local player = Players.LocalPlayer
+    local localDropVisuals = {}
+
+    local function cleanupDropVisual(dropId)
+        local state = localDropVisuals[dropId]
+        if not state then
+            return
+        end
+
+        localDropVisuals[dropId] = nil
+        if state.Tween then
+            state.Tween:Cancel()
+        end
+        if state.Value then
+            state.Value:Destroy()
+        end
+        if state.Model then
+            CollectionService:RemoveTag(state.Model, "AirdropBox")
+            state.Model:Destroy()
+        end
+    end
+
+    local function prepareLocalDropVisual(model)
+        if not model.PrimaryPart then
+            model.PrimaryPart = model:FindFirstChildWhichIsA("BasePart", true)
+        end
+
+        for _, descendant in ipairs(model:GetDescendants()) do
+            if descendant:IsA("BasePart") then
+                descendant.Anchored = true
+                descendant.CanCollide = false
+                descendant.CanTouch = false
+                descendant.CanQuery = false
+            elseif descendant:IsA("ProximityPrompt") then
+                descendant.Enabled = false
+            end
+        end
+    end
+
+    local function startDropVisual(dropId, startCFrame, targetCFrame, duration)
+        if type(dropId) ~= "string" or typeof(startCFrame) ~= "CFrame" or typeof(targetCFrame) ~= "CFrame" then
+            return
+        end
+
+        cleanupDropVisual(dropId)
+
+        local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
+        local luckyTemplate = itemModels and itemModels:FindFirstChild("Lucky")
+        if not luckyTemplate then
+            return
+        end
+
+        local visual = luckyTemplate:Clone()
+        prepareLocalDropVisual(visual)
+        if not visual.PrimaryPart then
+            visual:Destroy()
+            return
+        end
+
+        visual:SetAttribute("LocalAirdropVisual", true)
+        visual:PivotTo(startCFrame)
+        visual.Parent = Workspace
+        CollectionService:AddTag(visual, "AirdropBox")
+
+        local tweenValue = Instance.new("NumberValue")
+        tweenValue.Value = 0
+        local tween = TweenService:Create(
+            tweenValue,
+            TweenInfo.new(math.max(0.1, tonumber(duration) or 20), Enum.EasingStyle.Linear),
+            { Value = 1 }
+        )
+
+        localDropVisuals[dropId] = {
+            Model = visual,
+            Value = tweenValue,
+            Tween = tween,
+        }
+
+        tweenValue:GetPropertyChangedSignal("Value"):Connect(function()
+            if visual and visual.Parent then
+                visual:PivotTo(startCFrame:Lerp(targetCFrame, tweenValue.Value))
+            end
+        end)
+
+        tween.Completed:Connect(function()
+            if visual and visual.Parent then
+                visual:PivotTo(targetCFrame)
+            end
+        end)
+
+        tween:Play()
+    end
+
+    local airdropVisualRE = ReplicatedStorage:WaitForChild("AirdropVisualRE", 10)
+    if airdropVisualRE then
+        airdropVisualRE.OnClientEvent:Connect(function(action, dropId, ...)
+            if action == "Start" then
+                startDropVisual(dropId, ...)
+            elseif action == "Landed" then
+                cleanupDropVisual(dropId)
+            end
+        end)
+    end
 
     -- 1. 动态生成 ScreenGui
     local pointerGui = Instance.new("ScreenGui")

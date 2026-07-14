@@ -3,6 +3,8 @@ local TutorialEffect = {}
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
+local UI_ARROW_SIZE = 60
+
 -- 1. UI 闪烁特效 (保持不变)
 function TutorialEffect.AddFlash(object, color, thickness)
     local existing = object:FindFirstChild("TutorialFlash")
@@ -98,7 +100,7 @@ function TutorialEffect.AddUIArrow(targetUI)
 
     local arrow = Instance.new("ImageLabel")
     arrow.Name = "TutorialUIArrow"
-    arrow.Size = UDim2.new(0, 40, 0, 40)
+    arrow.Size = UDim2.new(0, UI_ARROW_SIZE, 0, UI_ARROW_SIZE)
     arrow.AnchorPoint = Vector2.new(0.5, 1) -- 锚点设为底部居中
     arrow.BackgroundTransparency = 1
     arrow.Image = "rbxassetid://120753408134411" -- 这是一个通用向下箭头的素材ID，你可以自转行替换

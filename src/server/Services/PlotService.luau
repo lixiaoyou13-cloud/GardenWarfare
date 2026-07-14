@@ -2,11 +2,11 @@
 local PlotService = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local AnalyticsService = game:GetService("AnalyticsService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local PlotUnlockConfig = require(ReplicatedStorage.Shared.PlotUnlockConfig)
 local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
+local RankingSeasonConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RankingSeasonConfig"))
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 
 local playerPlots = {}
@@ -68,9 +68,9 @@ local function rollbackPlotUnlock(player, data, snapshot)
     restorePlotUnlockState(data, snapshot)
     fireInventoryUpdate(player, data)
 
-    local rollbackSaved, rollbackErr = PlayerDataManager.ForceSave(player)
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "plot unlock rollback")
     if not rollbackSaved and rollbackErr ~= "stale_session" then
-        warn("[PlotService] Failed to save rollback after plot unlock for "
+        warn("[PlotService] Failed to queue rollback save after plot unlock for "
             .. tostring(player and player.Name or "unknown") .. ": " .. tostring(rollbackErr))
     end
 end
@@ -228,7 +228,7 @@ local function SpawnMaxLevelPart(plot, data)
     local billboardGui = showLevelPart:FindFirstChild("BillboardGui", true)
     local textLabel = billboardGui and billboardGui:FindFirstChild("TextLabel")
     if textLabel and textLabel:IsA("TextLabel") then
-        textLabel.Text = "Max Lv." .. tostring(data and data.UnlockedLevel or 1)
+        textLabel.Text = "Max Lv." .. tostring(RankingSeasonConfig.GetSeasonClearedLevel(data))
     end
 
     if showLevelPart:IsA("Model") then
@@ -248,6 +248,17 @@ local function SpawnMaxLevelPart(plot, data)
     end
 
     showLevelPart.Parent = plot
+end
+
+function PlotService.RefreshMaxLevelDisplay(player)
+    local plot = player and playerPlots[player.UserId]
+    if not plot then
+        return
+    end
+
+    local data = PlayerDataManager.GetPlayerData(player)
+    SpawnMaxLevelPart(plot, data)
+    RefreshPlotTitleDisplays(player)
 end
 
 local function ResetPlotForNextOwner(plot)
@@ -738,24 +749,15 @@ function PlotService.UpdateSoilVisuals(player, plot)
                             if price and PlayerDataManager.ConsumeCoins(player, price) then
                                 PlayerDataManager.IncrementUnlockedPlots(player)
 
-                                local saved, saveErr = PlayerDataManager.ForceSave(player)
-                                if not saved then
-                                    warn("[PlotService] Failed to save plot unlock for "
+                                local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "plot unlock")
+                                if not saveQueued then
+                                    warn("[PlotService] Failed to queue save after plot unlock for "
                                         .. player.Name .. ": " .. tostring(saveErr))
                                     rollbackPlotUnlock(player, data, snapshot)
                                     PlotService.UpdateSoilVisuals(player, plot)
-                                    notifyPlayer(player, "Unlock failed: save failed. Please try again.")
+                                    notifyPlayer(player, "Unlock failed: save unavailable. Please try again.")
                                     return
                                 end
-                                AnalyticsService:LogEconomyEvent(
-                                    player,
-                                    Enum.AnalyticsEconomyFlowType.Sink,
-                                    "Coins",
-                                    price,
-                                    data and data.Coins or 0,
-                                    Enum.AnalyticsEconomyTransactionType.Gameplay.Name,
-                                    "UnlockPlot_Soil_" .. tostring(soilId)
-                                )
                                 -- Unlock was already applied before the forced save.
                                 PlotService.UpdateSoilVisuals(player, plot) -- 刷新所有土地状态
                             else
@@ -818,6 +820,7 @@ function PlotService.ReleasePlot(player)
                             child:Destroy()
                         end
                     end
+                    lawnPart:SetAttribute("OccupiedBy", nil)
                 end
             end
         end

@@ -9,6 +9,124 @@ local Workspace = game:GetService("Workspace")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 
+local HOVER_REFRESH_INTERVAL = 0.25
+
+local function getLawnGridCoords(gridName)
+    if type(gridName) ~= "string" then
+        return nil, nil
+    end
+
+    local row, column = string.match(gridName, "^Lawn(%d+)_(%d+)$")
+    return tonumber(row), tonumber(column)
+end
+
+local function getAuraDamageMultiplier(auraConfig, mutationLevel)
+    if type(auraConfig) ~= "table" then
+        return 1
+    end
+
+    local baseDamageBonus = tonumber(auraConfig.BaseDamageBonus)
+    if baseDamageBonus and baseDamageBonus > 0 then
+        local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
+        local auraBuffMul = tonumber(stats and stats.AuraBuffMul) or 1
+        return 1 + baseDamageBonus * auraBuffMul
+    end
+
+    local multiplierByMutation = auraConfig.DamageMultiplierByMutation
+    if type(multiplierByMutation) == "table" then
+        local multiplier = tonumber(multiplierByMutation[mutationLevel]) or tonumber(multiplierByMutation[1])
+        if multiplier and multiplier > 0 then
+            return multiplier
+        end
+    end
+
+    local bonusByMutation = auraConfig.DamageBonusByMutation
+    if type(bonusByMutation) == "table" then
+        local bonus = tonumber(bonusByMutation[mutationLevel]) or tonumber(bonusByMutation[1])
+        if bonus and bonus > 0 then
+            return 1 + bonus
+        end
+    end
+
+    local multiplier = tonumber(auraConfig.DamageMultiplier)
+    if multiplier and multiplier > 0 then
+        return multiplier
+    end
+
+    local bonus = tonumber(auraConfig.DamageBonus)
+    if bonus and bonus > 0 then
+        return 1 + bonus
+    end
+
+    return 1
+end
+
+local function getPlantConfigForModel(plantModel)
+    if not plantModel then
+        return nil
+    end
+
+    local plantId = plantModel:GetAttribute("PlantId")
+        or plantModel:GetAttribute("YieldPlant")
+        or plantModel.Name
+    return ItemConfig.Plants[plantId]
+end
+
+local function getAttackBuffAuraMultiplier(plant)
+    if not plant then
+        return 1
+    end
+
+    local lawnPart = plant.Parent
+    local lawnFolder = lawnPart and lawnPart.Parent
+    if not (lawnPart and lawnPart:IsA("BasePart") and lawnFolder and lawnFolder.Name == "Lawn") then
+        return 1
+    end
+
+    local plantRow, plantColumn = getLawnGridCoords(plant:GetAttribute("GridName") or lawnPart.Name)
+    if not plantRow or not plantColumn then
+        return 1
+    end
+
+    local bestMultiplier = 1
+    for _, auraLawnPart in ipairs(lawnFolder:GetChildren()) do
+        if not auraLawnPart:IsA("BasePart") then
+            continue
+        end
+
+        local auraRow, auraColumn = getLawnGridCoords(auraLawnPart.Name)
+        if not auraRow or not auraColumn then
+            continue
+        end
+
+        for _, auraPlant in ipairs(auraLawnPart:GetChildren()) do
+            if not auraPlant:IsA("Model")
+                or auraPlant:GetAttribute("IsCombatPlant") ~= true
+                or auraPlant:GetAttribute("IsDead") == true
+                or (tonumber(auraPlant:GetAttribute("Health")) or 0) <= 0
+            then
+                continue
+            end
+
+            local auraDetail = getPlantConfigForModel(auraPlant)
+            local auraConfig = auraDetail and auraDetail.AttackBuffAura
+            if type(auraConfig) ~= "table" then
+                continue
+            end
+
+            local gridRadius = math.max(0, math.floor(tonumber(auraConfig.GridRadius) or 1))
+            if math.abs(auraRow - plantRow) > gridRadius or math.abs(auraColumn - plantColumn) > gridRadius then
+                continue
+            end
+
+            local auraMutationLevel = tonumber(auraPlant:GetAttribute("MutationLevel")) or 1
+            bestMultiplier = math.max(bestMultiplier, getAuraDamageMultiplier(auraConfig, auraMutationLevel))
+        end
+    end
+
+    return bestMultiplier
+end
+
 function PlantHoverController.Init()
     local player = Players.LocalPlayer
     local mouse = player:GetMouse()
@@ -128,6 +246,7 @@ function PlantHoverController.Init()
     -- 动态逻辑处理
     local currentTarget = nil
     local hpConnection = nil
+    local lastHoverUpdate = 0
 
     local function updateUI()
         if not currentTarget or not currentTarget.Parent then return end
@@ -142,8 +261,10 @@ function PlantHoverController.Init()
         -- 更新生命值文本显示 (向下取整以防出现小数)
         hpText.Text = math.floor(currentHP) .. " / " .. math.floor(maxHP)
 
-        local plantId = currentTarget.Name
-        local plantConfig = ItemConfig.Plants[plantId]
+        local plantConfig = getPlantConfigForModel(currentTarget)
+        local plantId = currentTarget:GetAttribute("PlantId")
+            or currentTarget:GetAttribute("YieldPlant")
+            or currentTarget.Name
         nameLabel.Text = plantConfig and plantConfig.Name or plantId
 
         -- 更新图片标签：如果图片 ID 正确，现在会正常显示
@@ -168,6 +289,10 @@ function PlantHoverController.Init()
             -- 严格读取 ItemConfig 中的变异攻击乘区
             local stats = ItemConfig.MutationStats[mutationLevel] or ItemConfig.MutationStats[1]
             local finalAttack = math.floor(plantConfig.Attack * stats.DamageMul)
+            local auraMultiplier = getAttackBuffAuraMultiplier(currentTarget)
+            if auraMultiplier > 1 then
+                finalAttack = math.max(1, math.floor(finalAttack * auraMultiplier + 0.5))
+            end
             local dpsValue = finalAttack / plantConfig.AttackInterval
 
             dpsLabel.Text = string.format("DPS: %.1f", dpsValue)
@@ -180,15 +305,29 @@ function PlantHoverController.Init()
             barBg.Position = UDim2.new(0.075, 0, 0.75, 0)
         else
             -- 无攻击力（如向日葵）：隐藏 DPS，缩减面板高度 (58)
-            dpsLabel.Visible = false
+            local ownAuraConfig = plantConfig and plantConfig.AttackBuffAura
+            if type(ownAuraConfig) == "table" then
+                local auraMultiplier = getAuraDamageMultiplier(ownAuraConfig, mutationLevel)
+                local bonusPercent = math.max(0, math.floor((auraMultiplier - 1) * 100 + 0.5))
+                dpsLabel.Text = "Buff: +" .. tostring(bonusPercent) .. "%"
+                dpsLabel.Visible = true
+            else
+                dpsLabel.Visible = false
+            end
 
             -- 动态面板大小与位置，消除空白
-            bgFrame.Size = UDim2.new(1, 0, 0, 58)
+            local compactHeight = type(ownAuraConfig) == "table" and 83 or 58
+            bgFrame.Size = UDim2.new(1, 0, 0, compactHeight)
             bgFrame.Position = UDim2.new(0, 0, 1, -58) -- 面板整体上移
 
             -- 内部组件向上微调，保持紧凑
             nameLabel.Position = UDim2.new(0, 0, 0.15, 0)
             barBg.Position = UDim2.new(0.075, 0, 0.62, 0)
+            bgFrame.Position = UDim2.new(0, 0, 1, -compactHeight)
+            if type(ownAuraConfig) == "table" then
+                nameLabel.Position = UDim2.new(0, 0, 0.35, 0)
+                barBg.Position = UDim2.new(0.075, 0, 0.75, 0)
+            end
         end
     end
 
@@ -215,6 +354,10 @@ function PlantHoverController.Init()
                 if hpConnection then hpConnection:Disconnect() end
                 hpConnection = currentTarget:GetAttributeChangedSignal("Health"):Connect(updateUI)
                 updateUI()
+                lastHoverUpdate = os.clock()
+            elseif os.clock() - lastHoverUpdate >= HOVER_REFRESH_INTERVAL then
+                updateUI()
+                lastHoverUpdate = os.clock()
             end
         else
             if currentTarget then

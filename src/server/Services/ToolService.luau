@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local PlotService = require(script.Parent.PlotService)
 local PlantCombatAI = require(script.Parent.PlantCombatAI)
+local CombatRegistry = require(script.Parent.CombatRegistry)
 local CollectionService = game:GetService("CollectionService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
@@ -12,6 +13,56 @@ local Players = game:GetService("Players")
 local SET_REJECT_INTERACTION_REMOTE_NAME = "SetRejectInteractionRE"
 local REJECT_INTERACTION_ATTRIBUTE = "RejectInteractionEnabled"
 local STEALING_PLANT_ATTRIBUTE = "IsStealingPlant"
+local VISUAL_EVENT_RADIUS = 220
+local HIT_EFFECT_TEXTURE = "rbxassetid://243098098"
+local HIT_EFFECT_COLOR = Color3.fromRGB(255, 215, 0)
+
+local plantAttackVisualRE = ReplicatedStorage:FindFirstChild("PlantAttackVisualRE")
+if not plantAttackVisualRE then
+    plantAttackVisualRE = Instance.new("RemoteEvent")
+    plantAttackVisualRE.Name = "PlantAttackVisualRE"
+    plantAttackVisualRE.Parent = ReplicatedStorage
+end
+
+local function addVisualRecipient(recipients, recipientSet, player)
+    if not player or recipientSet[player] then
+        return
+    end
+
+    recipientSet[player] = true
+    table.insert(recipients, player)
+end
+
+local function getCharacterRoot(player)
+    local character = player and player.Character
+    return character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart) or nil
+end
+
+local function collectVisualRecipients(ownerUserId, originPosition)
+    local recipients = {}
+    local recipientSet = {}
+
+    if ownerUserId then
+        addVisualRecipient(recipients, recipientSet, Players:GetPlayerByUserId(ownerUserId))
+    end
+
+    if typeof(originPosition) == "Vector3" then
+        for _, player in ipairs(Players:GetPlayers()) do
+            local rootPart = getCharacterRoot(player)
+            if rootPart and (rootPart.Position - originPosition).Magnitude <= VISUAL_EVENT_RADIUS then
+                addVisualRecipient(recipients, recipientSet, player)
+            end
+        end
+    end
+
+    return recipients
+end
+
+local function fireToolVisualEvent(ownerUserId, originPosition, ...)
+    for _, player in ipairs(collectVisualRecipients(ownerUserId, originPosition)) do
+        plantAttackVisualRE:FireClient(player, ...)
+    end
+end
 
 local function GetCombatEditCost(player)
     local plot = PlotService.GetPlayerPlot(player)
@@ -277,46 +328,17 @@ function ToolService.Init()
                         PlantCombatAI.ShowDamageText(targetModel, 25)
                     end
 
-                    if not targetModel:GetAttribute("IsFlashing") then
-                        targetModel:SetAttribute("IsFlashing", true)
-                        local originalColors = {}
-                        for _, p in pairs(targetModel:GetDescendants()) do
-                            if p:IsA("BasePart") then
-                                originalColors[p] = p.Color
-                                p.Color = Color3.fromRGB(255, 80, 80)
-                            end
-                        end
-                        task.delay(0.15, function()
-                            if targetModel and targetModel.Parent then
-                                for p, color in pairs(originalColors) do
-                                    if p and p.Parent then p.Color = color end
-                                end
-                                targetModel:SetAttribute("IsFlashing", false)
-                            end
-                        end)
-                    end
-
-                    if targetRoot then
-                        local effectPart = Instance.new("Part")
-                        effectPart.Size = Vector3.new(0.1, 0.1, 0.1)
-                        effectPart.Transparency = 1
-                        effectPart.Anchored = true
-                        effectPart.CanCollide = false
-                        effectPart.Position = targetRoot.Position + Vector3.new(0, 1, 0)
-                        effectPart.Parent = Workspace
-
-                        local attachment = Instance.new("Attachment", effectPart)
-                        local particles = Instance.new("ParticleEmitter", attachment)
-                        particles.Texture = "rbxassetid://243098098"
-                        particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
-                        particles.Size = NumberSequence.new(1, 0)
-                        particles.Rate = 0
-                        particles.Speed = NumberRange.new(5, 10)
-                        particles.Lifetime = NumberRange.new(0.1, 0.3)
-                        particles:Emit(15)
-
-                        game:GetService("Debris"):AddItem(effectPart, 1.5)
-                    end
+                    fireToolVisualEvent(
+                        player.UserId,
+                        targetRoot.Position,
+                        "Hit",
+                        targetModel,
+                        nil,
+                        targetRoot.Position + Vector3.new(0, 1, 0),
+                        HIT_EFFECT_TEXTURE,
+                        HIT_EFFECT_COLOR,
+                        player.UserId
+                    )
                 end
 
             -- Player PVP 受击击飞判定
@@ -331,44 +353,17 @@ function ToolService.Init()
 
                     damagedPlayers[targetModel] = true
 
-                    if not targetModel:GetAttribute("IsFlashing") then
-                        targetModel:SetAttribute("IsFlashing", true)
-                        local originalColors = {}
-                        for _, p in pairs(targetModel:GetDescendants()) do
-                            if p:IsA("BasePart") then
-                                originalColors[p] = p.Color
-                                p.Color = Color3.fromRGB(255, 80, 80)
-                            end
-                        end
-                        task.delay(0.15, function()
-                            if targetModel and targetModel.Parent then
-                                for p, color in pairs(originalColors) do
-                                    if p and p.Parent then p.Color = color end
-                                end
-                                targetModel:SetAttribute("IsFlashing", false)
-                            end
-                        end)
-                    end
-
-                    local effectPart = Instance.new("Part")
-                    effectPart.Size = Vector3.new(0.1, 0.1, 0.1)
-                    effectPart.Transparency = 1
-                    effectPart.Anchored = true
-                    effectPart.CanCollide = false
-                    effectPart.Position = targetRoot.Position + Vector3.new(0, 1, 0)
-                    effectPart.Parent = Workspace
-
-                    local attachment = Instance.new("Attachment", effectPart)
-                    local particles = Instance.new("ParticleEmitter", attachment)
-                    particles.Texture = "rbxassetid://243098098"
-                    particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
-                    particles.Size = NumberSequence.new(1.5, 0)
-                    particles.Rate = 0
-                    particles.Speed = NumberRange.new(10, 20)
-                    particles.Lifetime = NumberRange.new(0.2, 0.4)
-                    particles:Emit(20)
-
-                    game:GetService("Debris"):AddItem(effectPart, 1.5)
+                    fireToolVisualEvent(
+                        player.UserId,
+                        targetRoot.Position,
+                        "Hit",
+                        targetModel,
+                        nil,
+                        targetRoot.Position + Vector3.new(0, 1, 0),
+                        HIT_EFFECT_TEXTURE,
+                        HIT_EFFECT_COLOR,
+                        player.UserId
+                    )
 
                     ApplyKnockback(targetModel, character)
 
@@ -453,117 +448,63 @@ function ToolService.Init()
         local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
         local plantConfig = ItemConfig.Plants[plantId]
         if not plantConfig then return end
+        if typeof(targetPosition) ~= "Vector3" then return end
+
+        local plot = PlotService.GetPlayerPlot(player)
+        local characterRoot = character.PrimaryPart or character:FindFirstChild("HumanoidRootPart")
+        if not plot or not characterRoot then return end
 
         -- 使用解析出的 plantId 和 mutationLevel 进行扣除
         if not PlayerDataManager.ConsumePlant(player, plantId, 1, mutationLevel) then
             return -- 如果库存不足扣除失败，则不扔炸弹
         end
 
-        -- 扣除成功，继续执行投掷动画和爆炸伤害
-
-        -- 如果扣除成功，继续执行投掷动画和爆炸伤害
+        -- 扣除成功后，服务端只广播表现指令，真实伤害仍在落点结算。
         task.spawn(function()
-            local startPos = character.PrimaryPart.Position + Vector3.new(0, 2, 0)
+            local startPos = characterRoot.Position + Vector3.new(0, 2, 0)
             local height = 15
             local duration = 0.5
-            local steps = 20
-            local stepTime = duration / steps
+            fireToolVisualEvent(
+                player.UserId,
+                startPos,
+                "ThrownPlantVisual",
+                plantId,
+                startPos,
+                targetPosition,
+                height,
+                duration,
+                player.UserId
+            )
 
-            -- 后续的抛物线投掷和爆炸逻辑保持不变
-            local bombModel = nil
-            pcall(function()
-                local modelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
-                local template = modelsFolder and (modelsFolder:FindFirstChild("CherryBomb_Plant") or modelsFolder:FindFirstChild("CherryBomb"))
-                if template then
-                    bombModel = template:Clone()
-                    for _, p in pairs(bombModel:GetDescendants()) do
-                        if p:IsA("BasePart") then p.Anchored = true p.CanCollide = false end
-                    end
-                    bombModel:PivotTo(CFrame.new(startPos))
-                    bombModel.Parent = Workspace
-                end
-            end)
+            task.wait(duration)
 
-            -- 2. 抛物线运动
-            for i = 1, steps do
-                local t = i / steps
-                local currentPos = startPos:Lerp(targetPosition, t) + Vector3.new(0, math.sin(t * math.pi) * height, 0)
-                if bombModel then
-                    bombModel:PivotTo(CFrame.new(currentPos) * CFrame.Angles(math.rad(t * 360), 0, 0))
-                end
-                task.wait(stepTime)
-            end
-
-            if bombModel then bombModel:Destroy() end
-
-            -- 3. 落地瞬间：召唤爆炸特效
+            -- 落地瞬间：客户端播放爆炸表现，服务端做范围伤害结算。
             local effectName = plantConfig.ExplosionEffect
-            local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
-
-            if hitFolder and effectName then
-                local effectTemplate = hitFolder:FindFirstChild(effectName)
-                if effectTemplate then
-                    local newEffect = effectTemplate:Clone()
-
-                    -- 1. 判断并设置位置 (稍微抬高一点击，防止粒子被埋在地板下面)
-                    if newEffect:IsA("Model") then
-                        newEffect:PivotTo(CFrame.new(targetPosition + Vector3.new(0, 1.5, 0)))
-                    elseif newEffect:IsA("BasePart") then
-                        newEffect.Position = targetPosition + Vector3.new(0, 1.5, 0)
-                    end
-
-                    newEffect.Parent = Workspace
-
-                    -- 解决 Roblox 引擎吞特效的 BUG
-                    -- 必须等一瞬间，让玩家的客户端先把特效零件渲染出来，然后再触发爆炸
-                    task.wait(0.05)
-
-                    local emitCount = 0
-                    for _, particle in pairs(newEffect:GetDescendants()) do
-                        if particle:IsA("ParticleEmitter") then
-                            local customCount = particle:GetAttribute("EmitCount")
-
-                            if customCount and type(customCount) == "number" then
-                                particle:Emit(customCount)
-                            else
-                                particle:Emit(20)
-                            end
-
-                            emitCount += 1
-                        end
-                    end
-
-                    game:GetService("Debris"):AddItem(newEffect, 2)
-                else
-                    warn("Cherry Bomb effect missing: ReplicatedStorage -> Hit has no object named [" .. tostring(effectName) .. "]!")
-                end
-            else
-                warn("Cherry Bomb config error: ReplicatedStorage.Hit folder missing or ItemConfig.ExplosionEffect not set!")
+            if effectName then
+                fireToolVisualEvent(
+                    player.UserId,
+                    targetPosition,
+                    "EffectBurst",
+                    effectName,
+                    CFrame.new(targetPosition + Vector3.new(0, 1.5, 0)),
+                    player.UserId
+                )
             end
-
             -- 4. 落地瞬间：群体范围扣血
             local radius = plantConfig.ExplosionRadius or 18
             local damage = plantConfig.ExplosionDamage or 2500
 
-            local overlapParams = OverlapParams.new()
-            local hitParts = Workspace:GetPartBoundsInRadius(targetPosition, radius, overlapParams)
-            local processedZombies = {}
+            local registryTargets = CombatRegistry.CollectZombiesInRadius(plot, targetPosition, radius)
 
-            for _, part in ipairs(hitParts) do
-                local targetModel = part:FindFirstAncestorOfClass("Model")
-                if targetModel and targetModel:GetAttribute("IsZombie") and not processedZombies[targetModel] then
-                    processedZombies[targetModel] = true
-                    local targetHum = targetModel:FindFirstChildOfClass("Humanoid")
-                    if targetHum and targetHum.Health > 0 then
-                        targetHum.Health = math.max(0, targetHum.Health - damage)
+            for _, target in ipairs(registryTargets) do
+                local targetModel = target.Model
+                local targetHum = target.Humanoid
+                if targetModel and targetHum and targetHum.Health > 0 then
+                    targetHum.Health = math.max(0, targetHum.Health - damage)
 
                         -- 伤害飘字
-                        pcall(function()
-                            local PlantCombatAI = require(script.Parent.PlantCombatAI)
-                            if PlantCombatAI and PlantCombatAI.ShowDamageText then
-                                PlantCombatAI.ShowDamageText(targetModel, damage)
-                            end
-                        end)
+                    if PlantCombatAI.ShowDamageText then
+                        PlantCombatAI.ShowDamageText(targetModel, damage)
                     end
                 end
             end
