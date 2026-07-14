@@ -138,6 +138,9 @@ ChatGiftService.Init()
 local GiftingService = require(script.Services.GiftingService)
 GiftingService.Init()
 
+local TradeService = require(script.Services.TradeService)
+TradeService.Init()
+
 local LeaderboardSettlementService = require(script.Services.LeaderboardSettlementService)
 LeaderboardSettlementService.Init()
 -- 找到你原来 require 其他 Service 的地方，加上这一句

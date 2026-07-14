@@ -8,7 +8,6 @@ local GiftingConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForCh
 
 local WAIT_TIMEOUT = 10
 local BLUR_OVERLAY_NAME = "GiftingBlurOverlay"
-local BLUR_OVERLAY_Z_INDEX = 1
 local GIFTING_PANEL_MIN_Z_INDEX = 2
 local GIFT_CLONE_ATTRIBUTE = "GiftingRewardClone"
 local forceCloseForBossImpl = nil
@@ -225,42 +224,6 @@ local function raiseGuiTree(root, minZIndex)
     end
 end
 
-local function ensureBlurOverlay(giftingGui, giftingFrame)
-    if not giftingGui then
-        return nil
-    end
-
-    local overlayParent = giftingGui
-    if not (overlayParent:IsA("ScreenGui") or overlayParent:IsA("GuiObject")) then
-        overlayParent = giftingGui:FindFirstAncestorWhichIsA("ScreenGui") or giftingFrame
-    end
-    if not overlayParent then
-        return nil
-    end
-
-    local overlay = overlayParent:FindFirstChild(BLUR_OVERLAY_NAME)
-    if not overlay then
-        overlay = Instance.new("Frame")
-        overlay.Name = BLUR_OVERLAY_NAME
-        overlay.Size = UDim2.new(1, 0, 1, 0)
-        overlay.Position = UDim2.new(0, 0, 0, 0)
-        overlay.AnchorPoint = Vector2.new(0, 0)
-        overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-        overlay.BackgroundTransparency = 1
-        overlay.BorderSizePixel = 0
-        overlay.Visible = false
-        overlay.Parent = overlayParent
-    end
-
-    if overlay:IsA("GuiObject") then
-        overlay.Active = true
-        overlay.ZIndex = BLUR_OVERLAY_Z_INDEX
-    end
-
-    raiseGuiTree(giftingFrame, GIFTING_PANEL_MIN_Z_INDEX)
-    return overlay
-end
-
 function GiftingController.Init()
     local player = Players.LocalPlayer
     local playerGui = player:WaitForChild("PlayerGui", WAIT_TIMEOUT)
@@ -325,9 +288,24 @@ function GiftingController.Init()
         warn("[GiftingController] " .. tostring(GiftingConfig.UpdateRemoteName) .. " was not found.")
     end
 
-    local blurOverlay = ensureBlurOverlay(giftingGui, giftingFrame)
+    -- 礼物界面的背景模糊交给全局 UI 管理器处理，这里只清理旧遮罩。
+    local blurOverlay = giftingGui:FindFirstChild(BLUR_OVERLAY_NAME, true)
+    hideOverlayInstant(blurOverlay)
+    raiseGuiTree(giftingFrame, GIFTING_PANEL_MIN_Z_INDEX)
     local isOpen = false
     local isClaiming = false
+
+    local toggleTarget = getToggleTarget(giftingGui)
+    if toggleTarget then
+        local propertyName = toggleTarget:IsA("ScreenGui") and "Enabled" or "Visible"
+        toggleTarget:GetPropertyChangedSignal(propertyName):Connect(function()
+            local isActuallyOpen = toggleTarget:IsA("ScreenGui") and toggleTarget.Enabled or toggleTarget.Visible
+            isOpen = isActuallyOpen
+            if not isActuallyOpen then
+                hideOverlayInstant(blurOverlay)
+            end
+        end)
+    end
 
     local function hasClaimableGift(rewards)
         if type(rewards) ~= "table" then
@@ -442,9 +420,9 @@ function GiftingController.Init()
             return
         end
 
+        -- 开启后由 init.client 的全局面板逻辑关闭其他界面并处理背景效果。
         setGuiOpen(giftingGui, true)
         isOpen = true
-        UIEffectUtil.SetScreenBlur(true, blurOverlay)
     end
 
     local function closeGifting()
@@ -454,7 +432,7 @@ function GiftingController.Init()
         end
 
         isOpen = false
-        UIEffectUtil.SetScreenBlur(false, blurOverlay)
+        hideOverlayInstant(blurOverlay)
         setGuiOpen(giftingGui, false)
     end
 

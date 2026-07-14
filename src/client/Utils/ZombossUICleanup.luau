@@ -8,6 +8,7 @@ local UIEffectUtil = require(script.Parent.UIEffectUtil)
 local EventUIManager = require(script.Parent.Parent.UI.EventUI.EventUIManager)
 local NoticeController = require(script.Parent.Parent.UI.NoticeController)
 local GiftingController = require(script.Parent.Parent.UI.GiftingController)
+local TradeController = require(script.Parent.Parent.UI.TradeController)
 
 local LOCK_ATTRIBUTES = {
     Intro = "ZombossIntroUILocked",
@@ -117,6 +118,7 @@ function ZombossUICleanup.ForceCloseBossBlockingUI()
     forceCloseController(EventUIManager, "EventUIManager")
     forceCloseController(NoticeController, "NoticeController")
     forceCloseController(GiftingController, "GiftingController")
+    forceCloseController(TradeController, "TradeController")
 
     local overlays = {}
     local playerGui = getPlayerGui()
