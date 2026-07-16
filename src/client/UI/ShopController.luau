@@ -12,6 +12,9 @@ local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
 local SHOP_TIMER_UPDATE_INTERVAL = 1
 local DISTANCE_CHECK_INTERVAL = 0.2
 local GENERATED_SHOP_SLOT_ATTRIBUTE = "ShopGeneratedSlot"
+local SHOP_SLOT_STROKE_NAME = "UIStroke"
+local NORMAL_SHOP_GRADIENT_NAME = "Black"
+local SPECIAL_SHOP_GRADIENT_NAME = "Rainbow"
 
 local function GetConfiguredProductId(itemDetail)
     if type(itemDetail.ProductId) == "number" and itemDetail.ProductId > 0 then
@@ -21,6 +24,26 @@ local function GetConfiguredProductId(itemDetail)
         return itemDetail.IAPProductId
     end
     return nil
+end
+
+local function setGradientEnabled(stroke, gradientName, enabled)
+    local gradient = stroke and stroke:FindFirstChild(gradientName)
+    if gradient and gradient:IsA("UIGradient") then
+        gradient.Enabled = enabled
+    end
+end
+
+local function applyShopSlotStyle(slot, slotData)
+    local stroke = slot and slot:FindFirstChild(SHOP_SLOT_STROKE_NAME)
+    if not stroke or not stroke:IsA("UIStroke") then
+        return
+    end
+
+    local isSpecialShop = slotData and slotData.SpecialShop == true
+    stroke.Enabled = true
+    setGradientEnabled(stroke, NORMAL_SHOP_GRADIENT_NAME, not isSpecialShop)
+    setGradientEnabled(stroke, SPECIAL_SHOP_GRADIENT_NAME, isSpecialShop)
+    slot:SetAttribute("SpecialShopSlot", isSpecialShop)
 end
 
 local function RenderShopDisplayModel(viewport, seedId, itemDetail)
@@ -103,6 +126,8 @@ function ShopController.Init()
 
             local itemDetail = ItemConfig.Seeds[slotData.SeedId]
             if not itemDetail then continue end
+
+            applyShopSlotStyle(slot, slotData)
 
             local reqLvl = itemDetail.UnlockLevel or 1
             local isUnlocked = localPlayerData.UnlockedLevel >= reqLvl

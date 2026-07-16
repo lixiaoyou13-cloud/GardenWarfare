@@ -6,6 +6,23 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- Each notice creates one tag button in Notice.TypeButtons.
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
+    -- 2026/7/16 更新公告：修复偷菜复制与手机端交易 UI 问题，并发放神圣药水补偿。
+    {
+        Id = "notice-2026-07-16",
+        TagText = "2026/7/16",
+        PublishedAt = "2026-07-16",
+        Title = "July 16 Update",
+        Sections = {
+            {
+                Title = "Bug Fixes",
+                Content = "Fixed an issue where stealing plants from another player's garden could sometimes duplicate plants.\nFixed layout issues with text and buttons on the mobile trading screen.",
+            },
+            {
+                Title = "Compensation Gift",
+                Content = "Open the Gift page to claim 3 Divine Potions. Thank you for playing and sharing your feedback!",
+            },
+        },
+    },
     -- 2026/7/15 更新公告：交易系统上线，并修复图鉴与礼物界面问题。
     {
         Id = "notice-2026-07-15",

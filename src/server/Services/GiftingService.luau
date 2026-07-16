@@ -23,6 +23,7 @@ local DEDUCT_SUN_USAGE = "Usage: " .. ADMIN_DEDUCT_SUN_COMMAND .. " player amoun
 
 local claimingPlayers = {}
 local chatConnections = {}
+local importGlobalGifts
 
 local function getOrCreateRemoteFunction(name)
     local remote = ReplicatedStorage:FindFirstChild(name)
@@ -119,6 +120,8 @@ local REWARD_TYPE_ALIASES = {
     seeds = GiftingConfig.RewardTypes.Seed,
     plant = GiftingConfig.RewardTypes.Plant,
     plants = GiftingConfig.RewardTypes.Plant,
+    item = GiftingConfig.RewardTypes.Item,
+    items = GiftingConfig.RewardTypes.Item,
     chest = GiftingConfig.RewardTypes.Chest,
     chests = GiftingConfig.RewardTypes.Chest,
     title = GiftingConfig.RewardTypes.Title,
@@ -155,6 +158,11 @@ local function getItemName(rewardType, itemId)
     if rewardType == GiftingConfig.RewardTypes.Chest then
         local chestConfig = (ItemConfig.Chests and ItemConfig.Chests[itemId]) or ChestConfig.GetChest(itemId)
         return chestConfig and chestConfig.Name or itemId
+    end
+
+    if rewardType == GiftingConfig.RewardTypes.Item then
+        local itemConfig = ItemConfig.Items and ItemConfig.Items[itemId]
+        return itemConfig and itemConfig.Name or itemId
     end
 
     if rewardType == GiftingConfig.RewardTypes.Title then
@@ -213,6 +221,10 @@ local function validateReward(reward)
 
     if rewardType == GiftingConfig.RewardTypes.Plant then
         return ItemConfig.Plants and ItemConfig.Plants[itemId] ~= nil, "Gift failed: plant config not found."
+    end
+
+    if rewardType == GiftingConfig.RewardTypes.Item then
+        return ItemConfig.Items and ItemConfig.Items[itemId] ~= nil, "Gift failed: item config not found."
     end
 
     if rewardType == GiftingConfig.RewardTypes.Chest then
@@ -320,6 +332,10 @@ local function buildState(player)
         return {}
     end
 
+    if importGlobalGifts then
+        importGlobalGifts(player, data)
+    end
+
     return buildStateFromData(data)
 end
 
@@ -352,6 +368,51 @@ local function buildGiftIdMap(gifts)
     end
 
     return giftIds
+end
+
+-- 导入配置里的全服官方礼物，固定 GiftId 保证同一奖励只进一次待领取列表。
+importGlobalGifts = function(player, data)
+    if not player or not player.Parent or type(data) ~= "table" then
+        return false, "missing player data"
+    end
+
+    local globalGifts = GiftingConfig.GlobalGifts
+    if type(globalGifts) ~= "table" or #globalGifts <= 0 then
+        return true, "empty"
+    end
+
+    local gifts = normalizePendingGifts(data)
+    local claimedGiftIds = normalizeClaimedGiftIds(data)
+    local pendingGiftIds = buildGiftIdMap(gifts)
+    local snapshot = deepCopy(data)
+    local importedCount = 0
+
+    for _, rawGift in ipairs(globalGifts) do
+        local gift, message = normalizeGift(rawGift)
+        if gift and claimedGiftIds[gift.Id] ~= true and pendingGiftIds[gift.Id] ~= true then
+            table.insert(gifts, deepCopy(gift))
+            pendingGiftIds[gift.Id] = true
+            importedCount += 1
+        elseif not gift then
+            warn("[GiftingService] Global gift config skipped: " .. tostring(message))
+        end
+    end
+
+    if importedCount <= 0 then
+        return true, 0
+    end
+
+    local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "global gift import")
+    if not saveQueued then
+        restoreTable(data, snapshot)
+        fireInventoryUpdate(player, data)
+        warn("[GiftingService] Failed to queue save after global gift import for "
+            .. tostring(player.Name) .. ": " .. tostring(saveErr))
+        return false, saveErr
+    end
+
+    fireGiftingUpdate(player, data)
+    return true, importedCount
 end
 
 local function normalizeInbox(rawInbox)
@@ -547,6 +608,14 @@ local function grantReward(player, data, gift)
 
     if rewardType == GiftingConfig.RewardTypes.Plant then
         PlayerDataManager.GivePlant(player, gift.ItemId, amount, gift.Mutation, true)
+        return true, buildRewardText(gift)
+    end
+
+    if rewardType == GiftingConfig.RewardTypes.Item then
+        local success = PlayerDataManager.GiveItem(player, gift.ItemId, amount, false)
+        if not success then
+            return false, "Gift failed: item could not be granted."
+        end
         return true, buildRewardText(gift)
     end
 
@@ -862,7 +931,7 @@ end
 local function buildGiftFromCommand(sender, words)
     local rewardType = normalizeRewardType(words[3])
     if not rewardType then
-        return nil, "Usage: !gift player Sun amount | Tacos amount | Seed seedId amount | Plant plantId amount mutation | Chest chestId amount | Title titleId"
+        return nil, "Usage: !gift player Sun amount | Tacos amount | Seed seedId amount | Plant plantId amount mutation | Item itemId amount | Chest chestId amount | Title titleId"
     end
 
     local title = "Gift from " .. tostring(sender.DisplayName or sender.Name)
@@ -912,7 +981,7 @@ local function handleAdminCommand(player, message)
     end
 
     if #words < 4 then
-        sendTip(player, "Usage: !gift player Sun amount | Tacos amount | Seed seedId amount | Plant plantId amount mutation | Chest chestId amount | Title titleId")
+        sendTip(player, "Usage: !gift player Sun amount | Tacos amount | Seed seedId amount | Plant plantId amount mutation | Item itemId amount | Chest chestId amount | Title titleId")
         return
     end
 
@@ -972,6 +1041,7 @@ local function bindPlayer(player)
         if player.Parent and data then
             normalizeClaimedGiftIds(data)
             normalizePendingGifts(data)
+            importGlobalGifts(player, data)
             importInboxGifts(player, data)
             fireGiftingUpdate(player, data)
         end

@@ -11,6 +11,24 @@ local currentShopItems = {}
 local playerSpecificStock = {}
 local nextRefreshTime = 0
 
+local function getSpecialShopConfig(seedDetail)
+    local specialShop = seedDetail and seedDetail.SpecialShop
+    if type(specialShop) ~= "table" then
+        return nil
+    end
+
+    local chance = math.clamp(tonumber(specialShop.Chance) or 0, 0, 1)
+    if chance <= 0 then
+        return nil
+    end
+
+    return {
+        Chance = chance,
+        Stock = math.max(1, math.floor(tonumber(specialShop.Stock) or 1)),
+        Style = specialShop.Style,
+    }
+end
+
 local function cloneValue(value)
     if type(value) ~= "table" then
         return value
@@ -87,6 +105,7 @@ end
 function ShopService.RefreshStock()
     currentShopItems = {}
     playerSpecificStock = {}
+    local stockedSeeds = {}
 
     for _, seedId in ipairs(ItemConfig.IdToSeedKey or {}) do
         if seedId then
@@ -118,7 +137,36 @@ function ShopService.RefreshStock()
 
                 local restockAmount = restockById[itemDetail.Id] or 1
                 table.insert(currentShopItems, { SeedId = seedId, MaxStock = restockAmount })
+                stockedSeeds[seedId] = true
             end
+        end
+    end
+
+    local specialSeedIds = {}
+    for seedId, itemDetail in pairs(ItemConfig.Seeds or {}) do
+        local specialShop = getSpecialShopConfig(itemDetail)
+        if specialShop and not stockedSeeds[seedId] and math.random() < specialShop.Chance then
+            table.insert(specialSeedIds, seedId)
+        end
+    end
+
+    table.sort(specialSeedIds, function(a, b)
+        local aDetail = ItemConfig.Seeds[a]
+        local bDetail = ItemConfig.Seeds[b]
+        return (tonumber(aDetail and aDetail.Id) or 9999) < (tonumber(bDetail and bDetail.Id) or 9999)
+    end)
+
+    for _, seedId in ipairs(specialSeedIds) do
+        local itemDetail = ItemConfig.Seeds[seedId]
+        local specialShop = getSpecialShopConfig(itemDetail)
+        if specialShop then
+            table.insert(currentShopItems, {
+                SeedId = seedId,
+                MaxStock = specialShop.Stock,
+                SpecialShop = true,
+                ShopStyle = specialShop.Style,
+            })
+            stockedSeeds[seedId] = true
         end
     end
 
@@ -130,7 +178,12 @@ local function GetPlayerStockData(player)
     if not playerSpecificStock[player.UserId] then
         local personal = {}
         for i, item in ipairs(currentShopItems) do
-            table.insert(personal, { SeedId = item.SeedId, Stock = item.MaxStock })
+            table.insert(personal, {
+                SeedId = item.SeedId,
+                Stock = item.MaxStock,
+                SpecialShop = item.SpecialShop == true,
+                ShopStyle = item.ShopStyle,
+            })
         end
         playerSpecificStock[player.UserId] = personal
     end

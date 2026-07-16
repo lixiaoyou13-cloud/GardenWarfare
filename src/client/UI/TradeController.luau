@@ -75,8 +75,6 @@ local TRADE_BLUR_OVERLAY_NAME = "TradeBlurOverlay"
 local TRADE_BLUR_OVERLAY_Z_INDEX = 1
 local TRADE_PANEL_MIN_Z_INDEX = 2
 local TRADE_EXPRESSION_MIN_Z_INDEX = 60
-local TRADE_INVENTORY_ROW_SIZE = UDim2.new(1, -8, 0, 74)
-local TRADE_INVENTORY_ICON_SIZE = UDim2.new(0, 48, 0, 48)
 
 local function make(className, properties, parent)
     local instance = Instance.new(className)
@@ -198,21 +196,20 @@ local function setGuiTextColor(instance, color)
     end
 end
 
--- 设置 GuiObject 的锚点、尺寸和位置，用于还原编辑器模板克隆后的运行时布局。
-local function setGuiObjectLayout(instance, anchorPoint, position, size)
-    if not (instance and instance:IsA("GuiObject")) then
+-- 统一修正交易 UI 文本显示，避免手机窄宽度下自动换行导致错位。
+local function configureSingleLineText(instance, options)
+    if not (instance and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))) then
         return
     end
 
-    if anchorPoint then
-        instance.AnchorPoint = anchorPoint
-    end
-    if position then
-        instance.Position = position
-    end
-    if size then
-        instance.Size = size
-    end
+    local config = options or {}
+    instance.TextWrapped = config.TextWrapped == true
+    instance.TextScaled = config.TextScaled ~= false
+    instance.TextXAlignment = config.TextXAlignment or instance.TextXAlignment
+    instance.TextYAlignment = config.TextYAlignment or Enum.TextYAlignment.Center
+    pcall(function()
+        instance.TextTruncate = config.TextTruncate or Enum.TextTruncate.AtEnd
+    end)
 end
 
 -- 设置准备状态文案和颜色：准备为绿色，未准备为红色。
@@ -716,6 +713,33 @@ local function getSlotClickTarget(slot)
     }, slot)
 end
 
+-- 适配交易格模板：尊重 Studio 里的 Scale 布局，只修正文本和图片显示属性。
+local function applyOfferSlotTemplateLayout(slot)
+    if not (slot and slot:IsA("GuiObject")) then
+        return
+    end
+
+    local icon = findDescendant(slot, "Icon")
+    local quantityLabel = findDescendant(slot, "Quantity")
+    local nameLabel = findDescendant(slot, "NameLabel")
+    local mutationLabel = findDescendant(slot, "MutationLabel")
+
+    slot.ClipsDescendants = true
+
+    if icon and (icon:IsA("ImageLabel") or icon:IsA("ImageButton")) then
+        icon.ScaleType = Enum.ScaleType.Fit
+    end
+
+    for _, label in ipairs({ quantityLabel, nameLabel, mutationLabel }) do
+        if label and (label:IsA("TextLabel") or label:IsA("TextButton") or label:IsA("TextBox")) then
+            label.Visible = true
+            configureSingleLineText(label, {
+                TextXAlignment = Enum.TextXAlignment.Center,
+            })
+        end
+    end
+end
+
 local function createTradeSlot(parent, entry, isMine)
     local plantId = entry.PlantId
     local mutationLevel = tonumber(entry.Mutation) or 1
@@ -730,6 +754,7 @@ local function createTradeSlot(parent, entry, isMine)
         slot.Visible = true
         slot.Parent = parent
         slot:SetAttribute("TradeGenerated", true)
+        applyOfferSlotTemplateLayout(slot)
 
         setGuiImage(findDescendant(slot, "Icon"), plantDetail and plantDetail.IconId or "")
         setGuiText(findDescendant(slot, "Quantity"), "x" .. tostring(quantity))
@@ -991,7 +1016,6 @@ local function renderOfferContainers()
     if not currentSessionState then
         return
     end
-
     local localKey = tostring(localPlayer.UserId)
     local partnerUserId = getPartnerUserId(currentSessionState)
     local partnerKey = tostring(partnerUserId or "")
@@ -1123,27 +1147,53 @@ local function bindInventoryRowSelection(row, iconButton, controls, amountBox)
     end
 end
 
--- 还原背包条目模板的标准尺寸，避免编辑器里误调模板后运行时条目过大。
+-- 适配背包条目模板：尊重 Studio 里的 Scale 布局，只修正文本和按钮交互属性。
 local function applyInventoryRowTemplateLayout(row)
     if not (row and row:IsA("GuiObject")) then
         return
     end
 
-    row.Size = TRADE_INVENTORY_ROW_SIZE
+    row.ClipsDescendants = true
 
-    setGuiObjectLayout(findDescendant(row, "IconButton"), Vector2.new(0.5, 0.5), UDim2.new(0, 32, 0.5, 0), TRADE_INVENTORY_ICON_SIZE)
-    setGuiObjectLayout(findDescendant(row, "NameLabel"), Vector2.new(0, 0), UDim2.new(0, 64, 0, 7), UDim2.new(1, -208, 0, 24))
-    setGuiObjectLayout(findDescendant(row, "MutationLabel"), Vector2.new(0, 0), UDim2.new(0, 64, 0, 31), UDim2.new(1, -208, 0, 18))
-    setGuiObjectLayout(findDescendant(row, "QuantityLabel"), Vector2.new(0, 0), UDim2.new(0, 64, 0, 51), UDim2.new(1, -208, 0, 18))
-    setGuiObjectLayout(findDescendant(row, "MinusButton"), Vector2.new(0.5, 0.5), UDim2.new(1, -122, 0.5, 0), UDim2.new(0, 28, 0, 32))
-    setGuiObjectLayout(findDescendant(row, "AmountBox"), Vector2.new(0.5, 0.5), UDim2.new(1, -85, 0.5, 0), UDim2.new(0, 38, 0, 32))
-    setGuiObjectLayout(findDescendant(row, "PlusButton"), Vector2.new(0.5, 0.5), UDim2.new(1, -48, 0.5, 0), UDim2.new(0, 28, 0, 32))
-    setGuiObjectLayout(findDescendant(row, "UploadButton"), Vector2.new(0.5, 0.5), UDim2.new(1, -18, 0.5, 0), UDim2.new(0, 24, 0, 32))
+    local iconButton = findDescendant(row, "IconButton")
+    local nameLabel = findDescendant(row, "NameLabel")
+    local mutationLabel = findDescendant(row, "MutationLabel")
+    local quantityLabel = findDescendant(row, "QuantityLabel")
+    local minusButton = findDescendant(row, "MinusButton")
+    local amountBox = findDescendant(row, "AmountBox")
+    local plusButton = findDescendant(row, "PlusButton")
+    local uploadButton = findDescendant(row, "UploadButton")
 
-    bindTradeHoverEffect(findDescendant(row, "IconButton"))
-    bindTradeHoverEffect(findDescendant(row, "MinusButton"))
-    bindTradeHoverEffect(findDescendant(row, "PlusButton"))
-    bindTradeHoverEffect(findDescendant(row, "UploadButton"))
+    if iconButton and (iconButton:IsA("ImageLabel") or iconButton:IsA("ImageButton")) then
+        iconButton.ScaleType = Enum.ScaleType.Fit
+    end
+
+    configureSingleLineText(nameLabel, {
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    configureSingleLineText(mutationLabel, {
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    configureSingleLineText(quantityLabel, {
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+    configureSingleLineText(minusButton, {
+        TextXAlignment = Enum.TextXAlignment.Center,
+    })
+    configureSingleLineText(amountBox, {
+        TextXAlignment = Enum.TextXAlignment.Center,
+    })
+    configureSingleLineText(plusButton, {
+        TextXAlignment = Enum.TextXAlignment.Center,
+    })
+    configureSingleLineText(uploadButton, {
+        TextXAlignment = Enum.TextXAlignment.Center,
+    })
+
+    bindTradeHoverEffect(iconButton)
+    bindTradeHoverEffect(minusButton)
+    bindTradeHoverEffect(plusButton)
+    bindTradeHoverEffect(uploadButton)
 end
 
 local function createInventoryRow(parent, plantData, layoutOrder)
@@ -1790,6 +1840,16 @@ function TradeController.Init()
     fetchPlayerData()
     bindLocalCharacterPromptState(localPlayer.Character)
     localPlayer.CharacterAdded:Connect(bindLocalCharacterPromptState)
+
+    local camera = Workspace.CurrentCamera
+    if camera then
+        camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+            if mainFrame and mainFrame.Visible then
+                renderOfferContainers()
+                renderInventory()
+            end
+        end)
+    end
 
     for _, player in ipairs(Players:GetPlayers()) do
         watchPlayer(player)

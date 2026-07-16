@@ -24,6 +24,10 @@ local STEAL_SAVE_FIELDS = {
     "UnlockedMutations",
 }
 local STEALING_PLANT_ATTRIBUTE = "IsStealingPlant"
+local STEAL_RESOLVING_ATTRIBUTE = "IsStealResolving"
+local STEALING_USER_ID_ATTRIBUTE = "StealingUserId"
+local HARVEST_RESOLVE_LOCK_TIMEOUT = 30
+local resolvingHarvestSoils = {}
 
 local function cloneValue(value)
     if type(value) ~= "table" then
@@ -66,6 +70,78 @@ local function notifyPlayer(player, message)
     local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
     if showNotifRE and player and player.Parent then
         showNotifRE:FireClient(player, "Notice", message)
+    end
+end
+
+-- 同一块土地同一时间只允许一个收获/偷菜结算流程，防止旧回调重复发奖。
+local function getHarvestResolveKey(plot, soilName)
+    if not plot or type(soilName) ~= "string" or soilName == "" then
+        return nil
+    end
+
+    return tostring(plot:GetFullName()) .. ":" .. soilName
+end
+
+-- 检查土地是否正在结算收获或偷菜。
+local function isHarvestResolving(plot, soilName)
+    local key = getHarvestResolveKey(plot, soilName)
+    return key ~= nil and resolvingHarvestSoils[key] ~= nil
+end
+
+-- 收获/偷菜结算期间锁住土地、模型和 Prompt，避免同一株植物被重复收获。
+local function setHarvestResolvingLock(plot, soilName, targetPlant, prompt, locked)
+    local key = getHarvestResolveKey(plot, soilName)
+    if key then
+        if locked == true then
+            local token = os.clock()
+            resolvingHarvestSoils[key] = token
+            task.delay(HARVEST_RESOLVE_LOCK_TIMEOUT, function()
+                if resolvingHarvestSoils[key] == token then
+                    resolvingHarvestSoils[key] = nil
+                end
+            end)
+        else
+            resolvingHarvestSoils[key] = nil
+        end
+    end
+
+    if targetPlant and targetPlant.Parent then
+        targetPlant:SetAttribute(STEAL_RESOLVING_ATTRIBUTE, locked == true)
+    end
+
+    if prompt and prompt.Parent then
+        prompt.Enabled = locked ~= true
+    end
+end
+
+-- 清理偷菜读条状态，避免植物被主人收走后小偷仍保留可被击退状态。
+local function clearStealingState(targetPlant, stealingPlayer)
+    local stealingUserId = nil
+    if targetPlant then
+        stealingUserId = tonumber(targetPlant:GetAttribute(STEALING_USER_ID_ATTRIBUTE))
+        targetPlant:SetAttribute("IsBeingStolen", false)
+        targetPlant:SetAttribute(STEALING_USER_ID_ATTRIBUTE, nil)
+        CollectionService:RemoveTag(targetPlant, "BeingStolen")
+    end
+
+    if not stealingPlayer and stealingUserId then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.UserId == stealingUserId then
+                stealingPlayer = player
+                break
+            end
+        end
+    end
+
+    if stealingPlayer then
+        stealingPlayer:SetAttribute(STEALING_PLANT_ATTRIBUTE, false)
+    end
+end
+
+-- 存档失败时把临时移走的植物放回场景，避免偷菜失败后植物丢失。
+local function restoreStealResolvingPlant(targetPlant, originalParent)
+    if targetPlant and not targetPlant.Parent and originalParent and originalParent.Parent then
+        targetPlant.Parent = originalParent
     end
 end
 
@@ -227,6 +303,7 @@ function PlantService.Init()
                 -- 事件 1：手指按下的瞬间 (判定秒收与报警)
                 prompt.PromptButtonHoldBegan:Connect(function(player)
                     if soil:GetAttribute("IsUnlocked") ~= true then return end
+                    if isHarvestResolving(plot, soil.Name) then return end
 
                     local targetPlant = nil
                     for _, plant in ipairs(plantsFolder:GetChildren()) do
@@ -234,12 +311,17 @@ function PlantService.Init()
                     end
 
                     if targetPlant and targetPlant:GetAttribute("IsMature") then
+                        if targetPlant:GetAttribute(STEAL_RESOLVING_ATTRIBUTE) then return end
+
                         local myPlot = PlotService.GetPlayerPlot(player)
                         local isOwner = (myPlot == plot)
                         local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
 
                         if isOwner then
                             -- 主人专属特权：按下瞬间立刻秒收，不需要等15秒
+                            setHarvestResolvingLock(plot, soil.Name, targetPlant, prompt, true)
+                            clearStealingState(targetPlant)
+
                             local plantId = targetPlant.Name
                             local currentYield = targetPlant:GetAttribute("YieldCount") or 1
                             local mutLevel = targetPlant:GetAttribute("MutationLevel") or 1
@@ -279,12 +361,6 @@ function PlantService.Init()
                             prompt.ActionText = "Plant"
                             prompt.HoldDuration = 0.5 -- 地空了，种地时间恢复为0.5秒
 
-                            task.delay(0.05, function()
-                                if prompt and prompt.Parent then
-                                    prompt.Enabled = true
-                                end
-                            end)
-
                             local playObtainEffectRE = ReplicatedStorage:FindFirstChild("PlayObtainEffectRE")
                             if playObtainEffectRE then
                                 -- 把多段文字合并成一句
@@ -292,6 +368,10 @@ function PlantService.Init()
                                 local playFullEffect = (tonumber(plantConfig and plantConfig.Quality) or 0) >= 4
                                 playObtainEffectRE:FireClient(player, msg, playFullEffect)
                             end
+
+                            task.delay(0.05, function()
+                                setHarvestResolvingLock(plot, soil.Name, nil, prompt, false)
+                            end)
                         else
                             -- 2. 小偷按下E，开始死死按住15秒
                             if targetPlant:GetAttribute("IsBeingStolen") then
@@ -300,6 +380,7 @@ function PlantService.Init()
                             end
 
                             targetPlant:SetAttribute("IsBeingStolen", true)
+                            targetPlant:SetAttribute(STEALING_USER_ID_ATTRIBUTE, player.UserId)
                             player:SetAttribute(STEALING_PLANT_ATTRIBUTE, true)
                             -- 给这颗植物打上被偷的专属标签，供客户端雷达扫描
                             CollectionService:AddTag(targetPlant, "BeingStolen")
@@ -312,6 +393,11 @@ function PlantService.Init()
 
                 -- 事件 2：松手或被物理击飞导致强制中断
                 prompt.PromptButtonHoldEnded:Connect(function(player)
+                    if isHarvestResolving(plot, soil.Name) then
+                        player:SetAttribute(STEALING_PLANT_ATTRIBUTE, false)
+                        return
+                    end
+
                     local targetPlant = nil
                     for _, plant in ipairs(plantsFolder:GetChildren()) do
                         if plant:GetAttribute("PlantedOn") == soil.Name then targetPlant = plant; break end
@@ -323,11 +409,10 @@ function PlantService.Init()
                             -- 避免延迟 0.1 秒判定，避开底层事件冲突
                             task.wait(0.1)
                             if not targetPlant or not targetPlant.Parent then return end
+                            if targetPlant:GetAttribute(STEAL_RESOLVING_ATTRIBUTE) then return end
 
-                            targetPlant:SetAttribute("IsBeingStolen", false)
-                            player:SetAttribute(STEALING_PLANT_ATTRIBUTE, false)
-                            -- 中断时移除被偷标签
-                            CollectionService:RemoveTag(targetPlant, "BeingStolen")
+                            -- 中断时移除被偷标签和玩家偷菜状态。
+                            clearStealingState(targetPlant, player)
 
                             local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
                             if showNotifRE then showNotifRE:FireClient(player, "Notice", "Stealing canceled!") end
@@ -338,6 +423,7 @@ function PlantService.Init()
                 -- 事件 3：读条圆圈转满完成
                 prompt.Triggered:Connect(function(player)
                     if soil:GetAttribute("IsUnlocked") ~= true then return end
+                    if isHarvestResolving(plot, soil.Name) then return end
 
                     local myPlot = PlotService.GetPlayerPlot(player)
                     local isOwner = (myPlot == plot)
@@ -350,11 +436,12 @@ function PlantService.Init()
                     if targetPlant then
                         if targetPlant:GetAttribute("IsMature") then
                             -- 成熟逻辑：因为主人在按下瞬间就已经拿到了，所以能熬过 15 秒走到这里的只能是小偷
+                            if targetPlant:GetAttribute(STEAL_RESOLVING_ATTRIBUTE) then return end
+
                             if not isOwner and targetPlant:GetAttribute("IsBeingStolen") then
-                                targetPlant:SetAttribute("IsBeingStolen", false)
-                                player:SetAttribute(STEALING_PLANT_ATTRIBUTE, false)
-                                -- 成功得手时移除被偷标签
-                                CollectionService:RemoveTag(targetPlant, "BeingStolen")
+                                setHarvestResolvingLock(plot, soil.Name, targetPlant, prompt, true)
+                                -- 成功得手时移除被偷标签和玩家偷菜状态。
+                                clearStealingState(targetPlant, player)
 
                                 local plantId = targetPlant.Name
                                 local currentYield = targetPlant:GetAttribute("YieldCount") or 1
@@ -372,16 +459,22 @@ function PlantService.Init()
                                 local thiefData = PlayerDataManager.GetPlayerData(player)
                                 local ownerData = ownerPlayer and PlayerDataManager.GetPlayerData(ownerPlayer)
                                 if not ownerPlayer or not thiefData or not ownerData then
+                                    setHarvestResolvingLock(plot, soil.Name, targetPlant, prompt, false)
                                     notifyPlayer(player, "Steal failed: owner data is unavailable.")
                                     return
                                 end
                                 if not PlayerDataManager.IsDataSafeToSave(player) or not PlayerDataManager.IsDataSafeToSave(ownerPlayer) then
+                                    setHarvestResolvingLock(plot, soil.Name, targetPlant, prompt, false)
                                     notifyPlayer(player, "Steal failed: save unavailable. Please try again.")
                                     return
                                 end
 
                                 local thiefSnapshot = snapshotStealState(thiefData)
                                 local ownerSnapshot = snapshotStealState(ownerData)
+                                local originalPlantParent = targetPlant.Parent
+
+                                -- 成功结算开始后先从场景移走，防止主人在存档等待时看到并二次收获。
+                                targetPlant.Parent = nil
 
                                 PlayerDataManager.GivePlant(player, plantId, currentYield, mutLevel)
                                 PlayerDataManager.UnlockMutation(player, plantId, mutLevel)
@@ -389,6 +482,8 @@ function PlantService.Init()
 
                                 local stealSaved = saveStealTransaction(player, ownerPlayer, thiefData, ownerData, thiefSnapshot, ownerSnapshot)
                                 if not stealSaved then
+                                    restoreStealResolvingPlant(targetPlant, originalPlantParent)
+                                    setHarvestResolvingLock(plot, soil.Name, targetPlant, prompt, false)
                                     notifyPlayer(player, "Steal failed: save failed. Please try again.")
                                     return
                                 end
@@ -438,9 +533,7 @@ function PlantService.Init()
                                 prompt.HoldDuration = 0.5
 
                                 task.delay(0.05, function()
-                                    if prompt and prompt.Parent then
-                                        prompt.Enabled = true
-                                    end
+                                    setHarvestResolvingLock(plot, soil.Name, nil, prompt, false)
                                 end)
 
                                 local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
