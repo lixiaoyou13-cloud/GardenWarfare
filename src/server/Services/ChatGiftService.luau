@@ -26,6 +26,14 @@ local BUG551_ALLOWED_USERS = {
 local BUG551_REWARDS = {
     { PlantId = "Rotobaga", Amount = 3, Mutation = 1 },
 }
+local BUG4421_CODE = "bug4421"
+local BUG4421_CLAIM_FLAG = "Code_BUG4421_Claimed"
+local BUG4421_ALLOWED_USERS = {
+    ["sxyyhz1"] = true,
+}
+local BUG4421_REWARDS = {
+    { PlantId = "LanternFlower", Amount = 10, Mutation = 1 },
+}
 local PLANT666_CODE = "shgh4dwg5"
 local PLANT666_CLAIM_FLAG = "Code_Plant666_Claimed"
 local PLANT666_REWARDS = {
@@ -188,6 +196,54 @@ local function claimBug551Code(player)
     return true, "Code claimed: 3x Rotobaga!"
 end
 
+local function isBug4421CodeAllowed(player)
+    local username = player and player.Name
+    if type(username) ~= "string" then
+        return false
+    end
+
+    return BUG4421_ALLOWED_USERS[string.lower(username)] == true
+end
+
+local function claimBug4421Code(player)
+    if not isBug4421CodeAllowed(player) then
+        return false, "This code is not available for your account."
+    end
+
+    if claimingPlayers[player] then
+        return false, "Redeem is already processing."
+    end
+
+    claimingPlayers[player] = true
+
+    local data = PlayerDataManager.WaitForPlayerData(player, 10)
+    if not data then
+        claimingPlayers[player] = nil
+        return false, "Gift failed: data is still loading."
+    end
+
+    local rewardsOk, missingPlantId = validatePlantRewards(BUG4421_REWARDS)
+    if not rewardsOk then
+        claimingPlayers[player] = nil
+        warn("[ChatGiftService] BUG4421 code plant config not found: " .. tostring(missingPlantId))
+        return false, "Gift failed: reward config not found."
+    end
+
+    local success, message = PlayerDataManager.GrantSavedPlantBundle(
+        player,
+        BUG4421_CLAIM_FLAG,
+        BUG4421_REWARDS
+    )
+
+    claimingPlayers[player] = nil
+
+    if not success then
+        return false, message or "Gift failed: please try again later."
+    end
+
+    return true, "Code claimed: 10x Lantern Flower!"
+end
+
 local function claimPlant666Code(player)
     if claimingPlayers[player] then
         return false, "Redeem is already processing."
@@ -344,6 +400,10 @@ local function redeemCode(player, rawCode)
 
     if code == BUG551_CODE then
         return claimBug551Code(player)
+    end
+
+    if code == BUG4421_CODE then
+        return claimBug4421Code(player)
     end
 
     if code == PLANT666_CODE then

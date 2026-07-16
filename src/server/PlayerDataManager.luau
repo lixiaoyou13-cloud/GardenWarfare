@@ -430,6 +430,37 @@ local function applySunReset20260707(data)
     return true
 end
 
+local function normalizeSunBalances(data)
+    if type(data) ~= "table" then
+        return false
+    end
+
+    local changed = false
+    local coins = tonumber(data.Coins)
+    if not coins or coins < 0 then
+        if data.Coins ~= 0 then
+            data.Coins = 0
+            changed = true
+        end
+    elseif data.Coins ~= coins then
+        data.Coins = coins
+        changed = true
+    end
+
+    local totalSun = tonumber(data.TotalSun)
+    if not totalSun or totalSun < 0 then
+        if data.TotalSun ~= 0 then
+            data.TotalSun = 0
+            changed = true
+        end
+    elseif data.TotalSun ~= totalSun then
+        data.TotalSun = totalSun
+        changed = true
+    end
+
+    return changed
+end
+
 local function normalizeRankingSeasonProgress(data)
     RankingSeasonConfig.NormalizeSeasonUnlockedLevels(data)
     return data
@@ -2070,6 +2101,7 @@ local function onPlayerAdded(player)
             if success then
                 if savedData then
                 local sunResetApplied = false
+                local sunBalancesNormalized = false
                 savedData.Hotbar = {"Tool_Shovel", "System_Backpack", "Tool_WeaponBlock"}
                 if type(savedData.Inventory) ~= "table" then savedData.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} } end
                 if type(savedData.Inventory.Seeds) ~= "table" then savedData.Inventory.Seeds = {} end
@@ -2114,6 +2146,7 @@ local function onPlayerAdded(player)
                 savedData[SAVE_VERSION_KEY] = getSaveVersion(savedData)
                 savedData[LAST_SAVE_TIME_KEY] = tonumber(savedData[LAST_SAVE_TIME_KEY]) or 0
                 applyCurrentSessionLock(savedData, os.time())
+                sunBalancesNormalized = normalizeSunBalances(savedData)
                 sunResetApplied = applySunReset20260707(savedData)
 
                 -- 兼容老玩家数据
@@ -2146,6 +2179,10 @@ local function onPlayerAdded(player)
                 end
                 sessionData[player.UserId] = savedData
                 dataSaveAllowed[player.UserId] = true
+                if sunBalancesNormalized then
+                    markSessionDataChanged(player, "sun balance cleanup")
+                    print("[Data] Player " .. player.Name .. " negative Sun balance normalized to 0.")
+                end
                 if sunResetApplied then
                     markSessionDataChanged(player, "sun reset 20260707")
                     print("[Data] Player " .. player.Name .. " Sun reset applied; retained up to 1M Sun.")

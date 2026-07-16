@@ -118,9 +118,18 @@ local function shouldShowPlantInTab(tabIndex, plantDetail)
         return plantDetail and plantDetail.CodexCategory == SPECIAL_CODEX_TAB
     end
 
-    return plantDetail
-        and plantDetail.HideFromStandardCodex ~= true
-        and plantDetail.CodexCategory == nil
+    if not plantDetail
+        or plantDetail.HideFromStandardCodex == true
+        or plantDetail.CodexCategory ~= nil then
+        return false
+    end
+
+    local mutationLevel = getCodexMutationLevel(tabIndex, plantDetail)
+    if plantDetail.NoMutation == true and mutationLevel > 1 then
+        return false
+    end
+
+    return true
 end
 
 local function getSortedPlantsForTab(tabIndex)

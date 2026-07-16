@@ -785,6 +785,7 @@ local ItemConfig = {
 			HitEffectColor = Color3.fromRGB(255, 255, 127),
 			ProjectileName = "Rotobaga",
 			IsIAPOnly = true,
+			NoMutation = true,
 			Piercing = true,
 			IdleAnimId = "rbxassetid://90459622226121",
 			AttackAnimation = "rbxassetid://137485157321511",

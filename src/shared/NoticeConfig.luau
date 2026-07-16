@@ -6,6 +6,23 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- Each notice creates one tag button in Notice.TypeButtons.
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
+    -- 2026/7/15 更新公告：交易系统上线，并修复图鉴与礼物界面问题。
+    {
+        Id = "notice-2026-07-15",
+        TagText = "2026/7/15",
+        PublishedAt = "2026-07-15",
+        Title = "July 15 Trade Update",
+        Sections = {
+            {
+                Title = "Player Trading Added",
+                Content = "You can now send trade requests to nearby players and trade plants directly. Both players must confirm before a trade is completed.",
+            },
+            {
+                Title = "Bug Fixes",
+                Content = "Fixed an issue where Rotobaga could appear incorrectly in mutation tag displays.\nOpening the Gift page now uses the same UI rules as other pages, so other panels are properly disabled while it is open.",
+            },
+        },
+    },
     {
         Id = "notice-2026-07-13",
         TagText = "2026/7/13",
