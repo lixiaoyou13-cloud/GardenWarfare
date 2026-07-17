@@ -3,6 +3,8 @@ local EffectUtil = {}
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
+local SUNSHROOM_HEAL_VFX_DEBUG = false
+
 -- 定义所有变异特效的标签名称
 local MUTATION_TAGS = { "Glow", "Lightning", "HolyLight" }
 
@@ -110,14 +112,20 @@ end
 function EffectUtil.HideAllMutations(model)
     EffectUtil.ApplyMutationEffects(model, 1)
 end
+
+-- 播放模型内名为 VFX/vfx 的一次性粒子特效。
 function EffectUtil.PlayAttackVFX(model)
     if not model then return end
+    local isSunShroom = model.Name == "SunShroom" or model:GetAttribute("PlantId") == "SunShroom"
+    local vfxNodeCount = 0
+    local emittedCount = 0
 
     -- 1. 遍历模型内的所有节点击（解决有多个 VFX 节点击的问题，比如双持武器）
     for _, node in ipairs(model:GetDescendants()) do
 
         -- 2. 忽略大小写判定（VFX, vfx, Vfx 都能识别）
         if string.upper(node.Name) == "VFX" then
+            vfxNodeCount += 1
 
             -- 3. 把当前 VFX 节点击自转身，以及它内部的所有子代，放进一个列表里统一检查
             -- 解决你直接把 ParticleEmitter 命名为 VFX 的情况
@@ -150,9 +158,18 @@ function EffectUtil.PlayAttackVFX(model)
 
                     -- 6. 瞬间发射粒子
                     child:Emit(emitCount)
+                    emittedCount += 1
                 end
             end
         end
+    end
+
+    if isSunShroom and SUNSHROOM_HEAL_VFX_DEBUG then
+        print(("[SunShroomHealVFX][EffectUtil] scanned model=%s vfxNodes=%d emitters=%d"):format(
+            model:GetFullName(),
+            vfxNodeCount,
+            emittedCount
+        ))
     end
 end
 

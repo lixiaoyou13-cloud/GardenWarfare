@@ -349,6 +349,32 @@ local ItemConfig = {
 			IAPProductId = 0,
 			IAPPrice = 0,
 		},
+		["SunShroom"] = {
+			Id = 27,
+			Name = "Sun-shroom Seed",
+			Quality = 6,
+			GrowthTime = 2400,
+			YieldPlant = "SunShroom",
+			SeedId = "SunShroom_Seed", -- 使用专属种子模型。
+			BuyPrice = 2000000000, -- 获取方式待定，先按高阶特殊植物定价，避免生长加速为 0。
+			IsSellable = false,
+			ExcludeFromRandomSeedRewards = true, -- 获取方式待定，先不进入随机种子奖励池。
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["PumpkinShield"] = {
+			Id = 28,
+			Name = "Pumpkin Shield Seed",
+			Quality = 6,
+			GrowthTime = 2400,
+			YieldPlant = "PumpkinShield",
+			SeedId = "Pumpkin_Seed", -- 使用南瓜保护罩专属种子模型。
+			BuyPrice = 2000000000, -- 保持高阶特殊种子价格，避免生长加速价格为 0。
+			IsSellable = false,
+			ExcludeFromRandomSeedRewards = true, -- 获取方式未接入前，不进入随机种子奖励池。
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
 	},
 
 	Plants = {
@@ -717,6 +743,7 @@ local ItemConfig = {
 			ProjectileName = "Corn",
 			SplashDamageScale = 0.7,
 			SplashRadius = 14,
+			DisallowPumpkinShield = true, -- 南瓜保护罩会和玉米加农炮穿模，所以禁止覆盖。
 			Description = "Description: The ultimate weapon. Lobs giant cobs for devastating damage.",
 			IAPProductId = 0, -- Roblox Developer Product ID
 			IAPPrice = 0,
@@ -830,6 +857,7 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(255, 170, 0),
 			ProjectileName = "CarrotCannon",
+			DisallowPumpkinShield = true, -- 南瓜保护罩会和胡萝卜加农炮穿模，所以禁止覆盖。
 			ExcludeFromRandomPlantRewards = true,
 			Description = "Description: A heavy carrot cannon that fires a single powerful shot.",
 			IAPProductId = 0,
@@ -925,6 +953,68 @@ local ItemConfig = {
 			HitEffectTexture = "rbxassetid://243098098",
 			HitEffectColor = Color3.fromRGB(0, 255, 255),
 			Description = "Description: Releases stored energy when attacked, damaging nearby zombies with lightning.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["PumpkinShield"] = {
+			Id = "PumpkinShield",
+			Name = "Pumpkin Shield",
+			ModelName = "Pumpkin", -- 实际模型为 ReplicatedStorage.ItemModels.Pumpkin_Plant。
+			IconId = "rbxassetid://102628522776856",
+			HP = 10000,
+			Quality = 6,
+			CanAttack = false,
+			Attack = 0,
+			AttackInterval = 0,
+			IdleAnimId = "rbxassetid://97379802870009",
+			IsPumpkinShield = true, -- 作为覆盖型保护罩使用，可放在空格或普通植物上。
+			ExcludeFromRandomPlantRewards = true, -- 获取方式待定，先不进入随机植物奖励池。
+			Source = "Special",
+			Description = "Description: A protective pumpkin shell that takes zombie bites before the plant inside.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["MutantPumpkinShield"] = {
+			Id = "MutantPumpkinShield",
+			Name = "Mutant Pumpkin Shield",
+			ModelName = "MutantPumpkin", -- 实际模型为 ReplicatedStorage.ItemModels.MutantPumpkin_Plant。
+			IconId = "rbxassetid://122606049339886",
+			HP = 20000,
+			Quality = 6,
+			CanAttack = false,
+			Attack = 0,
+			AttackInterval = 0,
+			IdleAnimId = "rbxassetid://97379802870009",
+			NoSeed = true, -- 该植物没有种子，目前通过战令等特殊渠道发放。
+			NoMutation = true, -- 独立突变植物，不再叠加普通变异等级。
+			IsPumpkinShield = true, -- 复用南瓜保护罩的覆盖、受击优先和铲除逻辑。
+			HideFromStandardCodex = true,
+			CodexCategory = 5,
+			CodexLabel = "Mutant",
+			ExcludeFromRandomPlantRewards = true,
+			Source = "Special",
+			Description = "Description: A mutated pumpkin shield that protects plants from zombie bites.",
+			IAPProductId = 0,
+			IAPPrice = 0,
+		},
+		["SunShroom"] = {
+			Id = "SunShroom",
+			Name = "Sun-shroom",
+			IconId = "rbxassetid://81765126994995",
+			HP = 500,
+			Quality = 6,
+			CanAttack = false,
+			Attack = 0,
+			AttackInterval = 0,
+			IdleAnimId = "rbxassetid://82699523172532",
+			FrontHeal = {
+				Amount = 1000, -- 每次基础治疗量：1k，最终数值会再乘变异治疗倍率。
+				Interval = 5, -- 每 5 秒治疗一次前方一格植物。
+				GridDistance = 1,
+			},
+			ExcludeFromRandomPlantRewards = true, -- 获取方式待定，先不进入随机植物奖励池。
+			Source = "Special",
+			Description = "Description: Restores health to the plant one tile in front every 5 seconds.",
 			IAPProductId = 0,
 			IAPPrice = 0,
 		},
@@ -1031,9 +1121,9 @@ ItemConfig.Chests = {
     },
 }
 ItemConfig.MutationStats = {
-    [1] = { DamageMul = 1.0, HealthMul = 1.0, AuraBuffMul = 1.0 }, -- 普通
-    [2] = { DamageMul = 1.5, HealthMul = 1.5, AuraBuffMul = 1.5 }, -- 闪光 (+50% 攻击, +50% 血量)
-    [3] = { DamageMul = 2, HealthMul = 3, AuraBuffMul = 2.0 }, -- 雷电 (+100% 攻击, +200% 血量)
-    [4] = { DamageMul = 2.5, HealthMul = 4, AuraBuffMul = 2.5 }, -- 神圣 (+150% 攻击, +300% 血量)
+    [1] = { DamageMul = 1.0, HealthMul = 1.0, AuraBuffMul = 1.0, HealMul = 1.0 }, -- 普通：基础治疗倍率。
+    [2] = { DamageMul = 1.5, HealthMul = 1.5, AuraBuffMul = 1.5, HealMul = 1.2 }, -- 闪光：治疗倍率 1.2。
+    [3] = { DamageMul = 2, HealthMul = 3, AuraBuffMul = 2.0, HealMul = 1.5 }, -- 雷电：治疗倍率 1.5。
+    [4] = { DamageMul = 2.5, HealthMul = 4, AuraBuffMul = 2.5, HealMul = 2.0 }, -- 神圣：治疗倍率 2.0。
 }
 return ItemConfig

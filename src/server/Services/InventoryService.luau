@@ -21,6 +21,25 @@ local POTION_INTERACTION_MAX_DISTANCE = 35
 local POTION_MUTATION_ANIMATION_SECONDS = 2.1
 local potionUseLocks = setmetatable({}, { __mode = "k" })
 
+-- 判断是否是南瓜保护罩类覆盖植物。
+local function isPumpkinShieldPlant(plantId)
+    local plantDetail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+    return plantDetail and plantDetail.IsPumpkinShield == true
+end
+
+-- 通过配置里的模型名查找植物模型，兼容配置 ID 和资源命名不一致的植物。
+local function findPlantModelTemplate(itemModelsFolder, plantId, plantDetail)
+    if not itemModelsFolder then
+        return nil
+    end
+
+    local modelName = (plantDetail and plantDetail.ModelName) or plantId
+    return itemModelsFolder:FindFirstChild(modelName .. "_Plant")
+        or itemModelsFolder:FindFirstChild(modelName)
+        or itemModelsFolder:FindFirstChild(plantId .. "_Plant")
+        or itemModelsFolder:FindFirstChild(plantId)
+end
+
 local function getDisplayItemName(itemType, realId)
     if itemType == "Seed" then
         local seedConfig = ItemConfig.Seeds[realId]
@@ -349,7 +368,15 @@ local function getPotionTargetInfo(player, targetPlant)
         if not combatInfo then
             return nil, "This plant cannot mutate right now."
         end
-        local plantId = (combatInfo and combatInfo.PlantId) or targetPlant.Name
+        local isPumpkinShield = targetPlant:GetAttribute("IsPumpkinShield") == true
+        local plantId = if isPumpkinShield
+            then (targetPlant:GetAttribute("PlantId") or targetPlant.Name)
+            else ((combatInfo and combatInfo.PlantId) or targetPlant.Name)
+        local plantConfig = ItemConfig.Plants and ItemConfig.Plants[plantId]
+        if plantConfig and plantConfig.NoMutation == true then
+            return nil, "This plant cannot mutate."
+        end
+
         local seedId = getPlantSeedId(plantId)
 
         if not seedId then
@@ -362,7 +389,9 @@ local function getPotionTargetInfo(player, targetPlant)
             GridName = gridName,
             PlantId = plantId,
             SeedId = seedId,
-            CurrentMutation = tonumber(combatInfo and combatInfo.Mutation) or tonumber(targetPlant:GetAttribute("MutationLevel")) or 1,
+            CurrentMutation = if isPumpkinShield
+                then (tonumber(targetPlant:GetAttribute("MutationLevel")) or 1)
+                else (tonumber(combatInfo and combatInfo.Mutation) or tonumber(targetPlant:GetAttribute("MutationLevel")) or 1),
         }
     end
 
@@ -410,6 +439,11 @@ local function applyPotionMutation(player, targetInfo, mutationLevel)
     local targetPlant = targetInfo and targetInfo.Target
     if not targetPlant or not targetPlant.Parent then
         return false, "Mutation failed: plant is gone."
+    end
+
+    local targetPlantConfig = ItemConfig.Plants and ItemConfig.Plants[targetInfo.PlantId]
+    if targetPlantConfig and targetPlantConfig.NoMutation == true then
+        return false, "This plant cannot mutate."
     end
 
     targetPlant:SetAttribute("MutationLevel", mutationLevel)
@@ -659,11 +693,106 @@ function InventoryService.Init()
     swapCombatPlantRE.Name = "SwapCombatPlantRE"
     swapCombatPlantRE.Parent = ReplicatedStorage
 
+    local placePumpkinShieldRE = Instance.new("RemoteEvent")
+    placePumpkinShieldRE.Name = "PlacePumpkinShieldRE"
+    placePumpkinShieldRE.Parent = ReplicatedStorage
+
+    -- 给已有战斗植物加南瓜保护罩，不替换原植物。
+    placePumpkinShieldRE.OnServerEvent:Connect(function(player, targetPlantModel, equippedCompositeId, isCombatEdit)
+        if not targetPlantModel or not targetPlantModel.Parent then return end
+        if type(equippedCompositeId) ~= "string" then return end
+        if not targetPlantModel:GetAttribute("IsCombatPlant") then return end
+        if targetPlantModel:GetAttribute("IsPumpkinShield") == true then return end
+        if targetPlantModel:GetAttribute("IsDead") == true or (tonumber(targetPlantModel:GetAttribute("Health")) or 0) <= 0 then return end
+
+        local parts = string.split(equippedCompositeId, "_")
+        if parts[1] ~= "Plant" then return end
+
+        local shieldPlantId = parts[2]
+        local shieldMutation = 1
+        local shieldConfig = ItemConfig.Plants[shieldPlantId]
+        if not (shieldConfig and isPumpkinShieldPlant(shieldPlantId)) then return end
+
+        local gridPart = targetPlantModel.Parent
+        if not gridPart or not gridPart:IsA("BasePart") then return end
+
+        local myPlot = PlotService.GetPlayerPlot(player)
+        local lawnFolder = myPlot and myPlot:FindFirstChild("Lawn")
+        if not myPlot or not lawnFolder or gridPart.Parent ~= lawnFolder then return end
+        if gridPart:GetAttribute("PumpkinShield") then return end
+
+        local targetPlantId = targetPlantModel:GetAttribute("PlantId") or targetPlantModel.Name
+        local targetPlantConfig = ItemConfig.Plants[targetPlantId]
+        if targetPlantConfig and targetPlantConfig.DisallowPumpkinShield == true then
+            local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+            if showNotifRE then
+                showNotifRE:FireClient(player, "Notice", "Pumpkin Shield cannot cover this plant.")
+            end
+            return
+        end
+
+        local data = PlayerDataManager.GetPlayerData(player)
+        if not data then return end
+
+        local gridName = gridPart.Name
+        local combatInfo = data.CombatPlants and data.CombatPlants[gridName]
+        if not (combatInfo and combatInfo.PlantId == targetPlantId) then return end
+
+        local hasShieldPlant = false
+        local inventoryPlants = data.Inventory and data.Inventory.Plants
+        if type(inventoryPlants) == "table" then
+            for _, plantData in ipairs(inventoryPlants) do
+                if plantData.ID == shieldPlantId and (tonumber(plantData.Mutation) or 1) == shieldMutation and (tonumber(plantData.Quantity) or 0) > 0 then
+                    hasShieldPlant = true
+                    break
+                end
+            end
+        end
+        if not hasShieldPlant then return end
+
+        local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
+        local shieldTemplate = findPlantModelTemplate(itemModelsFolder, shieldPlantId, shieldConfig)
+        if not shieldTemplate then return end
+
+        if myPlot:GetAttribute("IsLevelActive") then
+            if not isCombatEdit then
+                local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                if showNotifRE then
+                    showNotifRE:FireClient(player, "Notice", "Cannot add Pumpkin Shield during combat!")
+                end
+                return
+            end
+
+            local cost = GetCombatEditCost(player)
+            if not PlayerDataManager.ConsumeCoins(player, cost) then
+                local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                if showNotifRE then
+                    showNotifRE:FireClient(player, "Notice", "Not enough Sun! Need " .. tostring(cost) .. " Sun.")
+                end
+                return
+            end
+        end
+
+        if not PlayerDataManager.ConsumePlant(player, shieldPlantId, 1, shieldMutation) then return end
+
+        local maxHP = math.max(1, math.floor(tonumber(shieldConfig.HP) or 300))
+        local shieldModel = CombatService.SpawnCombatPlant(gridPart, shieldPlantId, maxHP, maxHP, shieldMutation, {
+            AsPumpkinShield = true,
+        })
+        if not shieldModel then
+            PlayerDataManager.GivePlant(player, shieldPlantId, 1, shieldMutation, true)
+            return
+        end
+
+        PlayerDataManager.AddCombatPumpkinShield(player, gridName, shieldPlantId, maxHP, shieldMutation)
+    end)
+
     -- 接受 isCombatSwap 参数判定是否需要扣钱
     swapCombatPlantRE.OnServerEvent:Connect(function(player, oldPlantModel, equippedCompositeId, isCombatSwap)
         if not oldPlantModel or not oldPlantModel.Parent then return end
         if type(equippedCompositeId) ~= "string" then return end
         if not oldPlantModel:GetAttribute("IsCombatPlant") then return end
+        if oldPlantModel:GetAttribute("IsPumpkinShield") == true then return end
 
         local parts = string.split(equippedCompositeId, "_")
         if parts[1] ~= "Plant" then return end
@@ -671,10 +800,10 @@ function InventoryService.Init()
         local newPlantId = parts[2]
         local newMutLevel = tonumber(parts[3]) or 1
         local newPlantConfig = ItemConfig.Plants[newPlantId]
-        if not newPlantConfig or newPlantConfig.IsThrowable then return end
+        if not newPlantConfig or newPlantConfig.IsThrowable or newPlantConfig.IsPumpkinShield == true then return end
 
         local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
-        local newTemplate = itemModelsFolder and (itemModelsFolder:FindFirstChild(newPlantId .. "_Plant") or itemModelsFolder:FindFirstChild(newPlantId))
+        local newTemplate = findPlantModelTemplate(itemModelsFolder, newPlantId, newPlantConfig)
         if not newTemplate then return end
 
         local gridPart = oldPlantModel.Parent
@@ -683,6 +812,13 @@ function InventoryService.Init()
         local myPlot = PlotService.GetPlayerPlot(player)
         local lawnFolder = myPlot and myPlot:FindFirstChild("Lawn")
         if not myPlot or not lawnFolder or gridPart.Parent ~= lawnFolder then return end
+        if gridPart:GetAttribute("PumpkinShield") and newPlantConfig.DisallowPumpkinShield == true then
+            local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+            if showNotifRE then
+                showNotifRE:FireClient(player, "Notice", "Pumpkin Shield cannot cover this plant.")
+            end
+            return
+        end
 
         local data = PlayerDataManager.GetPlayerData(player)
         if not data then return end
@@ -718,7 +854,8 @@ function InventoryService.Init()
 
         PlayerDataManager.GivePlant(player, oldPlantId, 1, oldMutLevel)
         PlayerDataManager.RemoveCombatPlant(player, gridName)
-        gridPart:SetAttribute("OccupiedBy", nil)
+        local hasPumpkinShield = gridPart:GetAttribute("PumpkinShield") ~= nil
+        gridPart:SetAttribute("OccupiedBy", hasPumpkinShield and "PumpkinShield" or nil)
         local prompt = gridPart:FindFirstChildOfClass("ProximityPrompt")
         if prompt then prompt.Enabled = true end
         oldPlantModel:Destroy()
@@ -778,6 +915,11 @@ function InventoryService.Init()
         local targetInfo, targetMessage = getPotionTargetInfo(player, targetPlant)
         if not targetInfo then
             usePotionRE:FireClient(player, false, targetMessage or "Select a plant first.")
+            return
+        end
+        local targetPlantConfig = ItemConfig.Plants and ItemConfig.Plants[targetInfo.PlantId]
+        if targetPlantConfig and targetPlantConfig.NoMutation == true then
+            usePotionRE:FireClient(player, false, "This plant cannot mutate.")
             return
         end
 

@@ -5,6 +5,7 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
 local currentTipId = 0 -- 内部变量，用于追踪当前的提示任务
 
@@ -101,6 +102,21 @@ function UIEffectUtil.Play2DCollectEffect(amount, onCompleteCallback, displayTex
 end
 
 -- UI模块 3：UI渲染 3D 模型通用方案
+local function findSeedModelTemplate(itemModelsFolder, seedId)
+    local seedDetail = ItemConfig.Seeds and ItemConfig.Seeds[seedId]
+    local configuredSeedModelName = seedDetail and seedDetail.SeedId
+    if configuredSeedModelName then
+        local configuredModel = itemModelsFolder:FindFirstChild(configuredSeedModelName)
+        if configuredModel then
+            return configuredModel
+        end
+    end
+
+    return itemModelsFolder:FindFirstChild(seedId .. "_Seed")
+        or itemModelsFolder:FindFirstChild("PlantSeed")
+        or itemModelsFolder:FindFirstChild("Seed")
+end
+
 function UIEffectUtil.RenderToViewport(viewport, modelName, itemType, mutationLevel)
     if not viewport or not viewport:IsA("ViewportFrame") then return end
     for _, c in pairs(viewport:GetChildren()) do if c:IsA("Model") or c:IsA("BasePart") or c:IsA("Camera") then c:Destroy() end end
@@ -111,9 +127,15 @@ function UIEffectUtil.RenderToViewport(viewport, modelName, itemType, mutationLe
 
     local targetModel = nil
    if itemType == "Seed" then
-        -- 渲染时间同样查找特定的种子模型，兜底使用默认模型
-        targetModel = itemModelsFolder:FindFirstChild(modelName .. "_Seed") or itemModelsFolder:FindFirstChild("Seed")
-    elseif itemType == "Plant" then targetModel = itemModelsFolder:FindFirstChild(modelName .. "_Plant") or itemModelsFolder:FindFirstChild(modelName)
+        -- 渲染种子时优先读取配置里的 SeedId，兼容资源名和种子 ID 不一致。
+        targetModel = findSeedModelTemplate(itemModelsFolder, modelName)
+    elseif itemType == "Plant" then
+        local plantDetail = ItemConfig.Plants and ItemConfig.Plants[modelName]
+        local configuredModelName = (plantDetail and plantDetail.ModelName) or modelName
+        targetModel = itemModelsFolder:FindFirstChild(configuredModelName .. "_Plant")
+            or itemModelsFolder:FindFirstChild(configuredModelName)
+            or itemModelsFolder:FindFirstChild(modelName .. "_Plant")
+            or itemModelsFolder:FindFirstChild(modelName)
     elseif itemType == "Chest" then
         local chestFolder = ReplicatedStorage:FindFirstChild("Chest")
         targetModel = chestFolder and chestFolder:FindFirstChild(modelName)

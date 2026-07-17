@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
 local BaseItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("BaseItemConfig"))
+local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
 
 local SPECIAL_CODEX_TAB = 5
 local WAIT_TIMEOUT = 10
@@ -71,6 +72,11 @@ local function connectPress(guiObject, callback)
             end
         end)
     end
+end
+
+-- 图鉴属性数值统一走缩写格式，避免大数挤出 UI。
+local function formatStatNumber(value)
+    return NumberFormatUtil.FormatNumber(math.max(0, math.floor((tonumber(value) or 0) + 0.5)))
 end
 
 local function isMutationUnlocked(unlockedMutations, plantId, mutationLevel)
@@ -348,12 +354,16 @@ function EncyclopediaController.Init()
         local mutationStats = (ItemConfig.MutationStats and ItemConfig.MutationStats[mutationLevel]) or {
             DamageMul = 1,
             HealthMul = 1,
+            HealMul = 1,
         }
 
         local finalHp = math.floor((tonumber(plantDetail.HP) or 0) * (tonumber(mutationStats.HealthMul) or 1))
         local baseAttack = tonumber(plantDetail.Attack)
         local intervalValue = tonumber(plantDetail.AttackInterval)
         local finalAttack = baseAttack and math.floor(baseAttack * (tonumber(mutationStats.DamageMul) or 1)) or nil
+        local healConfig = type(plantDetail.FrontHeal) == "table" and plantDetail.FrontHeal or nil
+        local baseHeal = healConfig and tonumber(healConfig.Amount) or nil
+        local finalHeal = baseHeal and math.floor(baseHeal * (tonumber(mutationStats.HealMul) or 1) + 0.5) or nil
 
         if detailNameText and detailNameText:IsA("TextLabel") then
             detailNameText.Text = plantDetail.Name or plantId
@@ -366,7 +376,9 @@ function EncyclopediaController.Init()
             detailHpText.Text = "HP: " .. tostring(finalHp)
         end
         if detailDpsText and detailDpsText:IsA("TextLabel") then
-            if finalAttack then
+            if finalHeal then
+                detailDpsText.Text = "Heal: " .. formatStatNumber(finalHeal)
+            elseif finalAttack then
                 if intervalValue and intervalValue > 0 then
                     local attackPerSecond = math.floor((finalAttack / intervalValue) + 0.5)
                     detailDpsText.Text = "Attack/sec: " .. tostring(attackPerSecond)

@@ -206,7 +206,49 @@ function ToolService.Init()
 
         if (charPos - targetPos).Magnitude > 35 then return end
 
-        -- 分支 1：回收战斗植物
+        -- 优先处理南瓜保护罩，只移除保护罩，不影响格子里的主植物。
+        if targetObj:GetAttribute("IsPumpkinShield") == true then
+            local lawnPart = targetObj.Parent
+            if lawnPart and string.match(lawnPart.Name, "Lawn") then
+                local gridName = lawnPart.Name
+                local myPlot = PlotService.GetPlayerPlot(player)
+                if myPlot ~= lawnPart.Parent.Parent then return end
+
+                if myPlot:GetAttribute("IsLevelActive") then
+                    if isCombatRecycle then
+                        local cost = GetCombatEditCost(player)
+                        if not PlayerDataManager.ConsumeCoins(player, cost) then
+                            local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                            if showNotifRE then
+                                showNotifRE:FireClient(player, "Notice", "Not enough Sun! Need " .. tostring(cost) .. " Sun.")
+                            end
+                            return
+                        end
+                    else
+                        local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+                        if showNotifRE then
+                            showNotifRE:FireClient(player, "Notice", "Cannot remove Pumpkin Shield during combat!")
+                        end
+                        return
+                    end
+                end
+
+                PlayerDataManager.GivePlant(player, targetObj.Name, 1, 1)
+                PlayerDataManager.RemoveCombatPumpkinShield(player, gridName)
+
+                lawnPart:SetAttribute("PumpkinShield", nil)
+                if targetObj:GetAttribute("OccupiesEmptyGrid") == true or lawnPart:GetAttribute("OccupiedBy") == targetObj.Name then
+                    lawnPart:SetAttribute("OccupiedBy", nil)
+                    local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt then prompt.Enabled = true end
+                end
+
+                targetObj:Destroy()
+            end
+            return
+        end
+
+        -- 回收战斗植物本体。
         if targetObj:GetAttribute("IsCombatPlant") then
             local lawnPart = targetObj.Parent
             if lawnPart and string.match(lawnPart.Name, "Lawn") then
@@ -244,7 +286,8 @@ function ToolService.Init()
                 PlayerDataManager.GivePlant(player, plantIdToReturn, 1, mutationLvl)
                 PlayerDataManager.RemoveCombatPlant(player, gridName)
 
-                lawnPart:SetAttribute("OccupiedBy", nil)
+                local hasPumpkinShield = lawnPart:GetAttribute("PumpkinShield") ~= nil
+                lawnPart:SetAttribute("OccupiedBy", hasPumpkinShield and "PumpkinShield" or nil)
                 local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
                 if prompt then prompt.Enabled = true end
 

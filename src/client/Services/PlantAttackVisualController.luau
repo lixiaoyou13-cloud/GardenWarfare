@@ -24,6 +24,7 @@ local ATTACK_TRACK_IDLE_CACHE_TARGET = 12
 local LOCAL_OWNER_ATTACK_ANIMATION_DISTANCE = 180
 local OTHER_OWNER_ATTACK_ANIMATION_DISTANCE = 90
 local OFFSCREEN_ATTACK_ANIMATION_DISTANCE = 60
+local SUNSHROOM_HEAL_VFX_DEBUG = false
 
 local attackTracks = setmetatable({}, { __mode = "k" })
 local flashingZombies = setmetatable({}, { __mode = "k" })
@@ -525,6 +526,31 @@ local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
     track:Play(0.05)
     track:AdjustSpeed(speedMult)
     scheduleIdleAttackTrackCleanup(plant, cached, speedMult)
+end
+
+-- 播放植物模型自身的 VFX 节点特效，用于无攻击动画的表现。
+local function playPlantVFX(plant, ownerUserId)
+    if not plant or not plant.Parent then
+        if SUNSHROOM_HEAL_VFX_DEBUG then
+            print("[SunShroomHealVFX][Client] PlantVFX received, but plant is nil or not replicated")
+        end
+        return
+    end
+
+    local currentOwnerId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
+    local effectsEnabled = areEffectsEnabled(currentOwnerId)
+    local isSunShroom = plant.Name == "SunShroom" or plant:GetAttribute("PlantId") == "SunShroom"
+    if isSunShroom and SUNSHROOM_HEAL_VFX_DEBUG then
+        print(("[SunShroomHealVFX][Client] PlantVFX received plant=%s owner=%s effectsEnabled=%s"):format(
+            plant:GetFullName(),
+            tostring(currentOwnerId),
+            tostring(effectsEnabled)
+        ))
+    end
+
+    if effectsEnabled then
+        EffectUtil.PlayAttackVFX(plant)
+    end
 end
 
 local function getProjectileParts(projectile)
@@ -1355,6 +1381,8 @@ function PlantAttackVisualController.Init()
     visualConnection = visualRE.OnClientEvent:Connect(function(action, ...)
         if action == "Attack" then
             playAttackAnimation(...)
+        elseif action == "PlantVFX" then
+            playPlantVFX(...)
         elseif action == "Projectile" then
             spawnProjectileVisual(...)
         elseif action == "Hit" then

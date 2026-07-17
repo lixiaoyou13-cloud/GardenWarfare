@@ -437,13 +437,23 @@ function CombatRegistry.FindBlockingPlantInFront(plot, rowNum, origin, direction
     local flatDirection = getFlatUnit(direction, Vector3.new(0, 0, -1))
     local nearestRecord = nil
     local nearestDistance = math.huge
+    local nearestPriority = -math.huge
 
     for _, record in pairs(candidates) do
         if isRecordAlive(record, "Plant") then
             local distance = recordInForwardBox(record, origin, flatDirection, range, width)
-            if distance and distance < nearestDistance then
+            local priority = record.Model:GetAttribute("IsPumpkinShield") == true and 1 or 0
+            local sameDistance = distance and math.abs(distance - nearestDistance) <= 0.1
+            local sameGrid = nearestRecord
+                and record.Model:GetAttribute("GridName") == nearestRecord.Model:GetAttribute("GridName")
+            if distance and (
+                distance < nearestDistance
+                or (sameDistance and priority > nearestPriority)
+                or (sameGrid and priority > nearestPriority and distance <= nearestDistance + 3)
+            ) then
                 nearestRecord = record
                 nearestDistance = distance
+                nearestPriority = priority
             end
         else
             removeRecord(record)

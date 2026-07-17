@@ -7,6 +7,39 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local holdTrackCache = setmetatable({}, { __mode = "k" })
 local characterCleanupBound = setmetatable({}, { __mode = "k" })
 
+-- 通过配置里的模型名查找植物手持模型，兼容配置 ID 和资源命名不一致的植物。
+local function findPlantModelTemplate(itemModelsFolder, plantId, itemDetail)
+    if not itemModelsFolder then
+        return nil
+    end
+
+    local modelName = (itemDetail and itemDetail.ModelName) or plantId
+    return itemModelsFolder:FindFirstChild(modelName .. "_Plant")
+        or itemModelsFolder:FindFirstChild(modelName)
+        or itemModelsFolder:FindFirstChild(plantId .. "_Plant")
+        or itemModelsFolder:FindFirstChild(plantId)
+end
+
+-- 通过配置里的种子模型名查找手持模型，兼容 PumpkinShield -> Pumpkin_Seed 这类映射。
+local function findSeedModelTemplate(itemModelsFolder, seedId)
+    if not itemModelsFolder then
+        return nil
+    end
+
+    local seedDetail = ItemConfig.Seeds and ItemConfig.Seeds[seedId]
+    local configuredSeedModelName = seedDetail and seedDetail.SeedId
+    if configuredSeedModelName then
+        local configuredModel = itemModelsFolder:FindFirstChild(configuredSeedModelName)
+        if configuredModel then
+            return configuredModel
+        end
+    end
+
+    return itemModelsFolder:FindFirstChild(seedId .. "_Seed")
+        or itemModelsFolder:FindFirstChild("PlantSeed")
+        or itemModelsFolder:FindFirstChild("Seed")
+end
+
 local function stopAndDestroyHoldTrack(animator)
     local track = holdTrackCache[animator]
     if track then
@@ -128,12 +161,12 @@ function EquipmentService.UpdateHoldItem(player, compositeId)
 
     if itemType == "Seed" then
 
-        realModel = itemModelsFolder:FindFirstChild(realId .. "_Seed") or itemModelsFolder:FindFirstChild("Seed")
+        realModel = findSeedModelTemplate(itemModelsFolder, realId)
 
     elseif itemType == "Plant" then
         local itemDetail = ItemConfig.Plants[realId]
         if itemDetail then
-            realModel = itemModelsFolder and (itemModelsFolder:FindFirstChild(realId .. "_Plant") or itemModelsFolder:FindFirstChild(realId))
+            realModel = findPlantModelTemplate(itemModelsFolder, realId, itemDetail)
         end
     elseif itemType == "Tool" then
         realModel = itemModelsFolder and itemModelsFolder:FindFirstChild(realId)

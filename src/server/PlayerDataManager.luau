@@ -484,6 +484,21 @@ local function normalizeMutationLevel(mutationLevel)
     return math.max(1, math.floor(tonumber(mutationLevel) or 1))
 end
 
+-- 没有变异形态的植物统一压回普通形态，避免药水/奖励写出异常变异。
+local function normalizePlantMutationLevel(plantId, mutationLevel)
+    local plantDetail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+    if plantDetail and plantDetail.NoMutation == true then
+        return 1
+    end
+
+    return normalizeMutationLevel(mutationLevel)
+end
+
+local function isValidInventorySeedId(seedId)
+    return type(seedId) == "string"
+        and (seedId == "RandomSeed" or (ItemConfig.Seeds and ItemConfig.Seeds[seedId] ~= nil))
+end
+
 local function ensureUnlockedMutationTable(data, plantId)
     data.UnlockedMutations = data.UnlockedMutations or {}
     if type(data.UnlockedMutations[plantId]) ~= "table" then
@@ -557,7 +572,7 @@ local function backfillUnlockedMutationsFromOwnedPlants(data)
     if data.Inventory and type(data.Inventory.Plants) == "table" then
         for _, plantData in ipairs(data.Inventory.Plants) do
             if type(plantData) == "table" and type(plantData.ID) == "string" and (tonumber(plantData.Quantity) or 0) > 0 then
-                plantData.Mutation = normalizeMutationLevel(plantData.Mutation or 1)
+                plantData.Mutation = normalizePlantMutationLevel(plantData.ID, plantData.Mutation or 1)
                 markMutationUnlocked(data, plantData.ID, plantData.Mutation)
             end
         end
@@ -577,11 +592,80 @@ local function backfillUnlockedMutationsFromOwnedPlants(data)
     if type(data.CombatPlants) == "table" then
         for _, plantData in pairs(data.CombatPlants) do
             if type(plantData) == "table" and type(plantData.PlantId) == "string" then
-                plantData.Mutation = normalizeMutationLevel(plantData.Mutation or 1)
+                plantData.Mutation = normalizePlantMutationLevel(plantData.PlantId, plantData.Mutation or 1)
                 markMutationUnlocked(data, plantData.PlantId, plantData.Mutation)
+            end
+            local shieldData = type(plantData) == "table" and plantData.PumpkinShield
+            if type(shieldData) == "table" and type(shieldData.PlantId) == "string" then
+                shieldData.Mutation = normalizePlantMutationLevel(shieldData.PlantId, shieldData.Mutation or 1)
+                markMutationUnlocked(data, shieldData.PlantId, shieldData.Mutation)
             end
         end
     end
+end
+
+-- 清理背包里非法的种子条目，避免临时脚本写入 nil ID 后导致客户端背包崩溃。
+local function normalizeInventorySeedData(data)
+    if type(data) ~= "table" then
+        return false
+    end
+
+    if type(data.Inventory) ~= "table" then
+        data.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} }
+    end
+    if type(data.Inventory.Seeds) ~= "table" then
+        data.Inventory.Seeds = {}
+        return true
+    end
+
+    local changed = false
+    local mergedSeeds = {}
+    local seedOrder = {}
+
+    for _, seedData in ipairs(data.Inventory.Seeds) do
+        local seedId = type(seedData) == "table" and seedData.ID or nil
+        local quantity = type(seedData) == "table" and math.floor(tonumber(seedData.Quantity) or 0) or 0
+        if isValidInventorySeedId(seedId) and quantity > 0 then
+            if not mergedSeeds[seedId] then
+                mergedSeeds[seedId] = 0
+                table.insert(seedOrder, seedId)
+            end
+            mergedSeeds[seedId] += quantity
+        else
+            changed = true
+        end
+    end
+
+    local normalizedSeeds = {}
+    for _, seedId in ipairs(seedOrder) do
+        table.insert(normalizedSeeds, {
+            ID = seedId,
+            Quantity = mergedSeeds[seedId],
+        })
+    end
+
+    if #normalizedSeeds ~= #data.Inventory.Seeds then
+        changed = true
+    end
+    data.Inventory.Seeds = normalizedSeeds
+
+    if type(data.Hotbar) == "table" then
+        for index = #data.Hotbar, 1, -1 do
+            local compositeId = data.Hotbar[index]
+            if type(compositeId) ~= "string" then
+                table.remove(data.Hotbar, index)
+                changed = true
+            else
+                local parts = string.split(compositeId, "_")
+                if parts[1] == "Seed" and not mergedSeeds[parts[2]] then
+                    table.remove(data.Hotbar, index)
+                    changed = true
+                end
+            end
+        end
+    end
+
+    return changed
 end
 
 local function normalizeTitleData(data)
@@ -1660,8 +1744,23 @@ local function grantPassReward(player, data, rewardConfig)
         end
 
         PlayerDataManager.GiveSeed(player, seedId, amount, true)
-        local seedName = tostring((ItemConfig.Seeds[seedId] and ItemConfig.Seeds[seedId].Name) or seedId)
+        local seedName = tostring(rewardConfig.DisplayName or (ItemConfig.Seeds[seedId] and ItemConfig.Seeds[seedId].Name) or seedId)
         return true, seedName .. " x" .. tostring(amount), seedName, amount
+    end
+
+    if rewardType == PassRewardConfig.RewardTypes.Item then
+        local itemId = rewardConfig.ItemId
+        if not (itemId and ItemConfig.Items and ItemConfig.Items[itemId]) then
+            return false, "Item reward is not configured."
+        end
+
+        local granted = PlayerDataManager.GiveItem(player, itemId, amount, false)
+        if not granted then
+            return false, "Item reward failed."
+        end
+
+        local itemName = tostring(rewardConfig.DisplayName or (ItemConfig.Items[itemId] and ItemConfig.Items[itemId].Name) or itemId)
+        return true, itemName .. " x" .. tostring(amount), itemName, amount
     end
 
     if rewardType == PassRewardConfig.RewardTypes.Plant then
@@ -1673,7 +1772,7 @@ local function grantPassReward(player, data, rewardConfig)
         local mutation = math.max(1, math.floor(tonumber(rewardConfig.Mutation) or 1))
         local wasFirstUnlock = not isMutationUnlocked(data, plantId, mutation)
         PlayerDataManager.GivePlant(player, plantId, amount, mutation, true)
-        local plantName = tostring((ItemConfig.Plants[plantId] and ItemConfig.Plants[plantId].Name) or plantId)
+        local plantName = tostring(rewardConfig.DisplayName or (ItemConfig.Plants[plantId] and ItemConfig.Plants[plantId].Name) or plantId)
         return true, plantName .. " x" .. tostring(amount), plantName, amount, wasFirstUnlock and plantId or nil, mutation
     end
 
@@ -2102,6 +2201,7 @@ local function onPlayerAdded(player)
                 if savedData then
                 local sunResetApplied = false
                 local sunBalancesNormalized = false
+                local inventorySeedsNormalized = false
                 savedData.Hotbar = {"Tool_Shovel", "System_Backpack", "Tool_WeaponBlock"}
                 if type(savedData.Inventory) ~= "table" then savedData.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} } end
                 if type(savedData.Inventory.Seeds) ~= "table" then savedData.Inventory.Seeds = {} end
@@ -2110,6 +2210,7 @@ local function onPlayerAdded(player)
                 if type(savedData.Inventory.Items) ~= "table" then savedData.Inventory.Items = {} end
                 if type(savedData.Inventory.Titles) ~= "table" then savedData.Inventory.Titles = {} end
                 if type(savedData.EquippedTitle) ~= "string" then savedData.EquippedTitle = "" end
+                inventorySeedsNormalized = normalizeInventorySeedData(savedData)
                 normalizeTitleData(savedData)
                 if not savedData.PlantedPlants then savedData.PlantedPlants = {} end
                 if not savedData.CombatPlants then savedData.CombatPlants = {} end
@@ -2186,6 +2287,10 @@ local function onPlayerAdded(player)
                 if sunResetApplied then
                     markSessionDataChanged(player, "sun reset 20260707")
                     print("[Data] Player " .. player.Name .. " Sun reset applied; retained up to 1M Sun.")
+                end
+                if inventorySeedsNormalized then
+                    markSessionDataChanged(player, "inventory seed cleanup")
+                    print("[Data] Player " .. player.Name .. " invalid seed inventory entries cleaned.")
                 end
                 print("[Data] Player " .. player.Name .. " data loaded successfully!")
 
@@ -2584,7 +2689,7 @@ local function addPlantToData(data, plantId, amount, mutationLevel)
     data.Inventory.Chests = data.Inventory.Chests or {}
     data.Inventory.Titles = data.Inventory.Titles or {}
     data.Inventory.Items = data.Inventory.Items or {}
-    mutationLevel = normalizeMutationLevel(mutationLevel)
+    mutationLevel = normalizePlantMutationLevel(plantId, mutationLevel)
 
     local found = false
     for _, plantData in ipairs(data.Inventory.Plants) do
@@ -3259,7 +3364,15 @@ end
 
 function PlayerDataManager.GiveSeed(player, seedId, amount, suppressEffect)
     local data = sessionData[player.UserId]
-    if not data then return end
+    if not data then return false end
+    if not isValidInventorySeedId(seedId) then
+        warn("[PlayerDataManager] GiveSeed rejected invalid seedId: " .. tostring(seedId))
+        return false
+    end
+
+    amount = math.max(1, math.floor(tonumber(amount) or 1))
+    ensureInventoryTables(data)
+    normalizeInventorySeedData(data)
 
     local found = false
     for _, seedData in ipairs(data.Inventory.Seeds) do
@@ -3302,6 +3415,7 @@ function PlayerDataManager.GiveSeed(player, seedId, amount, suppressEffect)
         end
     end
     markSessionDataChanged(player, "seed grant")
+    return true
 end
 
 function PlayerDataManager.ConsumeSeed(player, seedId, amount)
@@ -3336,7 +3450,7 @@ end
 function PlayerDataManager.GivePlant(player, plantId, amount, mutationLevel, suppressUnlockAnim)
    local data = sessionData[player.UserId]
     if not data then return end
-    mutationLevel = normalizeMutationLevel(mutationLevel)
+    mutationLevel = normalizePlantMutationLevel(plantId, mutationLevel)
 
     local found = false
     for _, plantData in ipairs(data.Inventory.Plants) do
@@ -3376,7 +3490,7 @@ function PlayerDataManager.UnlockMutation(player, plantId, mutationLevel, suppre
     local data = sessionData[player.UserId]
     if not data then return end
 
-    mutationLevel = normalizeMutationLevel(mutationLevel)
+    mutationLevel = normalizePlantMutationLevel(plantId, mutationLevel)
     local isFirstTimeUnlock = not isMutationUnlocked(data, plantId, mutationLevel)
     markMutationUnlocked(data, plantId, mutationLevel)
 
@@ -3505,7 +3619,7 @@ end
 function PlayerDataManager.ConsumePlant(player, plantId, amount, mutationLevel)
     local data = sessionData[player.UserId]
     if not data or not data.Inventory or not data.Inventory.Plants then return false end
-    mutationLevel = normalizeMutationLevel(mutationLevel)
+    mutationLevel = normalizePlantMutationLevel(plantId, mutationLevel)
 
     for i, plantData in ipairs(data.Inventory.Plants) do
         if plantData.ID == plantId and normalizeMutationLevel(plantData.Mutation or 1) == mutationLevel then
@@ -3560,7 +3674,13 @@ end
 function PlayerDataManager.AddCombatPlant(player, gridName, plantId, hp, mutationLevel)
     local data = sessionData[player.UserId]
     if data and data.CombatPlants then
-        data.CombatPlants[gridName] = { PlantId = plantId, Mutation = mutationLevel or 1 }
+        local existing = data.CombatPlants[gridName]
+        local pumpkinShield = type(existing) == "table" and existing.PumpkinShield or nil
+        data.CombatPlants[gridName] = {
+            PlantId = plantId,
+            Mutation = normalizePlantMutationLevel(plantId, mutationLevel or 1),
+            PumpkinShield = pumpkinShield,
+        }
         markSessionDataChanged(player, "combat plant add")
     end
 end
@@ -3571,7 +3691,7 @@ function PlayerDataManager.UpdateCombatPlantMutation(player, gridName, mutationL
         return false
     end
 
-    data.CombatPlants[gridName].Mutation = normalizeMutationLevel(mutationLevel)
+    data.CombatPlants[gridName].Mutation = normalizePlantMutationLevel(data.CombatPlants[gridName].PlantId, mutationLevel)
     markSessionDataChanged(player, "combat plant mutation update")
     return true
 end
@@ -3581,9 +3701,58 @@ function PlayerDataManager.UpdateCombatPlantHP(player, gridName, hp) end
 function PlayerDataManager.RemoveCombatPlant(player, gridName)
     local data = sessionData[player.UserId]
     if data and data.CombatPlants then
-        data.CombatPlants[gridName] = nil
+        local existing = data.CombatPlants[gridName]
+        local pumpkinShield = type(existing) == "table" and existing.PumpkinShield or nil
+        if pumpkinShield then
+            data.CombatPlants[gridName] = { PumpkinShield = pumpkinShield }
+        else
+            data.CombatPlants[gridName] = nil
+        end
         markSessionDataChanged(player, "combat plant removal")
     end
+end
+
+-- 记录指定战斗格子的南瓜保护罩，不覆盖格子里的主植物。
+function PlayerDataManager.AddCombatPumpkinShield(player, gridName, plantId, hp, mutationLevel)
+    local data = sessionData[player.UserId]
+    if not (data and data.CombatPlants and type(gridName) == "string") then
+        return false
+    end
+
+    local entry = data.CombatPlants[gridName]
+    if type(entry) ~= "table" then
+        entry = {}
+        data.CombatPlants[gridName] = entry
+    end
+
+    entry.PumpkinShield = {
+        PlantId = plantId,
+        Mutation = normalizePlantMutationLevel(plantId, mutationLevel or 1),
+        HP = math.max(1, math.floor(tonumber(hp) or 1)),
+    }
+    markSessionDataChanged(player, "combat pumpkin shield add")
+    return true
+end
+
+-- 移除指定战斗格子的南瓜保护罩，主植物数据保持不变。
+function PlayerDataManager.RemoveCombatPumpkinShield(player, gridName)
+    local data = sessionData[player.UserId]
+    if not (data and data.CombatPlants and type(gridName) == "string") then
+        return false
+    end
+
+    local entry = data.CombatPlants[gridName]
+    if type(entry) ~= "table" or not entry.PumpkinShield then
+        return false
+    end
+
+    entry.PumpkinShield = nil
+    if entry.PlantId == nil then
+        data.CombatPlants[gridName] = nil
+    end
+
+    markSessionDataChanged(player, "combat pumpkin shield removal")
+    return true
 end
 
 function PlayerDataManager.UpdatePlantedPlantMutation(player, soilName, mutationLevel)

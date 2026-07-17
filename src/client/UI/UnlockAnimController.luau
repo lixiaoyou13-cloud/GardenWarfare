@@ -24,8 +24,13 @@ local function CreateViewportForModel(plantId, parentFrame)
     local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
     if not itemModelsFolder then return viewport end
 
-    -- 尝试寻找对应的植物模型 (支持带后缀或者不带后缀)
-    local modelTemplate = itemModelsFolder:FindFirstChild(plantId .. "_Plant") or itemModelsFolder:FindFirstChild(plantId)
+    -- 按植物配置里的 ModelName 查找模型，兼容独立植物临时复用其他模型。
+    local plantDetail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+    local configuredModelName = (plantDetail and plantDetail.ModelName) or plantId
+    local modelTemplate = itemModelsFolder:FindFirstChild(configuredModelName .. "_Plant")
+        or itemModelsFolder:FindFirstChild(configuredModelName)
+        or itemModelsFolder:FindFirstChild(plantId .. "_Plant")
+        or itemModelsFolder:FindFirstChild(plantId)
 
     if not modelTemplate then
         warn("ViewportFrame display model not found: " .. tostring(plantId))

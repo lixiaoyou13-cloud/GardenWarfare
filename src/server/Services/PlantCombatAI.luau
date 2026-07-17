@@ -33,6 +33,7 @@ local EVENT_BOSS_PROJECTILE_MIN_HEIGHT_SCALE = 0.45
 local EVENT_BOSS_PROJECTILE_MAX_HEIGHT_SCALE = 0.7
 local EVENT_BOSS_PROJECTILE_XZ_JITTER_RADIUS = 1.75
 local DAMAGE_TEXT_BATCH_WINDOW = 0.05
+local SUNSHROOM_HEAL_VFX_DEBUG = false
 local warnedProjectileIssues = {}
 local warnedAnimationIssues = {}
 local failedAnimationIds = {}
@@ -273,12 +274,14 @@ end
 local function firePlantVisualEvent(plot, originPosition, ...)
     local recipients = collectVisualRecipients(plot, originPosition)
     if #recipients == 0 then
-        return
+        return 0
     end
 
     for _, player in ipairs(recipients) do
         plantAttackVisualRE:FireClient(player, ...)
     end
+
+    return #recipients
 end
 
 local function flushDamageTextBatch(player, batch)
@@ -654,6 +657,85 @@ local function getPlantLawnPart(plant, plot)
     end
 
     return nil
+end
+
+-- 查找植物面朝方向前方指定格数的草坪。
+local function findFrontLawnPart(plant, plot, gridDistance)
+    local sourceLawn = getPlantLawnPart(plant, plot)
+    if not (sourceLawn and sourceLawn:IsA("BasePart")) then
+        return nil
+    end
+
+    local rootPart = plant and (plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart"))
+    if not rootPart then
+        return nil
+    end
+
+    local flatDir = getFlatUnit(rootPart.CFrame.LookVector, sourceLawn.CFrame.LookVector)
+    local stepDistance = getLawnStepDistance(sourceLawn, flatDir) * math.max(1, tonumber(gridDistance) or 1)
+    local targetPosition = sourceLawn.Position + flatDir * stepDistance
+    local containingLawn = findContainingLawnForPosition(plot, targetPosition)
+    if containingLawn and containingLawn ~= sourceLawn then
+        return containingLawn
+    end
+
+    local lawnFolder = plot and plot:FindFirstChild("Lawn")
+    if not lawnFolder then
+        return nil
+    end
+
+    local sideWidth = getLawnSideWidth(sourceLawn, flatDir)
+    local bestLawn = nil
+    local bestScore = math.huge
+    for _, lawnPart in ipairs(lawnFolder:GetChildren()) do
+        if not lawnPart:IsA("BasePart") or lawnPart == sourceLawn then
+            continue
+        end
+
+        local delta = lawnPart.Position - sourceLawn.Position
+        local flatDelta = Vector3.new(delta.X, 0, delta.Z)
+        local forward = flatDelta:Dot(flatDir)
+        local lateral = (flatDelta - flatDir * forward).Magnitude
+        if forward >= stepDistance * 0.45
+            and forward <= stepDistance * 1.55
+            and lateral <= sideWidth * 0.6
+        then
+            local score = math.abs(forward - stepDistance) + lateral
+            if score < bestScore then
+                bestScore = score
+                bestLawn = lawnPart
+            end
+        end
+    end
+
+    return bestLawn
+end
+
+-- 收集目标格子里所有需要治疗的战斗植物。
+local function collectDamagedCombatPlants(lawnPart)
+    if not lawnPart then
+        return {}
+    end
+
+    local targets = {}
+    for _, child in ipairs(lawnPart:GetChildren()) do
+        if not child:IsA("Model")
+            or child:GetAttribute("IsCombatPlant") ~= true
+            or child:GetAttribute("IsDead") == true
+        then
+            continue
+        end
+
+        local currentHP = tonumber(child:GetAttribute("Health")) or 0
+        local maxHP = tonumber(child:GetAttribute("MaxHealth")) or 0
+        if currentHP <= 0 or maxHP <= 0 or currentHP >= maxHP then
+            continue
+        end
+
+        table.insert(targets, child)
+    end
+
+    return targets
 end
 
 local function collectFrontAreaTargets(plant, rootPart, itemDetail, plot)
@@ -1469,6 +1551,91 @@ function PlantCombatAI.StartIdleAnimation(plant, itemDetail)
         end
         if plant then
             plant:SetAttribute("PlantCombatIdleStarted", nil)
+        end
+    end)
+end
+
+function PlantCombatAI.StartFrontHealAI(plant, itemDetail, mutationLevel, plot)
+    local healConfig = itemDetail and itemDetail.FrontHeal
+    if type(healConfig) ~= "table" or plant:GetAttribute("FrontHealAIStarted") then
+        return
+    end
+
+    plant:SetAttribute("FrontHealAIStarted", true)
+
+    task.spawn(function()
+        local interval = math.max(0.1, tonumber(healConfig.Interval) or 5)
+        local baseHealAmount = math.max(1, math.floor(tonumber(healConfig.Amount) or 1))
+        local gridDistance = math.max(1, tonumber(healConfig.GridDistance) or 1)
+
+        while plant.Parent and (tonumber(plant:GetAttribute("Health")) or 0) > 0 and plant:GetAttribute("IsDead") ~= true do
+            local speedMult = GetSafeGameSpeed(plot)
+            task.wait(interval / speedMult)
+
+            if not plant.Parent or (tonumber(plant:GetAttribute("Health")) or 0) <= 0 or plant:GetAttribute("IsDead") == true then
+                break
+            end
+
+            local frontLawn = findFrontLawnPart(plant, plot, gridDistance)
+            local targetPlants = collectDamagedCombatPlants(frontLawn)
+            if #targetPlants > 0 then
+                -- 按当前变异等级计算治疗倍率，支持后续战斗中动态变异。
+                local currentMutationLevel = tonumber(plant:GetAttribute("MutationLevel")) or mutationLevel or 1
+                local stats = ItemConfig.MutationStats[currentMutationLevel] or ItemConfig.MutationStats[1]
+                local healMul = tonumber(stats and stats.HealMul) or 1
+                local healAmount = math.max(1, math.floor(baseHealAmount * healMul + 0.5))
+                local healedCount = 0
+                local debugTargetName = nil
+                local debugOldHP = nil
+                local debugNewHP = nil
+
+                for _, targetPlant in ipairs(targetPlants) do
+                    local currentHP = math.max(0, tonumber(targetPlant:GetAttribute("Health")) or 0)
+                    local maxHP = math.max(1, tonumber(targetPlant:GetAttribute("MaxHealth")) or currentHP)
+                    local newHP = math.min(maxHP, currentHP + healAmount)
+                    if newHP <= currentHP then
+                        continue
+                    end
+
+                    targetPlant:SetAttribute("Health", newHP)
+                    targetPlant:SetAttribute("LastHealedAt", os.clock())
+                    healedCount += 1
+
+                    if not debugTargetName then
+                        debugTargetName = targetPlant.Name
+                        debugOldHP = currentHP
+                        debugNewHP = newHP
+                    end
+                end
+
+                if healedCount > 0 then
+
+                    local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+                    local recipients = firePlantVisualEvent(
+                        plot,
+                        rootPart and rootPart.Position,
+                        "PlantVFX",
+                        plant,
+                        plot and plot:GetAttribute("OwnerId")
+                    )
+
+                    if SUNSHROOM_HEAL_VFX_DEBUG then
+                        print(("[SunShroomHealVFX][Server] healed targets=%d first=%s hp=%s->%s amount=%s recipients=%d root=%s"):format(
+                            healedCount,
+                            tostring(debugTargetName),
+                            tostring(debugOldHP),
+                            tostring(debugNewHP),
+                            tostring(healAmount),
+                            tonumber(recipients) or 0,
+                            rootPart and rootPart:GetFullName() or "nil"
+                        ))
+                    end
+                end
+            end
+        end
+
+        if plant then
+            plant:SetAttribute("FrontHealAIStarted", nil)
         end
     end)
 end

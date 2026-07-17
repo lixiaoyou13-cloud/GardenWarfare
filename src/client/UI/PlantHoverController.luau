@@ -8,8 +8,14 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
 
 local HOVER_REFRESH_INTERVAL = 0.25
+
+-- 悬浮面板数值统一做缩写，避免治疗量等大数挤出文本框。
+local function formatStatNumber(value)
+    return NumberFormatUtil.FormatNumber(math.max(0, math.floor((tonumber(value) or 0) + 0.5)))
+end
 
 local function getLawnGridCoords(gridName)
     if type(gridName) ~= "string" then
@@ -125,6 +131,24 @@ local function getAttackBuffAuraMultiplier(plant)
     end
 
     return bestMultiplier
+end
+
+-- 计算治疗植物的单次治疗量，跟服务端使用同一套变异治疗倍率。
+local function getFrontHealAmount(plantConfig, mutationLevel)
+    local healConfig = plantConfig and plantConfig.FrontHeal
+    if type(healConfig) ~= "table" then
+        return nil
+    end
+
+    local baseHeal = tonumber(healConfig.Amount)
+    if not baseHeal or baseHeal <= 0 then
+        return nil
+    end
+
+    local level = tonumber(mutationLevel) or 1
+    local stats = ItemConfig.MutationStats[level] or ItemConfig.MutationStats[1]
+    local healMul = tonumber(stats and stats.HealMul) or 1
+    return math.max(1, math.floor(baseHeal * healMul + 0.5))
 end
 
 function PlantHoverController.Init()
@@ -281,9 +305,19 @@ function PlantHoverController.Init()
         end
 
         -- 布局自转适应判定
+        local healAmount = getFrontHealAmount(plantConfig, mutationLevel)
         local canAttack = plantConfig and plantConfig.CanAttack and plantConfig.Attack and plantConfig.AttackInterval
 
-       if canAttack then
+        if healAmount then
+            -- 治疗植物显示单次治疗量，不再显示攻击力/DPS。
+            dpsLabel.Text = "Heal: " .. formatStatNumber(healAmount)
+            dpsLabel.Visible = true
+
+            bgFrame.Size = UDim2.new(1, 0, 0, 83)
+            bgFrame.Position = UDim2.new(0, 0, 1, -83)
+            nameLabel.Position = UDim2.new(0, 0, 0.35, 0)
+            barBg.Position = UDim2.new(0.075, 0, 0.75, 0)
+        elseif canAttack then
             -- 有攻击力：显示 DPS，维持面板原高度 (83)
 
             -- 严格读取 ItemConfig 中的变异攻击乘区

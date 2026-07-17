@@ -13,6 +13,17 @@ local PlotService = require(script.Parent.PlotService)
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 local CoinDropService = require(script.Parent.CoinDropService)
 
+local MIN_SPEED_UP_BASE_PRICE = 100
+
+-- 获取加速基础价格，避免占位 0 导致免费加速。
+local function getSpeedUpBasePrice(itemDetail)
+    local buyPrice = itemDetail and tonumber(itemDetail.BuyPrice)
+    if not buyPrice or buyPrice <= 0 then
+        return MIN_SPEED_UP_BASE_PRICE
+    end
+    return buyPrice
+end
+
 -- 特效控制系统：支持 Attachment 容器穿透
 function PlantGrowthService.ApplyMutationEffects(model, mutationLevel)
     mutationLevel = mutationLevel or 1
@@ -35,8 +46,13 @@ end
 -- 生成成熟植物
 function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolder, savedMutation)
     local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
-    local matureModelName = itemDetail.YieldPlant .. "_Plant"
-    local matureModel = itemModelsFolder:FindFirstChild(matureModelName) or itemModelsFolder:FindFirstChild(itemDetail.YieldPlant)
+    local plantConfig = ItemConfig.Plants[itemDetail.YieldPlant]
+    local configuredModelName = (plantConfig and plantConfig.ModelName) or itemDetail.YieldPlant
+    local matureModelName = configuredModelName .. "_Plant"
+    local matureModel = itemModelsFolder:FindFirstChild(matureModelName)
+        or itemModelsFolder:FindFirstChild(configuredModelName)
+        or itemModelsFolder:FindFirstChild(itemDetail.YieldPlant .. "_Plant")
+        or itemModelsFolder:FindFirstChild(itemDetail.YieldPlant)
     if not matureModel then return nil end
 
     local plotNum = tonumber(string.match(plot.Name, "%d+")) or 1
@@ -65,7 +81,6 @@ function PlantGrowthService.SpawnMaturePlant(soil, itemDetail, plot, plantsFolde
         grownPlant.CFrame = soil.CFrame * CFrame.new(0, soil.Size.Y/2 + grownPlant.Size.Y/2, 0) * yRotation
     end
 
-    local plantConfig = ItemConfig.Plants[itemDetail.YieldPlant]
     local targetAnimId = plantConfig and plantConfig.IdleAnimId
     for _, part in pairs(grownPlant:GetDescendants()) do
         if part:IsA("BasePart") then
@@ -296,8 +311,8 @@ end
 function PlantGrowthService.StartPlantGrowth(player, plot, soil, itemDetail, newPlant, prompt, plantsFolder)
     task.spawn(function()
         local growthTime = itemDetail.GrowthTime
-        -- 1. 获取该植物种子的购买原价（保持底100）
-        local buyPrice = itemDetail.BuyPrice or 100
+        -- 1. 获取该植物种子的购买原价（保持底价保护）
+        local buyPrice = getSpeedUpBasePrice(itemDetail)
 
         while newPlant and newPlant.Parent do
             local elapsed = os.time() - (newPlant:GetAttribute("PlantedTime") or os.time())

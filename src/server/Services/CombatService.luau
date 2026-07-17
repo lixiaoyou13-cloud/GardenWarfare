@@ -11,19 +11,98 @@ local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local PlantCombatAI = require(script.Parent.PlantCombatAI)
 local CombatRegistry = require(script.Parent.CombatRegistry)
 
+-- 判断植物是否为南瓜保护罩这类覆盖型防御植物。
+local function isPumpkinShieldPlant(plantId)
+	local detail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+	return detail and detail.IsPumpkinShield == true
+end
+
+-- 判断草坪是否只有南瓜保护罩，没有内部主植物。
+local function isPumpkinShieldOnlyLawn(lawnPart)
+	if not (lawnPart and lawnPart:GetAttribute("PumpkinShield")) then
+		return false
+	end
+
+	local occupiedBy = lawnPart:GetAttribute("OccupiedBy")
+	return occupiedBy == nil or isPumpkinShieldPlant(occupiedBy)
+end
+
+-- 通过配置里的模型名查找植物模型，兼容配置 ID 和资源命名不一致的植物。
+local function findPlantModelTemplate(itemModelsFolder, plantId, itemDetail)
+	if not itemModelsFolder then
+		return nil
+	end
+
+	local modelName = (itemDetail and itemDetail.ModelName) or plantId
+	return itemModelsFolder:FindFirstChild(modelName .. "_Plant")
+		or itemModelsFolder:FindFirstChild(modelName)
+		or itemModelsFolder:FindFirstChild(plantId .. "_Plant")
+		or itemModelsFolder:FindFirstChild(plantId)
+end
+
+-- 没有变异的植物固定使用普通形态。
+local function normalizePlantMutation(plantId, mutationLevel)
+	local detail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+	if detail and detail.NoMutation == true then
+		return 1
+	end
+
+	return math.max(1, math.floor(tonumber(mutationLevel) or 1))
+end
+
+-- 判断是否为模型自身的一次性 VFX 容器。
+local function isModelVFXContainer(part)
+	return part and part:IsA("BasePart") and string.upper(part.Name) == "VFX"
+end
+
+-- 把未参与骨骼/关节的 VFX 容器固定到主节点，防止进入战斗后掉落。
+local function weldModelVFXContainer(part, rootPart)
+	if not (part and rootPart) or part == rootPart then
+		return
+	end
+
+	local weld = part:FindFirstChild("ModelVFXWeld")
+	if not weld then
+		weld = Instance.new("WeldConstraint")
+		weld.Name = "ModelVFXWeld"
+		weld.Parent = part
+	end
+
+	weld.Part0 = rootPart
+	weld.Part1 = part
+end
+
+-- 按配置和变异等级计算战斗植物生命上限。
+local function getCombatPlantMaxHP(plantId, mutationLevel)
+	local itemDetail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+	if not itemDetail then
+		return nil
+	end
+
+	local mLevel = normalizePlantMutation(plantId, mutationLevel)
+	local stats = ItemConfig.MutationStats[mLevel] or ItemConfig.MutationStats[1]
+	local healthMul = tonumber(stats and stats.HealthMul) or 1
+	return math.floor((itemDetail.HP or 300) * healthMul), mLevel
+end
+
 -- 生成战斗植物
-function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLevel)
+function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLevel, options)
 	local itemDetail = ItemConfig.Plants[plantId]
 	local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
 	if not itemModelsFolder then return nil end
-	local combatModel = itemModelsFolder:FindFirstChild(plantId .. "_Plant") or itemModelsFolder:FindFirstChild(plantId)
+	local combatModel = findPlantModelTemplate(itemModelsFolder, plantId, itemDetail)
 
 	if not combatModel or not itemDetail then return nil end
+
+	options = type(options) == "table" and options or {}
+	local isShield = options.AsPumpkinShield == true or isPumpkinShieldPlant(plantId)
+	mutationLevel = normalizePlantMutation(plantId, mutationLevel)
 
 	local newFighter = combatModel:Clone()
 	newFighter.Name = plantId
 	newFighter:SetAttribute("PlantId", plantId)
 	newFighter:SetAttribute("IsCombatPlant", true)
+	newFighter:SetAttribute("IsPumpkinShield", isShield == true)
 	newFighter:SetAttribute("Health", currentHP)
 	newFighter:SetAttribute("MaxHealth", maxHP)
 	newFighter:SetAttribute("MutationLevel", mutationLevel or 1)
@@ -86,17 +165,24 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 	local cachedParts = CombatRegistry.GetCachedParts(newFighter)
 	for _, part in pairs(cachedParts.BaseParts) do
 		if part:IsA("BasePart") then
+			local isVFXContainer = isModelVFXContainer(part)
 			-- 记录原始透明度
 			if not part:GetAttribute("OriginalTransparency") then
 				part:SetAttribute("OriginalTransparency", part.Transparency)
 			end
 			-- 强制隐藏特效容器
-			if MUTATION_TAGS[part.Name] then
+			if MUTATION_TAGS[part.Name] or isVFXContainer then
 				part.Transparency = 1
 				part:SetAttribute("OriginalTransparency", 1)
 			end
 			part.CanCollide = false
-			part.CanQuery = true
+			if isVFXContainer then
+				part.CanTouch = false
+				part.CanQuery = false
+				weldModelVFXContainer(part, newFighter.PrimaryPart)
+			else
+				part.CanQuery = true
+			end
 			part.Anchored = (not hasAnyAnim or part == newFighter.PrimaryPart)
 		end
 	end
@@ -104,10 +190,20 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 	EffectUtil.ApplyMutationEffects(newFighter, mutationLevel)
 	CombatRegistry.RefreshCachedParts(newFighter)
 	newFighter.Parent = lawnPart
-	lawnPart:SetAttribute("OccupiedBy", plantId)
+	local shieldOccupiesEmptyGrid = false
+	if isShield then
+		lawnPart:SetAttribute("PumpkinShield", plantId)
+		if not lawnPart:GetAttribute("OccupiedBy") then
+			lawnPart:SetAttribute("OccupiedBy", plantId)
+			newFighter:SetAttribute("OccupiesEmptyGrid", true)
+			shieldOccupiesEmptyGrid = true
+		end
+	else
+		lawnPart:SetAttribute("OccupiedBy", plantId)
+	end
 
 	local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
-	if prompt then prompt.Enabled = false end
+	if prompt then prompt.Enabled = isShield and shieldOccupiesEmptyGrid end
 
 	registerFighter()
 
@@ -116,6 +212,9 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 		PlantCombatAI.StartShooterAI(newFighter, itemDetail, mutationLevel, plot)
 	else
 		PlantCombatAI.StartIdleAnimation(newFighter, itemDetail)
+	end
+	if type(itemDetail.FrontHeal) == "table" then
+		PlantCombatAI.StartFrontHealAI(newFighter, itemDetail, mutationLevel, plot)
 	end
 
 	return newFighter
@@ -126,6 +225,39 @@ local function SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mutationLev
 end
 
 -- 避免延迟加载函数：专门对付循环依赖
+-- 生成已保存的主植物与南瓜保护罩。
+local function spawnSavedCombatEntry(lawnPart, plantInfo)
+	if not (lawnPart and type(plantInfo) == "table") then
+		return
+	end
+
+	local plantId = plantInfo.PlantId
+	if type(plantId) == "string" and plantId ~= "" and not isPumpkinShieldPlant(plantId) then
+		local maxHP, mutationLevel = getCombatPlantMaxHP(plantId, plantInfo.Mutation or 1)
+		if maxHP then
+			CombatService.SpawnCombatPlant(lawnPart, plantId, maxHP, maxHP, mutationLevel)
+		end
+	end
+
+	local shieldInfo = plantInfo.PumpkinShield
+	if type(shieldInfo) ~= "table" and isPumpkinShieldPlant(plantId) then
+		shieldInfo = {
+			PlantId = plantId,
+			Mutation = plantInfo.Mutation or 1,
+		}
+	end
+
+	local shieldPlantId = type(shieldInfo) == "table" and shieldInfo.PlantId or nil
+	if type(shieldPlantId) == "string" and isPumpkinShieldPlant(shieldPlantId) then
+		local maxHP, mutationLevel = getCombatPlantMaxHP(shieldPlantId, shieldInfo.Mutation or 1)
+		if maxHP then
+			CombatService.SpawnCombatPlant(lawnPart, shieldPlantId, maxHP, maxHP, mutationLevel, {
+				AsPumpkinShield = true,
+			})
+		end
+	end
+end
+
 local function GetPlotService()
 	return require(script.Parent.PlotService)
 end
@@ -160,14 +292,7 @@ function CombatService.Init()
 		for gridName, plantInfo in pairs(data.CombatPlants) do
 			local lawnPart = lawnFolder:FindFirstChild(gridName)
 			if lawnPart then
-				local itemDetail = ItemConfig.Plants[plantInfo.PlantId]
-				if itemDetail then
-					local baseMaxHP = itemDetail.HP or 300
-					local mLevel = plantInfo.Mutation or 1
-					local stats = ItemConfig.MutationStats[mLevel] or ItemConfig.MutationStats[1]
-					local maxHP = math.floor(baseMaxHP * stats.HealthMul)
-					SpawnCombatPlant(lawnPart, plantInfo.PlantId, maxHP, maxHP, mLevel)
-				end
+				spawnSavedCombatEntry(lawnPart, plantInfo)
 			end
 		end
 	end)
@@ -187,7 +312,9 @@ function CombatService.Init()
 				prompt.Triggered:Connect(function(player)
 					local myPlot = GetPlotService().GetPlayerPlot(player)
 					if myPlot ~= plot then return end
-					if lawnPart:GetAttribute("OccupiedBy") then return end
+					local occupiedBy = lawnPart:GetAttribute("OccupiedBy")
+					local shieldOnlyLawn = isPumpkinShieldOnlyLawn(lawnPart)
+					if occupiedBy and not shieldOnlyLawn then return end
 
 					local character = player.Character
 					local equippedCompositeId = character and character:GetAttribute("EquippedSeed")
@@ -203,9 +330,22 @@ function CombatService.Init()
 
 					local parts = string.split(equippedCompositeId, "_")
 					local plantId, targetMutation = parts[2], tonumber(parts[3]) or 1
+					targetMutation = normalizePlantMutation(plantId, targetMutation)
 
 					-- 拦截投掷类植物部署：樱桃炸弹不允许种在地上，只能丢
 					local itemDetailCheck = ItemConfig.Plants[plantId]
+					if shieldOnlyLawn then
+						if itemDetailCheck and itemDetailCheck.IsPumpkinShield == true then
+							return
+						end
+						if itemDetailCheck and itemDetailCheck.DisallowPumpkinShield == true then
+							local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+							if showNotifRE then
+								showNotifRE:FireClient(player, "Notice", "Pumpkin Shield cannot cover this plant.")
+							end
+							return
+						end
+					end
 					if itemDetailCheck and itemDetailCheck.IsThrowable then
 						local showTipRE = ReplicatedStorage:FindFirstChild("ShowTipRE")
 						if showTipRE then showTipRE:FireClient(player, "Click to throw this plant!") end
@@ -215,13 +355,22 @@ function CombatService.Init()
 					if PlayerDataManager.ConsumePlant(player, plantId, 1, targetMutation) then
 						local AnalyticsService = game:GetService("AnalyticsService")
 						local itemDetail = ItemConfig.Plants[plantId]
-						local baseMaxHP = itemDetail.HP or 300
-						local stats = ItemConfig.MutationStats[targetMutation] or ItemConfig.MutationStats[1]
-						local maxHP = math.floor(baseMaxHP * stats.HealthMul)
+						local maxHP = getCombatPlantMaxHP(plantId, targetMutation) or (itemDetail.HP or 300)
 
 						AnalyticsService:LogFunnelStepEvent(player, "Onboarding", nil, 2, "Step_2_First_Deploy")
-						SpawnCombatPlant(lawnPart, plantId, maxHP, maxHP, targetMutation)
-						PlayerDataManager.AddCombatPlant(player, lawnPart.Name, plantId, maxHP, targetMutation)
+						local newPlant = CombatService.SpawnCombatPlant(lawnPart, plantId, maxHP, maxHP, targetMutation, {
+							AsPumpkinShield = itemDetail and itemDetail.IsPumpkinShield == true,
+						})
+						if not newPlant then
+							PlayerDataManager.GivePlant(player, plantId, 1, targetMutation, true)
+							return
+						end
+
+						if itemDetail and itemDetail.IsPumpkinShield == true then
+							PlayerDataManager.AddCombatPumpkinShield(player, lawnPart.Name, plantId, maxHP, targetMutation)
+						else
+							PlayerDataManager.AddCombatPlant(player, lawnPart.Name, plantId, maxHP, targetMutation)
+						end
 					end
 				end)
 			end
@@ -267,6 +416,7 @@ function CombatService.ClearAllCombatPlants(player)
 			if child:GetAttribute("IsCombatPlant") then child:Destroy() end
 		end
 		lawnPart:SetAttribute("OccupiedBy", nil)
+		lawnPart:SetAttribute("PumpkinShield", nil)
 		local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
 		if prompt then prompt.Enabled = true end
 	end
@@ -281,63 +431,24 @@ function CombatService.ReloadSavedPlants(player)
 	local lawnFolder = plot and plot:FindFirstChild("Lawn")
 	if not lawnFolder then return end
 
+	for _, lawnPart in ipairs(lawnFolder:GetChildren()) do
+		if lawnPart:IsA("BasePart") then
+			for _, child in ipairs(lawnPart:GetChildren()) do
+				if child:GetAttribute("IsCombatPlant") then
+					child:Destroy()
+				end
+			end
+			lawnPart:SetAttribute("OccupiedBy", nil)
+			lawnPart:SetAttribute("PumpkinShield", nil)
+			local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
+			if prompt then prompt.Enabled = true end
+		end
+	end
+
 	for gridName, plantInfo in pairs(data.CombatPlants) do
 		local lawnPart = lawnFolder:FindFirstChild(gridName)
 		if lawnPart then
-			local existing = nil
-
-			-- 1. 找出当前格子上的植物
-			for _, c in ipairs(lawnPart:GetChildren()) do
-				if c:GetAttribute("IsCombatPlant") then
-                    existing = c
-                    break
-                end
-			end
-
-			if existing and existing.Name == plantInfo.PlantId then
-				-- 2. 判定：植物是否已经“社会性死亡”？
-                -- 如果已被标签记重建、被引爆，或者血量归零，通通视作死亡
-				if existing:GetAttribute("NeedsRebuild")
-                or existing:GetAttribute("Exploded")
-                or (existing:GetAttribute("Health") or 1) <= 0 then
-					existing:Destroy()
-					existing = nil
-				else
-					-- 3. 状态清晰除：植物还活着，但可能被啃咬得半透明了或残血了
-					-- 强制恢复满血
-					local maxHP = existing:GetAttribute("MaxHealth") or 300
-					existing:SetAttribute("Health", maxHP)
-
-					-- 强制恢复所有零件的原始可见度（解除啃咬隐藏状态）
-					for _, part in ipairs(existing:GetDescendants()) do
-						if part:IsA("BasePart") then
-							local origTrans = part:GetAttribute("OriginalTransparency")
-							if origTrans then
-								part.Transparency = origTrans
-							end
-						end
-					end
-
-					-- 唤醒可能被意外关闭的特效（重新刷新一遍等级特效）
-					EffectUtil.ApplyMutationEffects(existing, plantInfo.Mutation or 1)
-
-					-- 植物健康且恢复完毕，无需再重建，跳过并处理下一个格子
-					continue
-				end
-			end
-
-			-- 4. 如果植物名不符（比如占位不对），或者上面判定它死了（已被清晰空）
-			if existing then existing:Destroy() end
-
-            -- 5. 重新生成一个崭新、满血且正常的植物
-			local itemDetail = ItemConfig.Plants[plantInfo.PlantId]
-			if itemDetail then
-				local baseMaxHP = itemDetail.HP or 300
-				local mLevel = plantInfo.Mutation or 1
-				local stats = ItemConfig.MutationStats[mLevel] or ItemConfig.MutationStats[1]
-				local maxHP = math.floor(baseMaxHP * stats.HealthMul)
-				SpawnCombatPlant(lawnPart, plantInfo.PlantId, maxHP, maxHP, mLevel)
-			end
+			spawnSavedCombatEntry(lawnPart, plantInfo)
 		end
 	end
 end

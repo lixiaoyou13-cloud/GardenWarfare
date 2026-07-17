@@ -345,6 +345,7 @@ function PassController.Init()
     local passButtonRoot = playProperty:WaitForChild("Pass", 10)
     local openButton = findButton(passButtonRoot)
     local passNotification = findGuiObject(passButtonRoot and passButtonRoot:FindFirstChild("Notifications"))
+
     local passRoot = passGui:WaitForChild("Pass", 10)
     local levelRoot = passGui:WaitForChild("Level", 10)
     local questRoot = passGui:WaitForChild("Quest", 10)
@@ -882,7 +883,7 @@ function PassController.Init()
 
         isPurchasingShopItem = true
         local ok, success, message, tokenCount = pcall(function()
-            return purchasePassShopItemRF:InvokeServer(slot.SlotName)
+            return purchasePassShopItemRF:InvokeServer(slot.ItemKey or slot.SlotName)
         end)
         isPurchasingShopItem = false
 
@@ -902,25 +903,45 @@ function PassController.Init()
         UIEffectUtil.ShowTip(tostring(message or (success and "Purchased." or "Purchase failed.")))
     end
 
+    -- 按配置找到指定期数的商店 Holder，兼容旧版单 Holder 结构。
+    local function findPassShopHolder(scrollingFrame, holderName)
+        if not scrollingFrame then
+            return nil
+        end
+
+        holderName = tostring(holderName or "")
+        if holderName ~= "" then
+            return scrollingFrame:FindFirstChild(holderName)
+        end
+
+        return scrollingFrame:FindFirstChild("Holder")
+    end
+
     local function bindPassShopSlots()
-        local holder = findPath(passShopPage, { "MainScrollingFrame", "Holder" })
-        if not holder then
-            warn("[PassController] Missing pass shop holder: BasicGui.PassGui.Shop.MainScrollingFrame.Holder")
+        local scrollingFrame = findPath(passShopPage, { "MainScrollingFrame" })
+        if not scrollingFrame then
+            warn("[PassController] Missing pass shop scrolling frame: BasicGui.PassGui.Shop.MainScrollingFrame")
             return
         end
 
         table.clear(passShopSlots)
 
-        for _, slotName in ipairs(PassShopConfig.Order or {}) do
-            local itemConfig = PassShopConfig.GetItem(slotName)
-            local slotRoot = itemConfig and holder:WaitForChild(slotName, 10)
+        for _, itemKey in ipairs(PassShopConfig.Order or {}) do
+            local itemConfig = PassShopConfig.GetItem(itemKey)
+            local holderName = itemConfig and itemConfig.HolderName or "Holder"
+            local slotName = itemConfig and itemConfig.SlotName or itemKey
+            local holder = findPassShopHolder(scrollingFrame, holderName)
+            local slotRoot = itemConfig and holder and holder:WaitForChild(slotName, 10)
             local purchaseRoot = slotRoot and slotRoot:WaitForChild("Purchase", 10)
             local button = getOrCreateTransparentButton(purchaseRoot, "PassShopPurchaseClickArea")
             local priceText = findTextObject(slotRoot and slotRoot:FindFirstChild("Price", true))
+                or (purchaseRoot and purchaseRoot:FindFirstChildWhichIsA("TextLabel", true))
 
             if itemConfig and slotRoot and purchaseRoot and button then
                 local slot = {
+                    ItemKey = itemKey,
                     SlotName = slotName,
+                    HolderName = holderName,
                     ItemConfig = itemConfig,
                     Root = slotRoot,
                     Button = button,
@@ -935,7 +956,15 @@ function PassController.Init()
                     end)
                 end
             else
-                warn("[PassController] Pass shop slot binding is incomplete: " .. tostring(slotName))
+                warn(
+                    "[PassController] Pass shop slot binding is incomplete: "
+                        .. tostring(holderName)
+                        .. "."
+                        .. tostring(slotName)
+                        .. " ("
+                        .. tostring(itemKey)
+                        .. ")"
+                )
             end
         end
 

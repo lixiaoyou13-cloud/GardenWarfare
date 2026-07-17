@@ -18,10 +18,6 @@ local function getSpecialShopConfig(seedDetail)
     end
 
     local chance = math.clamp(tonumber(specialShop.Chance) or 0, 0, 1)
-    if chance <= 0 then
-        return nil
-    end
-
     return {
         Chance = chance,
         Stock = math.max(1, math.floor(tonumber(specialShop.Stock) or 1)),
@@ -145,7 +141,7 @@ function ShopService.RefreshStock()
     local specialSeedIds = {}
     for seedId, itemDetail in pairs(ItemConfig.Seeds or {}) do
         local specialShop = getSpecialShopConfig(itemDetail)
-        if specialShop and not stockedSeeds[seedId] and math.random() < specialShop.Chance then
+        if specialShop and not stockedSeeds[seedId] then
             table.insert(specialSeedIds, seedId)
         end
     end
@@ -160,9 +156,11 @@ function ShopService.RefreshStock()
         local itemDetail = ItemConfig.Seeds[seedId]
         local specialShop = getSpecialShopConfig(itemDetail)
         if specialShop then
+            -- 特殊商店格子常驻；概率只决定本轮是否有库存，未刷出时显示为 0。
+            local rolledStock = math.random() < specialShop.Chance and specialShop.Stock or 0
             table.insert(currentShopItems, {
                 SeedId = seedId,
-                MaxStock = specialShop.Stock,
+                MaxStock = rolledStock,
                 SpecialShop = true,
                 ShopStyle = specialShop.Style,
             })

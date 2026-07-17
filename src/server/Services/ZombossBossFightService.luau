@@ -57,6 +57,8 @@ local warnedJumpBoomIssues = {}
 local buildDamageStats = nil
 local cachedPlotService = nil
 local warnedPlotServiceLoadFailure = false
+local cachedCombatService = nil
+local warnedCombatServiceLoadFailure = false
 
 local function getPlotService()
     if cachedPlotService then
@@ -75,6 +77,27 @@ local function getPlotService()
     if not warnedPlotServiceLoadFailure then
         warnedPlotServiceLoadFailure = true
         warn("[ZombossBossFightService] Failed to load PlotService: " .. tostring(serviceOrErr))
+    end
+    return nil
+end
+
+local function getCombatService()
+    if cachedCombatService then
+        return cachedCombatService
+    end
+
+    local ok, serviceOrErr = pcall(function()
+        return require(script.Parent.CombatService)
+    end)
+
+    if ok then
+        cachedCombatService = serviceOrErr
+        return cachedCombatService
+    end
+
+    if not warnedCombatServiceLoadFailure then
+        warnedCombatServiceLoadFailure = true
+        warn("[ZombossBossFightService] Failed to load CombatService: " .. tostring(serviceOrErr))
     end
     return nil
 end
@@ -264,27 +287,6 @@ local function flashPlantRed(plantModel)
     end
 end
 
-local function hidePlantVisuals(plantModel)
-    local cachedParts = CombatRegistry.GetCachedParts(plantModel)
-    for _, part in ipairs(cachedParts.BaseParts) do
-        if part and part.Parent then
-            if part:GetAttribute("OriginalTransparency") == nil then
-                part:SetAttribute("OriginalTransparency", part.Transparency)
-            end
-            part.Transparency = 1
-        end
-    end
-
-    for _, effect in ipairs(cachedParts.VisualEffects) do
-        if effect and effect.Parent then
-            if effect:GetAttribute("OriginalEnabled") == nil then
-                effect:SetAttribute("OriginalEnabled", effect.Enabled)
-            end
-            effect.Enabled = false
-        end
-    end
-end
-
 local function collectAliveCombatPlants(plot, ownerUserId)
     local plants = {}
     local lawnFolder = plot and plot:FindFirstChild("Lawn")
@@ -306,6 +308,84 @@ local function collectAliveCombatPlants(plot, ownerUserId)
     end
 
     return plants
+end
+
+local function isLivingCombatPlant(model)
+    return model
+        and model:IsA("Model")
+        and model:GetAttribute("IsCombatPlant") == true
+        and model:GetAttribute("IsDead") ~= true
+        and (tonumber(model:GetAttribute("Health")) or 0) > 0
+end
+
+-- Boss 战中植物死亡会直接销毁，这里同步刷新格子占用状态。
+local function refreshLawnOccupancy(lawnPart)
+    if not (lawnPart and lawnPart:IsA("BasePart")) then
+        return
+    end
+
+    local mainPlant = nil
+    local pumpkinShield = nil
+    for _, child in ipairs(lawnPart:GetChildren()) do
+        if isLivingCombatPlant(child) then
+            if child:GetAttribute("IsPumpkinShield") == true then
+                pumpkinShield = pumpkinShield or child
+            else
+                mainPlant = mainPlant or child
+            end
+        end
+    end
+
+    if pumpkinShield then
+        local shieldId = pumpkinShield:GetAttribute("PlantId") or pumpkinShield.Name
+        lawnPart:SetAttribute("PumpkinShield", shieldId)
+        pumpkinShield:SetAttribute("OccupiesEmptyGrid", mainPlant == nil)
+    else
+        lawnPart:SetAttribute("PumpkinShield", nil)
+    end
+
+    if mainPlant then
+        lawnPart:SetAttribute("OccupiedBy", mainPlant:GetAttribute("PlantId") or mainPlant.Name)
+    elseif pumpkinShield then
+        lawnPart:SetAttribute("OccupiedBy", pumpkinShield:GetAttribute("PlantId") or pumpkinShield.Name)
+    else
+        lawnPart:SetAttribute("OccupiedBy", nil)
+    end
+
+    local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
+    if prompt then
+        prompt.Enabled = mainPlant == nil
+    end
+end
+
+local function destroyDeadCombatPlant(plant)
+    if not plant or not plant.Parent then
+        return
+    end
+
+    local lawnPart = plant.Parent
+    CombatRegistry.UnregisterPlant(plant)
+    plant:Destroy()
+    refreshLawnOccupancy(lawnPart)
+end
+
+local function reloadSavedPlantsForAllPlayers()
+    local CombatService = getCombatService()
+    if not (CombatService and type(CombatService.ReloadSavedPlants) == "function") then
+        warn("[ZombossBossFightService] Cannot reload combat plants because CombatService is unavailable.")
+        return
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Parent then
+            local ok, err = pcall(function()
+                CombatService.ReloadSavedPlants(player)
+            end)
+            if not ok then
+                warn("[ZombossBossFightService] Failed to reload combat plants for " .. tostring(player.Name) .. ": " .. tostring(err))
+            end
+        end
+    end
 end
 
 local function shuffleArray(array)
@@ -342,8 +422,7 @@ local function damageCombatPlant(player, plant, damageAmount)
     end
 
     plant:SetAttribute("IsDead", true)
-    CombatRegistry.UnregisterPlant(plant)
-    hidePlantVisuals(plant)
+    destroyDeadCombatPlant(plant)
     return true
 end
 
@@ -1237,6 +1316,7 @@ local function finishFight(wasDefeated)
     end
 
     fireAll("End", buildPayload(fight))
+    reloadSavedPlantsForAllPlayers()
 
     if wasDefeated and boss and boss.Parent then
         local bossConfig = BossZombieConfig[fight.BossId or BOSS_ID] or {}

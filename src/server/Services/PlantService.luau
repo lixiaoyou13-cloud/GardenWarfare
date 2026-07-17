@@ -28,6 +28,16 @@ local STEAL_RESOLVING_ATTRIBUTE = "IsStealResolving"
 local STEALING_USER_ID_ATTRIBUTE = "StealingUserId"
 local HARVEST_RESOLVE_LOCK_TIMEOUT = 30
 local resolvingHarvestSoils = {}
+local MIN_SPEED_UP_BASE_PRICE = 100
+
+-- 获取加速基础价格，避免占位 0 导致免费加速。
+local function getSpeedUpBasePrice(seedDetail)
+    local buyPrice = seedDetail and tonumber(seedDetail.BuyPrice)
+    if not buyPrice or buyPrice <= 0 then
+        return MIN_SPEED_UP_BASE_PRICE
+    end
+    return buyPrice
+end
 
 local function cloneValue(value)
     if type(value) ~= "table" then
@@ -556,7 +566,7 @@ function PlantService.Init()
                             if remaining > 0 then
                                 local seedId = targetPlant.Name
                                 local seedDetail = ItemConfig.Seeds[seedId]
-                                local buyPrice = seedDetail and seedDetail.BuyPrice or 100
+                                local buyPrice = getSpeedUpBasePrice(seedDetail)
 
                                 local cost = buyPrice * 2
 

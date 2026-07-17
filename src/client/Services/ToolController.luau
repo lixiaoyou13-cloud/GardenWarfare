@@ -16,6 +16,27 @@ local activeGiftPopup = nil
 local activeGiftRequestId = nil
 local weaponAttackAnimId = "rbxassetid://135432663541165"
 local weaponAttackTrackCache = setmetatable({}, { __mode = "k" })
+local SHOVEL_STACK_PROMPT_OFFSET_SCALE = 0.055
+local SHOVEL_STACK_PROMPT_OFFSET_MIN = 34
+local SHOVEL_STACK_PROMPT_OFFSET_MAX = 58
+
+-- ProximityPrompt 只有像素 UIOffset，这里按屏幕高度换算，尽量接近 scale 偏移。
+local function getScaledPromptYOffset()
+    local camera = Workspace.CurrentCamera
+    local viewportHeight = camera and camera.ViewportSize.Y or 720
+    return math.floor(math.clamp(viewportHeight * SHOVEL_STACK_PROMPT_OFFSET_SCALE, SHOVEL_STACK_PROMPT_OFFSET_MIN, SHOVEL_STACK_PROMPT_OFFSET_MAX))
+end
+
+-- 铲子同时出现 E/F 时分层显示：E 在上，F 在下。
+local function getPromptUIOffset(actionName)
+    if actionName == "Recycle to Backpack" then
+        return Vector2.new(0, -getScaledPromptYOffset())
+    elseif actionName == "Remove Pumpkin Shield" then
+        return Vector2.new(0, getScaledPromptYOffset())
+    end
+
+    return Vector2.zero
+end
 
 local function stopAndDestroyWeaponAttackTrack(animator)
     local track = weaponAttackTrackCache[animator]
@@ -82,6 +103,30 @@ end
 
 local function isPotionEquipped(equippedItem)
     return getPotionItemId(equippedItem) ~= nil
+end
+
+-- 解析快捷栏里的植物复合 ID。
+local function getEquippedPlantId(equippedItem)
+    if type(equippedItem) ~= "string" or not string.match(equippedItem, "^Plant_") then
+        return nil
+    end
+
+    local parts = string.split(equippedItem, "_")
+    return parts[2]
+end
+
+-- 判断当前拿着的是否是南瓜保护罩。
+local function isPumpkinShieldEquipped(equippedItem)
+    local plantId = getEquippedPlantId(equippedItem)
+    local plantDetail = plantId and ItemConfig.Plants and ItemConfig.Plants[plantId]
+    return plantDetail and plantDetail.IsPumpkinShield == true
+end
+
+-- 判断目标植物是否允许使用变异药水。
+local function canUsePotionOnPlant(plant)
+    local plantId = plant and (plant:GetAttribute("PlantId") or plant:GetAttribute("YieldPlant") or plant.Name)
+    local plantDetail = plantId and ItemConfig.Plants and ItemConfig.Plants[plantId]
+    return not (plantDetail and plantDetail.NoMutation == true)
 end
 
 local function setModelLocalHidden(model, hidden)
@@ -159,7 +204,11 @@ local function findPotionVisualTemplate(seedId, plantId, useSeed)
             or itemModelsFolder:FindFirstChild("PlantSeed")
     end
 
-    return (plantId and itemModelsFolder:FindFirstChild(plantId .. "_Plant"))
+    local plantDetail = plantId and ItemConfig.Plants and ItemConfig.Plants[plantId]
+    local modelName = (plantDetail and plantDetail.ModelName) or plantId
+    return (modelName and itemModelsFolder:FindFirstChild(modelName .. "_Plant"))
+        or (modelName and itemModelsFolder:FindFirstChild(modelName))
+        or (plantId and itemModelsFolder:FindFirstChild(plantId .. "_Plant"))
         or (plantId and itemModelsFolder:FindFirstChild(plantId))
 end
 
@@ -249,6 +298,7 @@ function ToolController.Init()
 
     -- 注册交换植物的远程事件
     local swapRE = ReplicatedStorage:WaitForChild("SwapCombatPlantRE", 10)
+    local placePumpkinShieldRE = ReplicatedStorage:WaitForChild("PlacePumpkinShieldRE", 10)
 
     -- 樱桃炸弹：爆炸范围指示球设置
    local throwBombRE = ReplicatedStorage:WaitForChild("ThrowBombRE", 10)
@@ -259,6 +309,9 @@ function ToolController.Init()
     end
     if not swapRE then
         warn("[ToolController] SwapCombatPlantRE was not created by the server; plant swapping is temporarily unavailable")
+    end
+    if not placePumpkinShieldRE then
+        warn("[ToolController] PlacePumpkinShieldRE was not created by the server; Pumpkin Shield placement is temporarily unavailable")
     end
     if not throwBombRE then
         warn("[ToolController] ThrowBombRE was not created by the server; Cherry Bomb is temporarily unavailable")
@@ -349,6 +402,8 @@ function ToolController.Init()
         local isCombat = plant:GetAttribute("IsCombatPlant")
         local isFarm = plant:GetAttribute("PlantedOn")
         local isMature = plant:GetAttribute("IsMature")
+        local isPumpkinShield = plant:GetAttribute("IsPumpkinShield") == true
+        local isLivingCombatPlant = isCombat and plant:GetAttribute("IsDead") ~= true and (tonumber(plant:GetAttribute("Health")) or 0) > 0
 
         local actionName = nil
         local promptKeyCode = Enum.KeyCode.E
@@ -357,18 +412,42 @@ function ToolController.Init()
         -- 判定：手里拿的是铲子 还是 植物？
         if equippedItem == "Tool_Shovel" then
             -- 铲子逻辑：战斗植物可回收，农田植物必须未成熟
-            if isCombat or (isFarm and not isMature) then
+            if isPumpkinShield then
+                actionName = "Remove Pumpkin Shield"
+                promptKeyCode = Enum.KeyCode.F
+            elseif isCombat or (isFarm and not isMature) then
                 actionName = "Recycle to Backpack"
             end
         elseif type(equippedItem) == "string" and string.match(equippedItem, "^Plant_") then
             -- 拿着植物！开启交换逻辑，只能交换阵地上的战斗植物
             -- 樱桃炸弹例外：拿在手里不触发交换植物的功能
-            if isCombat and not string.match(equippedItem, "Plant_CherryBomb") then
-                actionName = "Swap Plant"
+            if isPumpkinShieldEquipped(equippedItem) then
+                local lawnPart = plant.Parent
+                local plantId = plant:GetAttribute("PlantId") or plant.Name
+                local plantDetail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+                if isLivingCombatPlant
+                    and not isPumpkinShield
+                    and lawnPart
+                    and not lawnPart:GetAttribute("PumpkinShield")
+                    and not (plantDetail and plantDetail.DisallowPumpkinShield == true)
+                then
+                    actionName = "Add Pumpkin Shield"
+                end
+            elseif isCombat and not isPumpkinShield and not string.match(equippedItem, "Plant_CherryBomb") then
+                local lawnPart = plant.Parent
+                local newPlantId = getEquippedPlantId(equippedItem)
+                local newPlantDetail = newPlantId and ItemConfig.Plants and ItemConfig.Plants[newPlantId]
+                local blockedByShield = lawnPart
+                    and lawnPart:GetAttribute("PumpkinShield")
+                    and newPlantDetail
+                    and newPlantDetail.DisallowPumpkinShield == true
+                if not blockedByShield then
+                    actionName = "Swap Plant"
+                end
             end
         else
             potionItemId = getPotionItemId(equippedItem)
-            if potionItemId and (isCombat or isFarm) then
+            if potionItemId and (isCombat or isFarm) and canUsePotionOnPlant(plant) then
                 actionName = "Use Potion"
                 promptKeyCode = Enum.KeyCode.F
             end
@@ -382,6 +461,7 @@ function ToolController.Init()
             prompt.HoldDuration = 0.2 -- 稍微加一点击长按时间，防止误触
             prompt.MaxActivationDistance = 12
             prompt.RequiresLineOfSight = false
+            prompt.UIOffset = getPromptUIOffset(actionName)
 
             local attachPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart", true)
             if attachPart then
@@ -428,12 +508,17 @@ function ToolController.Init()
                         if plot and plot:GetAttribute("IsLevelActive") then
 
                             -- 战斗中的置换/回收确认弹窗
-                            if actionName == "Swap Plant" or actionName == "Recycle to Backpack" then
+                            if actionName == "Swap Plant" or actionName == "Recycle to Backpack" or actionName == "Remove Pumpkin Shield" or actionName == "Add Pumpkin Shield" then
                                 local cost = getCombatEditCost(player, plot)
                                 local costText = UIEffectUtil.FormatNumber(cost)
-                                local detailText = if actionName == "Swap Plant"
-                                    then "Swapping plants during combat costs " .. costText .. " Sun."
-                                    else "Removing plants during combat costs " .. costText .. " Sun."
+                                local detailText
+                                if actionName == "Swap Plant" then
+                                    detailText = "Swapping plants during combat costs " .. costText .. " Sun."
+                                elseif actionName == "Add Pumpkin Shield" then
+                                    detailText = "Adding Pumpkin Shield during combat costs " .. costText .. " Sun."
+                                else
+                                    detailText = "Removing plants during combat costs " .. costText .. " Sun."
+                                end
 
                                 local shown = PopupUtil.ShowConfirm(detailText, function()
                                     -- 传入 true 代表这是战斗中的操作
@@ -442,6 +527,12 @@ function ToolController.Init()
                                             swapRE:FireServer(plant, equippedItem, true)
                                         else
                                             UIEffectUtil.ShowTip("Swap service is not ready")
+                                        end
+                                    elseif actionName == "Add Pumpkin Shield" then
+                                        if placePumpkinShieldRE then
+                                            placePumpkinShieldRE:FireServer(plant, equippedItem, true)
+                                        else
+                                            UIEffectUtil.ShowTip("Pumpkin Shield service is not ready")
                                         end
                                     else
                                         shovelRE:FireServer(plant, true)
@@ -466,6 +557,12 @@ function ToolController.Init()
                             swapRE:FireServer(plant, equippedItem, false)
                         else
                             UIEffectUtil.ShowTip("Swap service is not ready")
+                        end
+                    elseif actionName == "Add Pumpkin Shield" then
+                        if placePumpkinShieldRE then
+                            placePumpkinShieldRE:FireServer(plant, equippedItem, false)
+                        else
+                            UIEffectUtil.ShowTip("Pumpkin Shield service is not ready")
                         end
                     else
                         shovelRE:FireServer(plant, false)

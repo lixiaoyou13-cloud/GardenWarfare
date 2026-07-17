@@ -1,6 +1,6 @@
 local PassRewardConfig = {}
 
-PassRewardConfig.ClientVisible = false
+PassRewardConfig.ClientVisible = true
 PassRewardConfig.DisabledMessage = "Pass event has ended."
 
 PassRewardConfig.RemoteName = "ClaimPassRewardRF"
@@ -22,6 +22,7 @@ PassRewardConfig.RewardTypes = {
     ExclusiveRollTicket = "ExclusiveRollTicket",
     Seed = "Seed",
     Plant = "Plant",
+    Item = "Item",
 }
 
 local function createEmptyReward(tier)
@@ -64,14 +65,25 @@ local function createSeedReward(tier, seedId, amount, displayName)
     }
 end
 
-local function createPlantReward(tier, plantId, amount, displayName)
+local function createPlantReward(tier, plantId, amount, displayName, mutation)
     return {
         Tier = tier,
         Type = PassRewardConfig.RewardTypes.Plant,
         PlantId = plantId,
         Amount = amount,
         DisplayName = displayName or plantId,
-        Mutation = 1,
+        Mutation = mutation or 1,
+    }
+end
+
+-- 发放背包道具奖励，例如变异药水。
+local function createItemReward(tier, itemId, amount, displayName)
+    return {
+        Tier = tier,
+        Type = PassRewardConfig.RewardTypes.Item,
+        ItemId = itemId,
+        Amount = amount,
+        DisplayName = displayName or itemId,
     }
 end
 
@@ -85,27 +97,29 @@ for tier = 1, PassRewardConfig.RegularMaxLevel do
     PassRewardConfig.Tracks.Premium[tier] = createEmptyReward(tier)
 end
 
-PassRewardConfig.Tracks.Free[1] = createSeedReward(1, "TallWall", 1, "Tall Wall-nut Seed")
-PassRewardConfig.Tracks.Free[2] = createRollReward(2, 1, "ROLLS")
-PassRewardConfig.Tracks.Free[3] = createSeedReward(3, "TallWall", 2, "Tall Wall-nut Seed")
-PassRewardConfig.Tracks.Free[4] = createPlantReward(4, "Chomper", 1, "Chomper")
-PassRewardConfig.Tracks.Free[5] = createPlantReward(5, "Melonpult", 1, "Melon-pult")
-PassRewardConfig.Tracks.Free[6] = createSeedReward(6, "TallWall", 3, "Tall Wall-nut Seed")
-PassRewardConfig.Tracks.Free[7] = createSeedReward(7, "Chomper", 1, "Chomper Seed")
-PassRewardConfig.Tracks.Free[8] = createPlantReward(8, "IceMelonpult", 1, "Ice Melon-pult")
-PassRewardConfig.Tracks.Free[9] = createPlantReward(9, "IceMelonpult", 2, "Ice Melon-pult")
-PassRewardConfig.Tracks.Free[10] = createSeedReward(10, "Chomper", 2, "Chomper Seed")
+-- 新一期战令：免费线奖励。
+PassRewardConfig.Tracks.Free[1] = createSeedReward(1, "SunShroom", 1, "Sun-shroom Seed")
+PassRewardConfig.Tracks.Free[2] = createItemReward(2, "ShinyPotion", 1, "Shiny Potion")
+PassRewardConfig.Tracks.Free[3] = createSeedReward(3, "SunShroom", 2, "Sun-shroom Seed")
+PassRewardConfig.Tracks.Free[4] = createSeedReward(4, "PumpkinShield", 1, "Pumpkin Shield Seed")
+PassRewardConfig.Tracks.Free[5] = createRollReward(5, 1, "ROLLS")
+PassRewardConfig.Tracks.Free[6] = createSeedReward(6, "SunShroom", 3, "Sun-shroom Seed")
+PassRewardConfig.Tracks.Free[7] = createSeedReward(7, "PumpkinShield", 1, "Pumpkin Shield Seed")
+PassRewardConfig.Tracks.Free[8] = createItemReward(8, "ShinyPotion", 1, "Shiny Potion")
+PassRewardConfig.Tracks.Free[9] = createItemReward(9, "ShinyPotion", 1, "Shiny Potion")
+PassRewardConfig.Tracks.Free[10] = createSeedReward(10, "PumpkinShield", 2, "Pumpkin Shield Seed")
 
-PassRewardConfig.Tracks.Premium[1] = createPlantReward(1, "Chomper", 1, "Chomper")
-PassRewardConfig.Tracks.Premium[2] = createRollReward(2, 1, "ROLLS")
-PassRewardConfig.Tracks.Premium[3] = createPlantReward(3, "Chomper", 1, "Chomper")
-PassRewardConfig.Tracks.Premium[4] = createRollReward(4, 1, "ROLLS")
+-- 新一期战令：付费线奖励。
+PassRewardConfig.Tracks.Premium[1] = createPlantReward(1, "PumpkinShield", 1, "Pumpkin Shield")
+PassRewardConfig.Tracks.Premium[2] = createItemReward(2, "ThunderPotion", 1, "Thunder Potion")
+PassRewardConfig.Tracks.Premium[3] = createPlantReward(3, "PumpkinShield", 1, "Pumpkin Shield")
+PassRewardConfig.Tracks.Premium[4] = createItemReward(4, "ThunderPotion", 1, "Thunder Potion")
 PassRewardConfig.Tracks.Premium[5] = createPlantReward(5, "CobCannon", 1, "Cob Cannon")
-PassRewardConfig.Tracks.Premium[6] = createPlantReward(6, "MutantChomper", 1, "Mutant Chomper")
-PassRewardConfig.Tracks.Premium[7] = createRollReward(7, 1, "ROLLS")
-PassRewardConfig.Tracks.Premium[8] = createPlantReward(8, "MutantChomper", 2, "Mutant Chomper")
-PassRewardConfig.Tracks.Premium[9] = createRollReward(9, 1, "ROLLS")
-PassRewardConfig.Tracks.Premium[10] = createPlantReward(10, "MutantChomper", 3, "Mutant Chomper")
+PassRewardConfig.Tracks.Premium[6] = createPlantReward(6, "MutantPumpkinShield", 1, "Mutant Pumpkin Shield")
+PassRewardConfig.Tracks.Premium[7] = createItemReward(7, "ThunderPotion", 2, "Thunder Potion")
+PassRewardConfig.Tracks.Premium[8] = createPlantReward(8, "MutantPumpkinShield", 2, "Mutant Pumpkin Shield")
+PassRewardConfig.Tracks.Premium[9] = createItemReward(9, "DivinePotion", 2, "Divine Potion")
+PassRewardConfig.Tracks.Premium[10] = createPlantReward(10, "MutantPumpkinShield", 3, "Mutant Pumpkin Shield")
 
 PassRewardConfig.Tracks.Free[PassRewardConfig.RepeatTier] = createRepeatTokenReward(PassRewardConfig.TrackKeys.Free)
 PassRewardConfig.Tracks.Premium[PassRewardConfig.RepeatTier] = createRepeatTokenReward(PassRewardConfig.TrackKeys.Premium)

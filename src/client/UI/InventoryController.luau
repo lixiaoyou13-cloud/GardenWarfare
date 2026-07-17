@@ -758,10 +758,9 @@ function InventoryController.Init()
             local seedEntries = {}
             for _, seedData in ipairs(newData.Inventory.Seeds) do
                 local seedId = seedData.ID
-                currentSeedItems[seedId] = true
-
                 local seedDetail = ItemConfig.Seeds[seedId]
                 if seedDetail then
+                    currentSeedItems[seedId] = true
                     local quality = getInventoryQuality(ItemConfig, seedId, "Seed", seedDetail)
                     local yieldPlantId = seedDetail.YieldPlant or seedId
                     local yieldPlantDetail = getSeedPlantDetail(ItemConfig, seedId, seedDetail)
