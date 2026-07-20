@@ -124,6 +124,10 @@ local function queueRankReward(entry)
         return true
     end
 
+    if RankingSeasonConfig.SettlementAutoGiftEnabled ~= true then
+        return true
+    end
+
     local giftTitle = "Leaderboard Season Reward"
     local rewardRankText = "Rank #" .. tostring(entry.Rank)
 

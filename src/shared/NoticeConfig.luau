@@ -6,6 +6,34 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- Each notice creates one tag button in Notice.TypeButtons.
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
+    {
+        Id = "notice-2026-07-20",
+        TagText = "2026/7/20",
+        PublishedAt = "2026-07-20",
+        Title = "July 20 Update",
+        Sections = {
+            {
+                Title = "New Plants",
+                Content = "Sun-shroom has joined the garden as a support plant that heals plants in front of it over time.\nPumpkin Shield can protect your plants by taking damage first.\nCarrot Cannon is a heavy artillery plant built for powerful long-range attacks.",
+            },
+            {
+                Title = "Dave's Shop",
+                Content = "Carrot Cannon Seeds can now appear in Dave's Shop as a rare special stock.",
+            },
+            {
+                Title = "Season Pass",
+                Content = "A new Season Pass is now live, featuring new rewards including Sun-shroom and Pumpkin Shield.\nThe Season Pass Shop can now offer rewards from both the current season and previous seasons.",
+            },
+            {
+                Title = "Leaderboard Rewards",
+                Content = "A new leaderboard reward preview page has been added. Visit the gift displays next to the leaderboard to check upcoming rewards.\nSeason leaderboard rewards will be updated on July 31.",
+            },
+            {
+                Title = "Bug Fixes",
+                Content = "Fixed an issue in the Zomboss event where plants defeated by the boss could fail to redeploy after the event ended.",
+            },
+        },
+    },
     -- 2026/7/16 更新公告：修复偷菜复制与手机端交易 UI 问题，并发放神圣药水补偿。
     {
         Id = "notice-2026-07-16",

@@ -2,7 +2,6 @@ local PassRewardConfig = {}
 
 PassRewardConfig.ClientVisible = true
 PassRewardConfig.DisabledMessage = "Pass event has ended."
-PassRewardConfig.EventEndText = "Event ends August 2"
 PassRewardConfig.SeasonId = "PassSeason_20260720" -- 战令赛季 ID；修改后会重置本期战令进度和领取状态。
 
 PassRewardConfig.RemoteName = "ClaimPassRewardRF"

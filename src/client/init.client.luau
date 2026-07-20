@@ -21,6 +21,7 @@ local OnlineRewardController = require(script.UI.OnlineRewardController)
 local PassController = require(script.UI.PassController)
 local GiftingController = require(script.UI.GiftingController)
 local TradeController = require(script.UI.TradeController)
+local LeaderboardRewardController = require(script.UI.LeaderboardRewardController)
 local NoticeController = require(script.UI.NoticeController)
 local FriendInviteController = require(script.UI.FriendInviteController)
 local EventUIManager = require(script.UI.EventUI.EventUIManager)
@@ -30,6 +31,7 @@ local ZombossBossFightController = require(script.Services.ZombossBossFightContr
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RankingSeasonConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RankingSeasonConfig"))
+local LeaderboardRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("LeaderboardRewardConfig"))
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
@@ -321,6 +323,12 @@ task.spawn(function()
     local settingsGui = basicGui:FindFirstChild("Settings")
     local rollPage = basicGui:FindFirstChild("RollPage")
     local giftingGui = basicGui:FindFirstChild("GiftingGui")
+    local leaderboardRewardGui = basicGui:FindFirstChild(LeaderboardRewardConfig.UiName or "RankingRewards")
+    local leaderboardRewardFrame = leaderboardRewardGui
+        and (
+            leaderboardRewardGui:FindFirstChild(LeaderboardRewardConfig.ContentFrameName or "Store", true)
+            or leaderboardRewardGui:FindFirstChild("MainFrame", true)
+        )
 
     addGlobalPanel(passGui, nil, false)
     addGlobalPanel(codesGui, nil, false)
@@ -328,8 +336,8 @@ task.spawn(function()
     addGlobalPanel(onlineGui, nil, false)
     addGlobalPanel(settingsGui, nil, false)
     addGlobalPanel(rollPage, nil, false)
-    -- 礼物界面也走统一面板逻辑，打开时关闭其他界面并启用背景遮罩。
     addGlobalPanel(giftingGui, nil, false)
+    addGlobalPanel(leaderboardRewardGui, leaderboardRewardFrame, true)
 
     local isAnyOpen = false
 
@@ -973,3 +981,4 @@ local FreeRewardClientController = require(script.Services.FreeRewardClientContr
 FreeRewardClientController.Init()
 GiftingController.Init()
 TradeController.Init()
+LeaderboardRewardController.Init()

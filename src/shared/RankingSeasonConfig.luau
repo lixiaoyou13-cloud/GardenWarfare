@@ -8,6 +8,7 @@ RankingSeasonConfig.SettlementStateStoreName = "LeaderboardSettlementState_v1"
 RankingSeasonConfig.TopCount = 60
 RankingSeasonConfig.RankValuePrefix = "Lv."
 RankingSeasonConfig.RunSettlementInStudio = false
+RankingSeasonConfig.SettlementAutoGiftEnabled = true
 RankingSeasonConfig.SettlementQueueDelaySeconds = 1
 RankingSeasonConfig.DefaultSeasonNextLevel = 1
 RankingSeasonConfig.CurrentStoreResetEnabled = false

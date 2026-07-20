@@ -149,6 +149,9 @@ local RankingService = require(script.Services.RankingService)
 -- 然后在下方的执行区域，加上初始化
 RankingService.Init()
 
+local LeaderboardRewardService = require(script.Services.LeaderboardRewardService)
+LeaderboardRewardService.Init()
+
 local OnlineRewardService = require(script.Services.OnlineRewardService)
 OnlineRewardService.Init()
 
