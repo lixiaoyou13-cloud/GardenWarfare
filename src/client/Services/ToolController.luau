@@ -507,15 +507,23 @@ function ToolController.Init()
                         local plot = lawnPart and lawnPart.Parent and lawnPart.Parent.Parent
                         if plot and plot:GetAttribute("IsLevelActive") then
 
-                            -- 战斗中的置换/回收确认弹窗
-                            if actionName == "Swap Plant" or actionName == "Recycle to Backpack" or actionName == "Remove Pumpkin Shield" or actionName == "Add Pumpkin Shield" then
+                            -- 战斗中加南瓜罩直接提交，服务端继续负责合法性校验。
+                            if actionName == "Add Pumpkin Shield" then
+                                if placePumpkinShieldRE then
+                                    placePumpkinShieldRE:FireServer(plant, equippedItem, true)
+                                else
+                                    UIEffectUtil.ShowTip("Pumpkin Shield service is not ready")
+                                end
+                                return
+                            end
+
+                            -- 战斗中的置换/回收仍保留确认弹窗。
+                            if actionName == "Swap Plant" or actionName == "Recycle to Backpack" or actionName == "Remove Pumpkin Shield" then
+                                local detailText
                                 local cost = getCombatEditCost(player, plot)
                                 local costText = UIEffectUtil.FormatNumber(cost)
-                                local detailText
                                 if actionName == "Swap Plant" then
                                     detailText = "Swapping plants during combat costs " .. costText .. " Sun."
-                                elseif actionName == "Add Pumpkin Shield" then
-                                    detailText = "Adding Pumpkin Shield during combat costs " .. costText .. " Sun."
                                 else
                                     detailText = "Removing plants during combat costs " .. costText .. " Sun."
                                 end
@@ -527,12 +535,6 @@ function ToolController.Init()
                                             swapRE:FireServer(plant, equippedItem, true)
                                         else
                                             UIEffectUtil.ShowTip("Swap service is not ready")
-                                        end
-                                    elseif actionName == "Add Pumpkin Shield" then
-                                        if placePumpkinShieldRE then
-                                            placePumpkinShieldRE:FireServer(plant, equippedItem, true)
-                                        else
-                                            UIEffectUtil.ShowTip("Pumpkin Shield service is not ready")
                                         end
                                     else
                                         shovelRE:FireServer(plant, true)

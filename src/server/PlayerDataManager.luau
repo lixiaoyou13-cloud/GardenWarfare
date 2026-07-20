@@ -219,22 +219,83 @@ local function normalizePassClaimedMap(value)
     return normalized
 end
 
-local function normalizePassV1Data(data)
+-- 获取当前战令赛季 ID，用于隔离不同赛季的进度和领取状态。
+local function getCurrentPassSeasonId()
+    return tostring(PassRewardConfig.SeasonId or "PassV1")
+end
+
+-- 生成当前赛季的默认战令数据。
+local function createDefaultPassV1Data()
+    return {
+        SeasonId = getCurrentPassSeasonId(),
+        Level = 1,
+        Exp = 0,
+        FreeClaimed = {},
+        PremiumClaimed = {},
+        PremiumOwned = false,
+        RepeatRewardAvailable = 0,
+        FreeRepeatClaimed = 0,
+        PremiumRepeatClaimed = 0,
+    }
+end
+
+-- 生成当前赛季的默认战令任务数据。
+local function createDefaultPassQuestV1Data(dayKey)
+    return {
+        SeasonId = getCurrentPassSeasonId(),
+        DayKey = dayKey or PassQuestConfig.GetUtcDayKey(os.time()),
+        Progress = {},
+        Claimed = {},
+    }
+end
+
+-- 规范化战令商店代币；换赛季时旧赛季余额不继承。
+local function normalizePassShopTokenData(data)
     if type(data) ~= "table" then
-        return {
-            Level = 1,
-            Exp = 0,
-            FreeClaimed = {},
-            PremiumClaimed = {},
-            PremiumOwned = false,
-            RepeatRewardAvailable = 0,
-            FreeRepeatClaimed = 0,
-            PremiumRepeatClaimed = 0,
-        }
+        return 0, false
     end
 
-    if type(data.PassV1) ~= "table" then
-        data.PassV1 = {}
+    local tokenKey = PassShopConfig.TokenDataKey or "PassShopTokens"
+    local seasonKey = PassShopConfig.TokenSeasonDataKey or "PassShopTokenSeasonId"
+    local currentSeasonId = getCurrentPassSeasonId()
+    if tostring(data[seasonKey] or "") ~= currentSeasonId then
+        data[tokenKey] = 0
+        data[seasonKey] = currentSeasonId
+        return 0, true
+    end
+
+    local tokenCount = math.max(0, math.floor(tonumber(data[tokenKey]) or 0))
+    local changed = data[tokenKey] ~= tokenCount
+    data[tokenKey] = tokenCount
+    data[seasonKey] = currentSeasonId
+    return tokenCount, changed
+end
+
+-- 增加当前赛季的战令商店代币，确保写入前已经完成赛季隔离。
+local function addPassShopTokensToData(data, amount)
+    if type(data) ~= "table" then
+        return 0
+    end
+
+    local tokenKey = PassShopConfig.TokenDataKey or "PassShopTokens"
+    local seasonKey = PassShopConfig.TokenSeasonDataKey or "PassShopTokenSeasonId"
+    local tokenCount = normalizePassShopTokenData(data)
+    amount = math.max(0, math.floor(tonumber(amount) or 0))
+
+    data[tokenKey] = tokenCount + amount
+    data[seasonKey] = getCurrentPassSeasonId()
+    return data[tokenKey]
+end
+
+local function normalizePassV1Data(data)
+    if type(data) ~= "table" then
+        return createDefaultPassV1Data()
+    end
+
+    local currentSeasonId = getCurrentPassSeasonId()
+    if type(data.PassV1) ~= "table" or tostring(data.PassV1.SeasonId or "") ~= currentSeasonId then
+        data.PassV1 = createDefaultPassV1Data()
+        return data.PassV1
     end
 
     local level = math.clamp(math.floor(tonumber(data.PassV1.Level) or 1), 1, PASS_V1_MAX_LEVEL)
@@ -256,6 +317,7 @@ local function normalizePassV1Data(data)
         exp = math.clamp(exp, 0, getPassExpRequired(level) - 1)
     end
 
+    data.PassV1.SeasonId = currentSeasonId
     data.PassV1.Level = level
     data.PassV1.Exp = exp
     data.PassV1.FreeClaimed = normalizePassClaimedMap(data.PassV1.FreeClaimed)
@@ -279,20 +341,18 @@ end
 local function normalizePassQuestV1Data(data)
     local dayKey = PassQuestConfig.GetUtcDayKey(os.time())
     if type(data) ~= "table" then
-        return {
-            DayKey = dayKey,
-            Progress = {},
-            Claimed = {},
-        }, false
+        return createDefaultPassQuestV1Data(dayKey), false
     end
 
     local changed = false
-    if type(data.PassQuestV1) ~= "table" then
-        data.PassQuestV1 = {}
+    local currentSeasonId = getCurrentPassSeasonId()
+    if type(data.PassQuestV1) ~= "table" or tostring(data.PassQuestV1.SeasonId or "") ~= currentSeasonId then
+        data.PassQuestV1 = createDefaultPassQuestV1Data(dayKey)
         changed = true
     end
 
     local questData = data.PassQuestV1
+    questData.SeasonId = currentSeasonId
     if tostring(questData.DayKey or "") ~= dayKey then
         questData.DayKey = dayKey
         questData.Progress = {}
@@ -372,21 +432,8 @@ local function GetDefaultData()
         },
         ClaimedAchieve = {},
         RollTickets = {0, 0},
-        PassV1 = {
-            Level = 1,
-            Exp = 0,
-            FreeClaimed = {},
-            PremiumClaimed = {},
-            PremiumOwned = false,
-            RepeatRewardAvailable = 0,
-            FreeRepeatClaimed = 0,
-            PremiumRepeatClaimed = 0,
-        },
-        PassQuestV1 = {
-            DayKey = "",
-            Progress = {},
-            Claimed = {},
-        },
+        PassV1 = createDefaultPassV1Data(),
+        PassQuestV1 = createDefaultPassQuestV1Data(),
 
         NewbieGiftStartTime = 0,
         NewbieGiftPurchased = false,
@@ -396,6 +443,7 @@ local function GetDefaultData()
         ExclusiveRollTotalRolls = 0,
         ExclusiveRollTickets = 0,
         PassShopTokens = 0,
+        [PassShopConfig.TokenSeasonDataKey or "PassShopTokenSeasonId"] = getCurrentPassSeasonId(),
         PendingGifts = {},
         ClaimedGiftIds = {},
         RankingSeasonBaselines = {},
@@ -1604,6 +1652,7 @@ local RELIABLE_REWARD_FIELDS = {
     "PassV1",
     "PassQuestV1",
     "PassShopTokens",
+    "PassShopTokenSeasonId",
     "ExclusiveRollTickets",
     "ClaimedAchieve",
     "SignInDays",
@@ -1731,8 +1780,7 @@ local function grantPassReward(player, data, rewardConfig)
     end
 
     if rewardType == PassRewardConfig.RewardTypes.PassShopToken then
-        local tokenKey = PassShopConfig.TokenDataKey or "PassShopTokens"
-        data[tokenKey] = math.max(0, math.floor(tonumber(data[tokenKey]) or 0)) + amount
+        addPassShopTokensToData(data, amount)
         local tokenName = tostring(rewardConfig.DisplayName or "Token")
         return true, tokenName .. " x" .. tostring(amount), tokenName, amount
     end
@@ -1796,8 +1844,7 @@ local function grantPassShopReward(player, data, itemConfig)
     end
 
     if rewardType == PassShopConfig.RewardTypes.PassShopToken then
-        local tokenKey = PassShopConfig.TokenDataKey or "PassShopTokens"
-        data[tokenKey] = math.max(0, math.floor(tonumber(data[tokenKey]) or 0)) + amount
+        addPassShopTokensToData(data, amount)
         return true, "Token x" .. tostring(amount), "Token", amount
     end
 
@@ -1850,8 +1897,11 @@ local function purchasePassShopItem(player, slotName)
 
     local tokenKey = PassShopConfig.TokenDataKey or "PassShopTokens"
     local function getPassShopTokenCount()
+        normalizePassShopTokenData(data)
         return math.max(0, math.floor(tonumber(data[tokenKey]) or 0))
     end
+
+    normalizePassShopTokenData(data)
 
     if dataSaveAllowed[player.UserId] ~= true then
         return false, "Data is still saving. Please try again later.", getPassShopTokenCount()
@@ -2202,6 +2252,7 @@ local function onPlayerAdded(player)
                 local sunResetApplied = false
                 local sunBalancesNormalized = false
                 local inventorySeedsNormalized = false
+                local passShopTokensNormalized = false
                 savedData.Hotbar = {"Tool_Shovel", "System_Backpack", "Tool_WeaponBlock"}
                 if type(savedData.Inventory) ~= "table" then savedData.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} } end
                 if type(savedData.Inventory.Seeds) ~= "table" then savedData.Inventory.Seeds = {} end
@@ -2241,6 +2292,8 @@ local function onPlayerAdded(player)
                 if type(savedData.OnlineRewardRefreshAt) ~= "number" then savedData.OnlineRewardRefreshAt = 0 end
                 normalizePassV1Data(savedData)
                 normalizePassQuestV1Data(savedData)
+                local _, tokenSeasonChanged = normalizePassShopTokenData(savedData)
+                passShopTokensNormalized = tokenSeasonChanged == true
                 ensureEnterGamePassQuest(savedData)
                 normalizeActiveMutationPotionBuffs(savedData, os.time())
                 syncPassPremiumOwnership(player, savedData)
@@ -2291,6 +2344,10 @@ local function onPlayerAdded(player)
                 if inventorySeedsNormalized then
                     markSessionDataChanged(player, "inventory seed cleanup")
                     print("[Data] Player " .. player.Name .. " invalid seed inventory entries cleaned.")
+                end
+                if passShopTokensNormalized then
+                    markSessionDataChanged(player, "pass shop token season reset")
+                    print("[Data] Player " .. player.Name .. " pass shop tokens reset for current season.")
                 end
                 print("[Data] Player " .. player.Name .. " data loaded successfully!")
 
@@ -2620,6 +2677,18 @@ function PlayerDataManager.AddPassExp(player, amount)
     end
 
     return passData
+end
+
+function PlayerDataManager.AddPassShopTokens(player, amount)
+    local data = player and sessionData[player.UserId]
+    if not data then
+        return 0
+    end
+
+    local tokenCount = addPassShopTokensToData(data, amount)
+    markSessionDataChanged(player, "pass shop token")
+    fireInventoryUpdate(player, data)
+    return tokenCount
 end
 
 function PlayerDataManager.AddPassQuestProgress(player, taskId, amount)

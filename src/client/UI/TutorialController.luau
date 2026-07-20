@@ -52,6 +52,26 @@ local function waitForGuiDescendant(root, name, timeout)
     return nil
 end
 
+-- 教程依赖的核心 UI 可能会慢加载，使用轮询避免 Infinite yield。
+local function waitForDirectChild(root, name, timeout, context)
+    if not root then
+        warn("[TutorialController] Missing UI object: " .. tostring(context or name))
+        return nil
+    end
+
+    local child = root:FindFirstChild(name)
+    local expiresAt = os.clock() + (timeout or 30)
+    while not child and os.clock() < expiresAt do
+        task.wait(0.1)
+        child = root:FindFirstChild(name)
+    end
+
+    if not child then
+        warn("[TutorialController] Missing UI object: " .. tostring(context or name))
+    end
+    return child
+end
+
 local function isPrimaryPointerInput(input)
     return input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch
@@ -104,17 +124,28 @@ end
 
 function TutorialController.Init()
     local player = Players.LocalPlayer
-    local playerGui = player:WaitForChild("PlayerGui")
-    local basicGui = playerGui:WaitForChild("BasicGui")
-    local inventoryGui = basicGui:WaitForChild("InventoryGui")
-    local overlayGui = playerGui:WaitForChild("GlobalOverlayGui")
-    local inventoryMain = inventoryGui:WaitForChild("MainFrame")
-    local inventoryPages = inventoryMain:WaitForChild("MainFrame")
-    local seedPage = inventoryPages:WaitForChild("SeedPage")
+    local playerGui = waitForDirectChild(player, "PlayerGui", 30, "Players.LocalPlayer.PlayerGui")
+    if not playerGui then return end
+
+    local basicGui = waitForDirectChild(playerGui, "BasicGui", 30, "PlayerGui.BasicGui")
+    local inventoryGui = waitForDirectChild(basicGui, "InventoryGui", 30, "BasicGui.InventoryGui")
+    local overlayGui = waitForDirectChild(playerGui, "GlobalOverlayGui", 30, "PlayerGui.GlobalOverlayGui")
+    local inventoryMain = waitForDirectChild(inventoryGui, "MainFrame", 30, "BasicGui.InventoryGui.MainFrame")
+    local inventoryPages = waitForDirectChild(inventoryMain, "MainFrame", 30, "BasicGui.InventoryGui.MainFrame.MainFrame")
+    local seedPage = waitForDirectChild(inventoryPages, "SeedPage", 30, "BasicGui.InventoryGui.MainFrame.MainFrame.SeedPage")
+    if not (basicGui and inventoryGui and overlayGui and inventoryMain and inventoryPages and seedPage) then
+        return
+    end
     local closeButton = findFirstGuiObjectByName(inventoryMain, { "Close", "CloseBtn", "CloseButton" })
-    local playProperty = basicGui:WaitForChild("PlayProperty")
-    local hotbarFrame = playProperty:WaitForChild("HotbarFrame")
-    local battleBtn = playProperty:WaitForChild("StartBattle") -- 战斗按钮
+    local playProperty = waitForDirectChild(basicGui, "PlayProperty", 30, "BasicGui.PlayProperty")
+    local hotbarFrame = waitForDirectChild(playProperty, "HotbarFrame", 30, "BasicGui.PlayProperty.HotbarFrame")
+    if not (playProperty and hotbarFrame) then
+        return
+    end
+    local battleBtn = waitForDirectChild(playProperty, "StartBattle", 30, "BasicGui.PlayProperty.StartBattle") -- 战斗按钮
+    if not battleBtn then
+        return
+    end
 
     local function getBackpackButton(timeout)
         return waitForGuiDescendant(hotbarFrame, "System_Backpack", timeout or 2)

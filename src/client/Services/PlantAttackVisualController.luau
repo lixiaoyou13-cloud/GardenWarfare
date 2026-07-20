@@ -25,6 +25,10 @@ local LOCAL_OWNER_ATTACK_ANIMATION_DISTANCE = 180
 local OTHER_OWNER_ATTACK_ANIMATION_DISTANCE = 90
 local OFFSCREEN_ATTACK_ANIMATION_DISTANCE = 60
 local SUNSHROOM_HEAL_VFX_DEBUG = false
+local CARROT_CANNON_ATTACK_DEBUG = false -- 临时调试萝卜加农炮攻击动画表现。
+local CARROT_CANNON_ATTACK_ANIMATION_ID = "79085387107532"
+local CARROT_CANNON_DEBUG_PRINT_LIMIT = 120
+local CARROT_CANNON_DEBUG_MOTOR_NAMES = { "luobo ", "chelun1", "chelun2", "chetoupao" }
 
 local attackTracks = setmetatable({}, { __mode = "k" })
 local flashingZombies = setmetatable({}, { __mode = "k" })
@@ -43,6 +47,7 @@ local activeProjectileCounts = {
     Total = 0,
 }
 local visualConnection = nil
+local carrotCannonDebugPrintCount = 0
 local visualSettings = {
     EffectsSelf = true,
     EffectsOthers = true,
@@ -448,31 +453,205 @@ local function getAnimator(model)
     return animator
 end
 
+-- 判断本次攻击动画是否需要输出萝卜加农炮调试日志。
+local function shouldDebugCarrotCannonAttack(plant, animationId)
+    if not CARROT_CANNON_ATTACK_DEBUG then
+        return false
+    end
+
+    if tostring(animationId or ""):find(CARROT_CANNON_ATTACK_ANIMATION_ID, 1, true) then
+        return true
+    end
+
+    local plantName = plant and plant.Name or ""
+    return tostring(plantName):find("CarrotCannon", 1, true) ~= nil
+end
+
+-- 控制萝卜加农炮调试日志输出数量，避免刷屏。
+local function printCarrotCannonDebug(message)
+    if carrotCannonDebugPrintCount >= CARROT_CANNON_DEBUG_PRINT_LIMIT then
+        return
+    end
+
+    carrotCannonDebugPrintCount += 1
+    print("[CarrotCannonAttackDebug][Client] " .. tostring(message))
+end
+
+-- 将 Motor6D.Transform 转成便于查看的位置和角度文本。
+local function formatCFrameForDebug(cframe)
+    local x, y, z = cframe:ToOrientation()
+    local position = cframe.Position
+    return ("pos=(%.3f, %.3f, %.3f) rotDeg=(%.1f, %.1f, %.1f)"):format(
+        position.X,
+        position.Y,
+        position.Z,
+        math.deg(x),
+        math.deg(y),
+        math.deg(z)
+    )
+end
+
+-- 读取 AnimationTrack 上的动画资源 ID，部分环境读不到时返回 unknown。
+local function getTrackAnimationIdForDebug(track)
+    local ok, animation = pcall(function()
+        return track.Animation
+    end)
+    if ok and animation and animation:IsA("Animation") then
+        return tostring(animation.AnimationId)
+    end
+
+    return "unknown"
+end
+
+-- 输出当前 Animator 正在播放的动画轨道，方便判断待机和攻击是否叠加。
+local function debugCarrotCannonPlayingTracks(plant, label, animationId)
+    if not shouldDebugCarrotCannonAttack(plant, animationId) then
+        return
+    end
+
+    local animator = getAnimator(plant)
+    if not animator then
+        printCarrotCannonDebug(tostring(label) .. " tracks | animator missing")
+        return
+    end
+
+    local tracks = animator:GetPlayingAnimationTracks()
+    local parts = {}
+    for index, playingTrack in ipairs(tracks) do
+        table.insert(parts, ("#%d id=%s playing=%s time=%.3f length=%.3f weight=%.3f priority=%s"):format(
+            index,
+            getTrackAnimationIdForDebug(playingTrack),
+            tostring(playingTrack.IsPlaying),
+            tonumber(playingTrack.TimePosition) or 0,
+            tonumber(playingTrack.Length) or 0,
+            tonumber(playingTrack.WeightCurrent) or 0,
+            tostring(playingTrack.Priority)
+        ))
+    end
+
+    if #parts == 0 then
+        table.insert(parts, "none")
+    end
+
+    printCarrotCannonDebug(tostring(label) .. " tracks | " .. table.concat(parts, " | "))
+end
+
+-- 在植物模型下按名称查找指定 Motor6D。
+local function findMotorByName(root, motorName)
+    for _, descendant in ipairs(root:GetDescendants()) do
+        if descendant:IsA("Motor6D") and descendant.Name == motorName then
+            return descendant
+        end
+    end
+
+    return nil
+end
+
+-- 格式化 Motor6D 绑定零件信息，用来排查零件是否被锚定或没有实际位移。
+local function formatMotorPartForDebug(part)
+    if not part or not part:IsA("BasePart") then
+        return "nil"
+    end
+
+    return ("%s anchored=%s %s"):format(
+        part:GetFullName(),
+        tostring(part.Anchored),
+        formatCFrameForDebug(part.CFrame)
+    )
+end
+
+-- 打印萝卜加农炮关键 Motor6D 在动画播放过程中的 Transform。
+local function debugCarrotCannonMotors(plant, label, track, animationId)
+    if not shouldDebugCarrotCannonAttack(plant, animationId) then
+        return
+    end
+
+    local parts = {}
+    if track then
+        table.insert(parts, ("trackPlaying=%s time=%.3f length=%.3f weight=%.3f priority=%s"):format(
+            tostring(track.IsPlaying),
+            tonumber(track.TimePosition) or 0,
+            tonumber(track.Length) or 0,
+            tonumber(track.WeightCurrent) or 0,
+            tostring(track.Priority)
+        ))
+    end
+
+    for _, motorName in ipairs(CARROT_CANNON_DEBUG_MOTOR_NAMES) do
+        local motor = findMotorByName(plant, motorName)
+        if motor then
+            table.insert(parts, ("%q Transform %s Part0=%s Part1=%s"):format(
+                motorName,
+                formatCFrameForDebug(motor.Transform),
+                formatMotorPartForDebug(motor.Part0),
+                formatMotorPartForDebug(motor.Part1)
+            ))
+        else
+            table.insert(parts, ("%q missing"):format(motorName))
+        end
+    end
+
+    printCarrotCannonDebug(tostring(label) .. " | " .. table.concat(parts, " | "))
+end
+
 local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
-    if not plant or not plant.Parent then return end
-    if type(animationId) ~= "string" or animationId == "" then return end
-    if failedAnimationIds[animationId] then return end
+    local debugCarrot = shouldDebugCarrotCannonAttack(plant, animationId)
+    if not plant or not plant.Parent then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: plant missing animation=" .. tostring(animationId))
+        end
+        return
+    end
+    if type(animationId) ~= "string" or animationId == "" then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: animationId invalid plant=" .. tostring(plant:GetFullName()))
+        end
+        return
+    end
+    if failedAnimationIds[animationId] then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: animation previously failed plant=" .. tostring(plant:GetFullName()) .. " animation=" .. tostring(animationId))
+        end
+        return
+    end
 
     ownerUserId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
     if not arePlantAnimationsEnabled(ownerUserId) then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: plant animation setting disabled owner=" .. tostring(ownerUserId))
+        end
         cleanupAttackTrack(plant)
         return
     end
 
     if not isPlantAnimationImportant(plant, ownerUserId) then
+        if debugCarrot then
+            local position = getInstancePosition(plant)
+            local camera = Workspace.CurrentCamera
+            local distance = position and camera and (camera.CFrame.Position - position).Magnitude or -1
+            printCarrotCannonDebug(("skip: not important owner=%s distance=%.2f"):format(tostring(ownerUserId), distance))
+        end
         cleanupAttackTrack(plant)
         return
     end
 
     speedMult = tonumber(speedMult) or 1
     local animator = getAnimator(plant)
-    if not animator then return end
+    if not animator then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: animator missing plant=" .. tostring(plant:GetFullName()))
+        end
+        return
+    end
 
     local cached = attackTracks[plant]
     if not cached or cached.animationId ~= animationId or cached.animator ~= animator then
         cleanupAttackTrack(plant)
 
         if not pruneAttackTracksForNewTrack(plant) then
+            if debugCarrot then
+                printCarrotCannonDebug("skip: attack track cache full plant=" .. tostring(plant:GetFullName()))
+            end
             return
         end
 
@@ -487,11 +666,23 @@ local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
         if not ok or not track then
             failedAnimationIds[animationId] = true
             warnAnimationOnce(animationId, "failed to load; skipping future attempts for this client")
+            if debugCarrot then
+                printCarrotCannonDebug("load failed plant=" .. tostring(plant:GetFullName()) .. " error=" .. tostring(track))
+            end
             return
         end
 
         track.Priority = Enum.AnimationPriority.Action
         track.Looped = false
+
+        if debugCarrot then
+            printCarrotCannonDebug(("loaded plant=%s animation=%s length=%.3f priority=%s"):format(
+                tostring(plant:GetFullName()),
+                tostring(animationId),
+                tonumber(track.Length) or 0,
+                tostring(track.Priority)
+            ))
+        end
 
         cached = {
             animationId = animationId,
@@ -518,13 +709,44 @@ local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
     end
 
     local track = cached.track
-    if not track then return end
+    if not track then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: cached track missing plant=" .. tostring(plant:GetFullName()))
+        end
+        return
+    end
 
     cached.ownerUserId = ownerUserId
     cached.lastUsedAt = os.clock()
+    if debugCarrot then
+        printCarrotCannonDebug(("play plant=%s animation=%s owner=%s speed=%.2f"):format(
+            tostring(plant:GetFullName()),
+            tostring(animationId),
+            tostring(ownerUserId),
+            speedMult
+        ))
+        debugCarrotCannonPlayingTracks(plant, "before Play", animationId)
+        debugCarrotCannonMotors(plant, "before Play", track, animationId)
+    end
     track:Stop(0)
     track:Play(0.05)
     track:AdjustSpeed(speedMult)
+    if debugCarrot then
+        debugCarrotCannonPlayingTracks(plant, "after Play", animationId)
+        debugCarrotCannonMotors(plant, "after Play", track, animationId)
+        task.delay(0.12 / math.max(speedMult, 0.01), function()
+            if plant and plant.Parent and track then
+                debugCarrotCannonPlayingTracks(plant, "after 0.12s", animationId)
+                debugCarrotCannonMotors(plant, "after 0.12s", track, animationId)
+            end
+        end)
+        task.delay(0.35 / math.max(speedMult, 0.01), function()
+            if plant and plant.Parent and track then
+                debugCarrotCannonPlayingTracks(plant, "after 0.35s", animationId)
+                debugCarrotCannonMotors(plant, "after 0.35s", track, animationId)
+            end
+        end)
+    end
     scheduleIdleAttackTrackCleanup(plant, cached, speedMult)
 end
 

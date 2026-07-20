@@ -246,8 +246,17 @@ function UIEffectUtil.ShowTip(message: string)
     end
 
     -- 2. 获取原始的 TipInfo 节点击并迁移（如果是第一次数调用）
-    local basicGui = playerGui:WaitForChild("BasicGui")
-    local playProperty = basicGui:WaitForChild("PlayProperty")
+    local basicGui = playerGui:FindFirstChild("BasicGui") or playerGui:WaitForChild("BasicGui", 30)
+    if not basicGui then
+        warn("UIEffectUtil: BasicGui node not found; tip skipped")
+        return
+    end
+
+    local playProperty = basicGui:FindFirstChild("PlayProperty") or basicGui:WaitForChild("PlayProperty", 30)
+    if not playProperty then
+        warn("UIEffectUtil: PlayProperty node not found; tip skipped")
+        return
+    end
     local tipInfo = topMsgGui:FindFirstChild("TipInfo")
 
     if not tipInfo then
@@ -263,7 +272,11 @@ function UIEffectUtil.ShowTip(message: string)
         end
     end
 
-    local tipLabel = tipInfo:WaitForChild("TextLabel")
+    local tipLabel = tipInfo:WaitForChild("TextLabel", 10)
+    if not tipLabel then
+        warn("UIEffectUtil: TipInfo.TextLabel node not found; tip skipped")
+        return
+    end
 
     -- 3. 逻辑处理
     currentTipId += 1

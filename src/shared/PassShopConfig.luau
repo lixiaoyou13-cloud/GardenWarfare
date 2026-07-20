@@ -6,6 +6,9 @@ PassShopConfig.RemoteName = "PurchasePassShopItemRF"
 -- 玩家数据中用于保存战令商店代币的字段。
 PassShopConfig.TokenDataKey = "PassShopTokens"
 
+-- 玩家数据中用于记录战令商店代币所属赛季的字段；赛季变化时会清空旧代币。
+PassShopConfig.TokenSeasonDataKey = "PassShopTokenSeasonId"
+
 -- 战令商店可发放的奖励类型。
 PassShopConfig.RewardTypes = {
     Plant = "Plant",

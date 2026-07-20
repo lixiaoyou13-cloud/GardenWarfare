@@ -2,12 +2,14 @@ local PassRewardConfig = {}
 
 PassRewardConfig.ClientVisible = true
 PassRewardConfig.DisabledMessage = "Pass event has ended."
+PassRewardConfig.EventEndText = "Event ends August 2"
+PassRewardConfig.SeasonId = "PassSeason_20260720" -- 战令赛季 ID；修改后会重置本期战令进度和领取状态。
 
 PassRewardConfig.RemoteName = "ClaimPassRewardRF"
 PassRewardConfig.RegularMaxLevel = 10
 PassRewardConfig.RepeatTier = 11
 PassRewardConfig.MaxLevel = 11
-PassRewardConfig.PremiumGamePassId = 1890839237
+PassRewardConfig.PremiumGamePassId = 1919529525 -- 赛季通信证付费档 Game Pass 商品 ID。
 PassRewardConfig.ExpProductId = 3606687341
 PassRewardConfig.ExpProductAmount = 200
 

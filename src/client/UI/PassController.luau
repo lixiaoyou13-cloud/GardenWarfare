@@ -353,6 +353,7 @@ function PassController.Init()
     local closeButton = findButton(waitForPath(passRoot, { "Top", "Main", "Containers", "Close" }))
     local openShopButton = findButton(passRoot and passRoot:FindFirstChild("Shop"))
     local closeShopButton = findButton(waitForPath(passShopPage, { "Top", "Close" }))
+    local eventEndText = findTextObject(waitForPath(passRoot, { "Top", "Main", "Containers", "TimeDay" }))
     local expAmountText = findTextObject(waitForPath(passGui, { "Level", "Exp", "Main", "ExpAmount" }))
     local expProgressBar = findGuiObject(waitForPath(passGui, { "Level", "Exp", "Main", "Moving" }))
     local premiumBuyButton = findButton(waitForPath(passGui, { "Pass", "Gift", "Main", "BuyFrame", "Buy" }))
@@ -402,6 +403,7 @@ function PassController.Init()
     if not tokenCountText then
         warn("[PassController] Missing token count text: BasicGui.PassGui.Pass.Shop.Icon.main")
     end
+    setTextObjectText(eventEndText, PassRewardConfig.EventEndText or "")
 
     local function showPassMainPage()
         setGuiOpen(levelRoot, true)

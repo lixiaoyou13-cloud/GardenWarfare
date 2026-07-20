@@ -709,9 +709,11 @@ function InventoryService.Init()
         if parts[1] ~= "Plant" then return end
 
         local shieldPlantId = parts[2]
-        local shieldMutation = 1
         local shieldConfig = ItemConfig.Plants[shieldPlantId]
         if not (shieldConfig and isPumpkinShieldPlant(shieldPlantId)) then return end
+        local shieldMutation = if shieldConfig.NoMutation == true
+            then 1
+            else math.max(1, math.floor(tonumber(parts[3]) or 1))
 
         local gridPart = targetPlantModel.Parent
         if not gridPart or not gridPart:IsA("BasePart") then return end
@@ -762,20 +764,14 @@ function InventoryService.Init()
                 end
                 return
             end
-
-            local cost = GetCombatEditCost(player)
-            if not PlayerDataManager.ConsumeCoins(player, cost) then
-                local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
-                if showNotifRE then
-                    showNotifRE:FireClient(player, "Notice", "Not enough Sun! Need " .. tostring(cost) .. " Sun.")
-                end
-                return
-            end
+            -- 战斗中添加南瓜保护罩免费，只保留确认入口和服务端合法性校验。
         end
 
         if not PlayerDataManager.ConsumePlant(player, shieldPlantId, 1, shieldMutation) then return end
 
-        local maxHP = math.max(1, math.floor(tonumber(shieldConfig.HP) or 300))
+        local stats = ItemConfig.MutationStats[shieldMutation] or ItemConfig.MutationStats[1]
+        local healthMul = tonumber(stats and stats.HealthMul) or 1
+        local maxHP = math.max(1, math.floor((tonumber(shieldConfig.HP) or 300) * healthMul))
         local shieldModel = CombatService.SpawnCombatPlant(gridPart, shieldPlantId, maxHP, maxHP, shieldMutation, {
             AsPumpkinShield = true,
         })

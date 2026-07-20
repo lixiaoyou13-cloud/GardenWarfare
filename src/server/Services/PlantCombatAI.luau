@@ -34,6 +34,7 @@ local EVENT_BOSS_PROJECTILE_MAX_HEIGHT_SCALE = 0.7
 local EVENT_BOSS_PROJECTILE_XZ_JITTER_RADIUS = 1.75
 local DAMAGE_TEXT_BATCH_WINDOW = 0.05
 local SUNSHROOM_HEAL_VFX_DEBUG = false
+local CARROT_CANNON_ATTACK_DEBUG = false -- 临时调试萝卜加农炮攻击动画事件。
 local warnedProjectileIssues = {}
 local warnedAnimationIssues = {}
 local failedAnimationIds = {}
@@ -1702,7 +1703,16 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
 
             if targetZombieModel and targetHum then
                 if itemDetail.AttackAnimation and itemDetail.AttackAnimation ~= "" then
-                    firePlantVisualEvent(plot, rootPart.Position, "Attack", plant, itemDetail.AttackAnimation, speedMult, plot and plot:GetAttribute("OwnerId"))
+                    local recipientCount = firePlantVisualEvent(plot, rootPart.Position, "Attack", plant, itemDetail.AttackAnimation, speedMult, plot and plot:GetAttribute("OwnerId"))
+                    if CARROT_CANNON_ATTACK_DEBUG and itemDetail.Id == "CarrotCannon" then
+                        print(("[CarrotCannonAttackDebug][Server] attack event plant=%s target=%s animation=%s recipients=%d speed=%.2f"):format(
+                            tostring(plant and plant:GetFullName() or nil),
+                            tostring(targetZombieModel and targetZombieModel.Name or nil),
+                            tostring(itemDetail.AttackAnimation),
+                            recipientCount,
+                            speedMult
+                        ))
+                    end
                 end
 
                 local windUpTime = math.min(0.3, attackInterval * 0.2) / speedMult

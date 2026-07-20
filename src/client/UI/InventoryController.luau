@@ -53,6 +53,28 @@ local function waitChild(parent, childName, path)
     return child
 end
 
+-- 核心 UI 允许慢加载，但不能用无限 WaitForChild 触发 Studio 告警。
+local function waitRequiredChild(parent, childName, path)
+    if not parent then
+        warnMissing(path)
+        return nil
+    end
+
+    local child = parent:FindFirstChild(childName)
+    local nextWarnAt = os.clock() + WAIT_TIMEOUT
+    while not child do
+        if os.clock() >= nextWarnAt then
+            warn("[InventoryController] Waiting for required UI object: " .. tostring(path))
+            nextWarnAt = os.clock() + WAIT_TIMEOUT
+        end
+
+        task.wait(0.25)
+        child = parent:FindFirstChild(childName)
+    end
+
+    return child
+end
+
 local function connectPress(guiObject, callback)
     if not guiObject then
         return
@@ -467,13 +489,13 @@ end
 function InventoryController.Init()
     local Players = game:GetService("Players")
     local player = Players.LocalPlayer
-    local playerGui = player:WaitForChild("PlayerGui")
+    local playerGui = waitRequiredChild(player, "PlayerGui", "Players.LocalPlayer.PlayerGui")
     local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
     local ChestConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ChestConfig"))
     local TitleConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TitleConfig"))
 
-    local basicGui = playerGui:WaitForChild("BasicGui")
-    local inventoryGui = basicGui:WaitForChild("InventoryGui")
+    local basicGui = waitRequiredChild(playerGui, "BasicGui", "PlayerGui.BasicGui")
+    local inventoryGui = waitRequiredChild(basicGui, "InventoryGui", "BasicGui.InventoryGui")
     local mainFrame = waitChild(inventoryGui, "MainFrame", "BasicGui.InventoryGui.MainFrame")
     if not mainFrame then
         return

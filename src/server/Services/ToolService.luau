@@ -233,7 +233,13 @@ function ToolService.Init()
                     end
                 end
 
-                PlayerDataManager.GivePlant(player, targetObj.Name, 1, 1)
+                local pData = PlayerDataManager.GetPlayerData(player)
+                local combatInfo = pData and pData.CombatPlants and pData.CombatPlants[gridName]
+                local shieldInfo = type(combatInfo) == "table" and combatInfo.PumpkinShield or nil
+                local savedShieldMutation = type(shieldInfo) == "table" and tonumber(shieldInfo.Mutation) or nil
+                local mutationLvl = tonumber(targetObj:GetAttribute("MutationLevel")) or savedShieldMutation or 1
+
+                PlayerDataManager.GivePlant(player, targetObj.Name, 1, mutationLvl)
                 PlayerDataManager.RemoveCombatPumpkinShield(player, gridName)
 
                 lawnPart:SetAttribute("PumpkinShield", nil)

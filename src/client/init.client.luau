@@ -45,6 +45,69 @@ local localPlayer = game:GetService("Players").LocalPlayer
 local initialCameraMaxZoomDistance = localPlayer.CameraMaxZoomDistance
 localPlayer.CameraMaxZoomDistance = initialCameraMaxZoomDistance
 
+-- 持续等待核心 UI，避免 Roblox 的无限等待告警，也避免 UI 迟到时直接跳过绑定。
+local function waitForChildEventually(parent, childName, context, warnEverySeconds)
+    if not parent then
+        return nil
+    end
+
+    local child = parent:FindFirstChild(childName)
+    local nextWarnAt = os.clock() + (warnEverySeconds or 10)
+    while not child do
+        if os.clock() >= nextWarnAt then
+            warn(string.format("[Client] Waiting for %s; %s is still missing.", tostring(context or childName), childName))
+            nextWarnAt = os.clock() + (warnEverySeconds or 10)
+        end
+
+        task.wait(0.25)
+        child = parent:FindFirstChild(childName)
+    end
+
+    return child
+end
+
+-- 提前创建全局遮罩层，后续教程/弹窗不用依赖 BasicGui 绑定流程是否已经完成。
+local function ensureGlobalOverlayGui(playerGui)
+    if not playerGui then
+        return nil, nil
+    end
+
+    local overlayGui = playerGui:FindFirstChild("GlobalOverlayGui")
+    if not (overlayGui and overlayGui:IsA("ScreenGui")) then
+        overlayGui = Instance.new("ScreenGui")
+        overlayGui.Name = "GlobalOverlayGui"
+        overlayGui.Parent = playerGui
+    end
+
+    overlayGui.ResetOnSpawn = false
+    overlayGui.DisplayOrder = 90
+    overlayGui.IgnoreGuiInset = true
+    overlayGui.Enabled = true
+
+    local bgOverlay = overlayGui:FindFirstChild("BlackMask")
+    if not (bgOverlay and bgOverlay:IsA("Frame")) then
+        bgOverlay = Instance.new("Frame")
+        bgOverlay.Name = "BlackMask"
+        bgOverlay.Parent = overlayGui
+    end
+
+    bgOverlay.Size = UDim2.new(1, 0, 1, 0)
+    bgOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    bgOverlay.BackgroundTransparency = 1
+    bgOverlay.BorderSizePixel = 0
+    bgOverlay.Active = true
+    bgOverlay.Visible = false
+
+    return overlayGui, bgOverlay
+end
+
+local bootstrapPlayerGui = localPlayer:WaitForChild("PlayerGui", 30)
+if bootstrapPlayerGui then
+    ensureGlobalOverlayGui(bootstrapPlayerGui)
+else
+    warn("[Client] PlayerGui was not found within 30 seconds; some UI controllers may wait for it.")
+end
+
 local VISIBLE_TEXT_TRANSLATIONS = {
     ["蓝色"] = "Blue",
     ["假的"] = "Placeholder",
@@ -153,41 +216,10 @@ end
 task.spawn(function()
     local player = game:GetService("Players").LocalPlayer
 
-    local playerGui = player:WaitForChild("PlayerGui", 10)
-    if not playerGui then
-        warn("[Client] PlayerGui was not found within 10 seconds; skipping global UI effect binding.")
-        return
-    end
+    local playerGui = bootstrapPlayerGui or waitForChildEventually(player, "PlayerGui", "Players.LocalPlayer.PlayerGui", 10)
+    local overlayGui, bgOverlay = ensureGlobalOverlayGui(playerGui)
 
-    local basicGui = playerGui:WaitForChild("BasicGui", 10)
-    if not basicGui then
-        warn("[Client] BasicGui was not found within 10 seconds; skipping global UI effect binding.")
-        return
-    end
-    for _, gui in pairs(basicGui:GetChildren()) do
-        if gui:IsA("ScreenGui") then
-            gui.ResetOnSpawn = false
-            print("Locked UI reset protection for: " .. gui.Name)
-        end
-    end
-
-    local inventoryGui = basicGui:WaitForChild("InventoryGui", 10)
-    local shopGui = basicGui:WaitForChild("ShopGui", 10)
-    local codexGui = basicGui:WaitForChild("Codex", 10)
-    local playProperty = basicGui:WaitForChild("PlayProperty", 10)
-    local levelSelectGui = basicGui:WaitForChild("LevelSelect", 10)
-    if not (inventoryGui and shopGui and codexGui and playProperty) then
-        warn("[Client] One or more BasicGui children were not found; skipping global UI effect binding.")
-        return
-    end
-    if levelSelectGui and levelSelectGui:IsA("ScreenGui") then
-        levelSelectGui.Enabled = false
-    end
-
-    local TWEEN_TIME = 0.4
-    local POS_CENTER = UDim2.new(0.5, 0, 0.5, 0)
-    local POS_BOTTOM = UDim2.new(0.5, 0, 1.5, 0)
-
+    -- 先绑定按钮反馈，后续晚加载的 BasicGui 子节点也会通过 DescendantAdded 补上。
     local function applyGlobalButtonEffect(button)
         if button:IsA("TextButton") or button:IsA("ImageButton") then
             if button:GetAttribute("HoverAnimBound") then return end
@@ -224,6 +256,27 @@ task.spawn(function()
     for _, uiNode in pairs(playerGui:GetDescendants()) do applyGlobalButtonEffect(uiNode) end
     playerGui.DescendantAdded:Connect(applyGlobalButtonEffect)
 
+    local basicGui = waitForChildEventually(playerGui, "BasicGui", "PlayerGui.BasicGui", 10)
+    for _, gui in pairs(basicGui:GetChildren()) do
+        if gui:IsA("ScreenGui") then
+            gui.ResetOnSpawn = false
+            print("Locked UI reset protection for: " .. gui.Name)
+        end
+    end
+
+    local inventoryGui = waitForChildEventually(basicGui, "InventoryGui", "BasicGui.InventoryGui", 10)
+    local shopGui = waitForChildEventually(basicGui, "ShopGui", "BasicGui.ShopGui", 10)
+    local codexGui = waitForChildEventually(basicGui, "Codex", "BasicGui.Codex", 10)
+    local playProperty = waitForChildEventually(basicGui, "PlayProperty", "BasicGui.PlayProperty", 10)
+    local levelSelectGui = basicGui:FindFirstChild("LevelSelect")
+    if levelSelectGui and levelSelectGui:IsA("ScreenGui") then
+        levelSelectGui.Enabled = false
+    end
+
+    local TWEEN_TIME = 0.4
+    local POS_CENTER = UDim2.new(0.5, 0, 0.5, 0)
+    local POS_BOTTOM = UDim2.new(0.5, 0, 1.5, 0)
+
     local blurEffect = Lighting:FindFirstChild("GlobalUIBlur") or Instance.new("BlurEffect", Lighting)
     blurEffect.Name = "GlobalUIBlur"
     blurEffect.Size = 0
@@ -231,21 +284,7 @@ task.spawn(function()
     local camera = Workspace.CurrentCamera
     local defaultFOV = 70
 
-    local overlayGui = Instance.new("ScreenGui")
-    overlayGui.Name = "GlobalOverlayGui"
-    overlayGui.ResetOnSpawn = false
-    overlayGui.DisplayOrder = 90
-    overlayGui.IgnoreGuiInset = true
-    overlayGui.Parent = playerGui
-
-    local bgOverlay = Instance.new("Frame")
-    bgOverlay.Name = "BlackMask"
-    bgOverlay.Size = UDim2.new(1, 0, 1, 0)
-    bgOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    bgOverlay.BackgroundTransparency = 1
-    bgOverlay.Active = true
-    bgOverlay.Visible = false
-    bgOverlay.Parent = overlayGui
+    overlayGui, bgOverlay = ensureGlobalOverlayGui(playerGui)
 
     local x2SunBtn = playProperty:FindFirstChild("X2Sun")
     if x2SunBtn then

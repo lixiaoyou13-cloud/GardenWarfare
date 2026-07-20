@@ -639,8 +639,7 @@ local function grantReward(player, data, gift)
     end
 
     if rewardType == GiftingConfig.RewardTypes.PassShopToken then
-        data.PassShopTokens = math.max(0, math.floor(tonumber(data.PassShopTokens) or 0)) + amount
-        fireInventoryUpdate(player, data)
+        PlayerDataManager.AddPassShopTokens(player, amount)
         return true, buildRewardText(gift)
     end
 
