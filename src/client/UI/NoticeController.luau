@@ -445,13 +445,25 @@ end
 
 local SENTENCE_DELIMITERS = { ".", "!", "?", "。", "！", "？", "\n" }
 
+local function isDecimalPoint(text, index)
+    local prevChar = string.sub(text, index - 1, index - 1)
+    local nextChar = string.sub(text, index + 1, index + 1)
+    return string.match(prevChar, "%d") ~= nil and string.match(nextChar, "%d") ~= nil
+end
+
 local function findNextSentenceDelimiter(text, startIndex)
     local bestStart = nil
     local bestEnd = nil
     local bestDelimiter = nil
 
     for _, delimiter in ipairs(SENTENCE_DELIMITERS) do
-        local delimiterStart, delimiterEnd = string.find(text, delimiter, startIndex, true)
+        local searchStart = startIndex
+        local delimiterStart, delimiterEnd = string.find(text, delimiter, searchStart, true)
+        while delimiter == "." and delimiterStart and isDecimalPoint(text, delimiterStart) do
+            searchStart = delimiterEnd + 1
+            delimiterStart, delimiterEnd = string.find(text, delimiter, searchStart, true)
+        end
+
         if delimiterStart and (not bestStart or delimiterStart < bestStart) then
             bestStart = delimiterStart
             bestEnd = delimiterEnd
