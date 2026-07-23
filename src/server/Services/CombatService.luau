@@ -11,6 +11,50 @@ local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local PlantCombatAI = require(script.Parent.PlantCombatAI)
 local CombatRegistry = require(script.Parent.CombatRegistry)
 
+local TUTORIAL_AUTO_DEPLOY_PLANT_ID = "Peashooter"
+local TUTORIAL_AUTO_DEPLOY_MIN_STEP = 5
+local TUTORIAL_AUTO_DEPLOY_MAX_STEP = 6
+local TUTORIAL_AUTO_DEPLOY_LAWNS = {
+	Lawn2_1 = true,
+	Lawn3_1 = true,
+	Lawn4_1 = true,
+	Lawn5_1 = true,
+	Lawn6_1 = true,
+}
+
+-- 校验新手教程自动补位部署，避免客户端伪造 plantId 免费生成任意植物。
+local function canUseTutorialAutoDeploy(player, lawnName, plantId)
+	if plantId ~= TUTORIAL_AUTO_DEPLOY_PLANT_ID or TUTORIAL_AUTO_DEPLOY_LAWNS[lawnName] ~= true then
+		return false
+	end
+
+	local data = PlayerDataManager.GetPlayerData(player)
+	if type(data) ~= "table" then
+		return false
+	end
+
+	local tutorialStep = math.floor(tonumber(data.TutorialStep) or 0)
+	if tutorialStep < TUTORIAL_AUTO_DEPLOY_MIN_STEP or tutorialStep > TUTORIAL_AUTO_DEPLOY_MAX_STEP then
+		return false
+	end
+
+	local combatPlants = data.CombatPlants
+	if type(combatPlants) ~= "table" then
+		return false
+	end
+
+	for gridName, combatInfo in pairs(combatPlants) do
+		if gridName ~= lawnName
+			and type(combatInfo) == "table"
+			and combatInfo.PlantId == TUTORIAL_AUTO_DEPLOY_PLANT_ID
+		then
+			return true
+		end
+	end
+
+	return false
+end
+
 -- 判断植物是否为南瓜保护罩这类覆盖型防御植物。
 local function isPumpkinShieldPlant(plantId)
 	local detail = ItemConfig.Plants and ItemConfig.Plants[plantId]
@@ -398,6 +442,9 @@ function CombatService.Init()
 	tutorialDeployRE.Parent = ReplicatedStorage
 
 	tutorialDeployRE.OnServerEvent:Connect(function(player, lawnName, plantId)
+		if type(lawnName) ~= "string" or type(plantId) ~= "string" then return end
+		if not canUseTutorialAutoDeploy(player, lawnName, plantId) then return end
+
 		local myPlot = GetPlotService().GetPlayerPlot(player)
 		if not myPlot then return end
 
@@ -405,7 +452,7 @@ function CombatService.Init()
 		local lawnPart = lawnFolder and lawnFolder:FindFirstChild(lawnName)
 		if not lawnPart or lawnPart:GetAttribute("OccupiedBy") then return end
 
-		local itemDetail = ItemConfig.Plants[plantId]
+		local itemDetail = ItemConfig.Plants[TUTORIAL_AUTO_DEPLOY_PLANT_ID]
 		if not itemDetail then return end
 
 		local targetMutation = 1
@@ -413,8 +460,8 @@ function CombatService.Init()
 		local stats = ItemConfig.MutationStats[targetMutation] or ItemConfig.MutationStats[1]
 		local maxHP = math.floor(baseMaxHP * stats.HealthMul)
 
-		SpawnCombatPlant(lawnPart, plantId, maxHP, maxHP, targetMutation)
-		PlayerDataManager.AddCombatPlant(player, lawnPart.Name, plantId, maxHP, targetMutation)
+		SpawnCombatPlant(lawnPart, TUTORIAL_AUTO_DEPLOY_PLANT_ID, maxHP, maxHP, targetMutation)
+		PlayerDataManager.AddCombatPlant(player, lawnPart.Name, TUTORIAL_AUTO_DEPLOY_PLANT_ID, maxHP, targetMutation)
 	end)
 end
 

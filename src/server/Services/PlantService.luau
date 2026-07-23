@@ -647,26 +647,9 @@ function PlantService.Init()
     tutorialPlantRE.Name = "TutorialPlantRE"
     tutorialPlantRE.Parent = ReplicatedStorage
 
-    tutorialPlantRE.OnServerEvent:Connect(function(player, lawnName, plantId)
-        local plot = PlotService.GetPlayerPlot(player)
-        if not plot then return end
-
-        local lawnFolder = plot:FindFirstChild("Lawn")
-        local plantsFolder = plot:FindFirstChild("Plants")
-        local targetLawn = lawnFolder and lawnFolder:FindFirstChild(lawnName)
-
-        local itemDetail = ItemConfig.Seeds[plantId] or ItemConfig.Seeds["Peashooter"]
-
-        if targetLawn and itemDetail then
-            local plantedTime = os.time()
-            PlayerDataManager.UpdatePlantedPlant(player, lawnName, plantId, plantedTime)
-
-            local newPlant = PlantGrowthService.CreateSeedling(plantId, targetLawn, itemDetail, plantedTime, plot, plantsFolder)
-            if newPlant then
-                local prompt = targetLawn:FindFirstChildOfClass("ProximityPrompt")
-                PlantGrowthService.StartPlantGrowth(player, plot, targetLawn, itemDetail, newPlant, prompt, plantsFolder)
-            end
-        end
+    tutorialPlantRE.OnServerEvent:Connect(function()
+        -- 旧教程种植 Remote 已废弃；保留对象但拒绝执行，避免客户端伪造免费种植。
+        return
     end)
 end
 

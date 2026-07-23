@@ -6,6 +6,19 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- Each notice creates one tag button in Notice.TypeButtons.
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
+    -- 2026/7/23 更新公告：修复南瓜罩偶尔不保护内部植物的问题。
+    {
+        Id = "notice-2026-07-23",
+        TagText = "2026/7/23",
+        PublishedAt = "2026-07-23",
+        Title = "July 23 Bug Fixes",
+        Sections = {
+            {
+                Title = "Bug Fixes",
+                Content = "Fixed an issue where Pumpkin Shield could occasionally fail to protect the plant underneath it.",
+            },
+        },
+    },
     {
         Id = "notice-2026-07-21",
         TagText = "2026/7/21",

@@ -21,8 +21,8 @@ local FriendSunBoostService = require(script.Parent.Services.FriendSunBoostServi
 -- 引入签到奖励配置
 local SignInRewardConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SignInRewardConfig"))
 
--- local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
-local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V20")
+local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V18")
+-- local PlayerDataStore = DataStoreService:GetDataStore("MyGameData_V22")
 local sessionData = {}
 local dataSaveAllowed = {}
 local saveQueueState = {}
