@@ -58,6 +58,25 @@ local function collectVisualRecipients(ownerUserId, originPosition)
     return recipients
 end
 
+-- 查找南瓜罩同格内的主战斗植物，用于铲除南瓜时保留格子占用。
+local function findInnerCombatPlant(lawnPart, shieldModel)
+    if not lawnPart then
+        return nil
+    end
+
+    for _, child in ipairs(lawnPart:GetChildren()) do
+        if child ~= shieldModel
+            and child:IsA("Model")
+            and child:GetAttribute("IsCombatPlant") == true
+            and child:GetAttribute("IsPumpkinShield") ~= true
+        then
+            return child
+        end
+    end
+
+    return nil
+end
+
 local function fireToolVisualEvent(ownerUserId, originPosition, ...)
     for _, player in ipairs(collectVisualRecipients(ownerUserId, originPosition)) do
         plantAttackVisualRE:FireClient(player, ...)
@@ -243,7 +262,12 @@ function ToolService.Init()
                 PlayerDataManager.RemoveCombatPumpkinShield(player, gridName)
 
                 lawnPart:SetAttribute("PumpkinShield", nil)
-                if targetObj:GetAttribute("OccupiesEmptyGrid") == true or lawnPart:GetAttribute("OccupiedBy") == targetObj.Name then
+                local innerPlant = findInnerCombatPlant(lawnPart, targetObj)
+                if innerPlant then
+                    lawnPart:SetAttribute("OccupiedBy", innerPlant:GetAttribute("PlantId") or innerPlant.Name)
+                    local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt then prompt.Enabled = false end
+                elseif targetObj:GetAttribute("OccupiesEmptyGrid") == true or lawnPart:GetAttribute("OccupiedBy") == targetObj.Name then
                     lawnPart:SetAttribute("OccupiedBy", nil)
                     local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")
                     if prompt then prompt.Enabled = true end

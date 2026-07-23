@@ -446,11 +446,19 @@ function CombatRegistry.FindBlockingPlantInFront(plot, rowNum, origin, direction
             local sameDistance = distance and math.abs(distance - nearestDistance) <= 0.1
             local sameGrid = nearestRecord
                 and record.Model:GetAttribute("GridName") == nearestRecord.Model:GetAttribute("GridName")
-            if distance and (
-                distance < nearestDistance
-                or (sameDistance and priority > nearestPriority)
-                or (sameGrid and priority > nearestPriority and distance <= nearestDistance + 3)
-            ) then
+
+            local shouldReplace = false
+            if distance then
+                if sameGrid and priority ~= nearestPriority then
+                    -- 同一格内南瓜罩必须优先于内部植物，不受模型 RootPart 偏移影响。
+                    shouldReplace = priority > nearestPriority
+                else
+                    shouldReplace = distance < nearestDistance
+                        or (sameDistance and priority > nearestPriority)
+                end
+            end
+
+            if shouldReplace then
                 nearestRecord = record
                 nearestDistance = distance
                 nearestPriority = priority

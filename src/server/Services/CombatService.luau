@@ -27,6 +27,19 @@ local function isPumpkinShieldOnlyLawn(lawnPart)
 	return occupiedBy == nil or isPumpkinShieldPlant(occupiedBy)
 end
 
+-- 清理空地南瓜转为保护普通植物后的占空标记。
+local function clearPumpkinShieldEmptyOccupancy(lawnPart)
+	if not (lawnPart and lawnPart:GetAttribute("PumpkinShield")) then
+		return
+	end
+
+	for _, child in ipairs(lawnPart:GetChildren()) do
+		if child:IsA("Model") and child:GetAttribute("IsPumpkinShield") == true then
+			child:SetAttribute("OccupiesEmptyGrid", nil)
+		end
+	end
+end
+
 -- 通过配置里的模型名查找植物模型，兼容配置 ID 和资源命名不一致的植物。
 local function findPlantModelTemplate(itemModelsFolder, plantId, itemDetail)
 	if not itemModelsFolder then
@@ -200,6 +213,7 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 		end
 	else
 		lawnPart:SetAttribute("OccupiedBy", plantId)
+		clearPumpkinShieldEmptyOccupancy(lawnPart)
 	end
 
 	local prompt = lawnPart:FindFirstChildOfClass("ProximityPrompt")

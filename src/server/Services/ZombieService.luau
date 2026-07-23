@@ -984,6 +984,33 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player, options)
                 and isPlantInZombieLane(plantModel)
         end
 
+        -- 扣血前再次确认同格南瓜罩，避免模型偏移或排序异常时打穿内部植物。
+        local function resolvePumpkinProtectedTarget(targetPlant)
+            if not isPlantDamageTargetValid(targetPlant) then
+                return nil
+            end
+
+            if targetPlant:GetAttribute("IsPumpkinShield") == true then
+                return targetPlant
+            end
+
+            local lawnPart = targetPlant.Parent
+            if not (lawnPart and lawnPart:IsA("BasePart")) then
+                return targetPlant
+            end
+
+            for _, child in ipairs(lawnPart:GetChildren()) do
+                if child:IsA("Model")
+                    and child:GetAttribute("IsPumpkinShield") == true
+                    and isPlantDamageTargetValid(child)
+                then
+                    return child
+                end
+            end
+
+            return targetPlant
+        end
+
         local function waitGameSeconds(duration, plantModel)
             local targetDuration = math.max(0, tonumber(duration) or 0)
             local elapsed = 0
@@ -1006,7 +1033,8 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player, options)
         end
 
         local function damageTargetPlant(targetPlant)
-            if not isPlantDamageTargetValid(targetPlant) then
+            targetPlant = resolvePumpkinProtectedTarget(targetPlant)
+            if not targetPlant then
                 return false
             end
 
@@ -1185,62 +1213,7 @@ function ZombieService.SpawnZombie(plot, rowNum, zombieId, player, options)
 
                     timeAccumulated = 0
 
-                    local currentPlantHP = targetPlant:GetAttribute("Health") or 0
-                    -- 使用经过 38% 倍率放大的最终攻击力
-                    currentPlantHP = currentPlantHP - finalAttack
-                    local plantDetail = ItemConfig.Plants[targetPlant.Name]
-                    if plantDetail and plantDetail.ReactiveOnDamaged then
-                        PlantCombatAI.TriggerDamagedReactiveAttack(
-                            targetPlant,
-                            plantDetail,
-                            targetPlant:GetAttribute("MutationLevel") or 1,
-                            plot
-                        )
-                    end
-
-                    targetPlant:SetAttribute("Health", currentPlantHP)
-
-                    local gridName = targetPlant:GetAttribute("GridName")
-                    if gridName and player then
-                        PlayerDataManager.UpdateCombatPlantHP(player, gridName, currentPlantHP)
-                    end
-
-                    flashPlantRed(targetPlant)
-                    for _, p in pairs(EMPTY_LIST) do
-                        if p:IsA("BasePart") then
-                            if not p:GetAttribute("OriginalColor") then
-                                p:SetAttribute("OriginalColor", p.Color)
-                            end
-                            p.Color = Color3.fromRGB(255, 50, 50)
-
-                            task.delay(0.15, function()
-                                if p and p.Parent then
-                                    p.Color = p:GetAttribute("OriginalColor")
-                                end
-                            end)
-                        end
-                    end
-
-                    if currentPlantHP <= 0 then
-                        targetPlant:SetAttribute("IsDead", true)
-                        CombatRegistry.UnregisterPlant(targetPlant)
-                        hidePlantVisuals(targetPlant)
-
-                        for _, p in pairs(EMPTY_LIST) do
-                            if p:IsA("BasePart") then
-                                -- 只有在没有初始记录的情况下才记录，防止把受击过程中的中间状态记下来
-                                if p:GetAttribute("OriginalTransparency") == nil then
-                                    p:SetAttribute("OriginalTransparency", p.Transparency)
-                                end
-                                p.Transparency = 1 -- 死亡消失
-                            elseif p:IsA("ParticleEmitter") or p:IsA("Light") or p:IsA("Beam") or p:IsA("Highlight") or p:IsA("Trail") then
-                                if p:GetAttribute("OriginalEnabled") == nil then
-                                    p:SetAttribute("OriginalEnabled", p.Enabled)
-                                end
-                                p.Enabled = false
-                            end
-                        end
-                    end
+                    damageTargetPlant(targetPlant)
                 end
             else
                 humanoid.WalkSpeed = config.Speed * speedMult * slowMultiplier
