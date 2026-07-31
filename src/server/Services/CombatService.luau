@@ -269,7 +269,7 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 	if itemDetail.CanAttack then
 		PlantCombatAI.StartShooterAI(newFighter, itemDetail, mutationLevel, plot)
 	else
-		PlantCombatAI.StartIdleAnimation(newFighter, itemDetail)
+		PlantCombatAI.StartIdleAnimation(newFighter, itemDetail, plot)
 	end
 	if type(itemDetail.FrontHeal) == "table" then
 		PlantCombatAI.StartFrontHealAI(newFighter, itemDetail, mutationLevel, plot)

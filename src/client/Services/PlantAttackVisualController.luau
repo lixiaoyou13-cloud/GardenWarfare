@@ -31,6 +31,8 @@ local CARROT_CANNON_DEBUG_PRINT_LIMIT = 120
 local CARROT_CANNON_DEBUG_MOTOR_NAMES = { "luobo ", "chelun1", "chelun2", "chetoupao" }
 
 local attackTracks = setmetatable({}, { __mode = "k" })
+local activeMarkerProjectileContexts = setmetatable({}, { __mode = "k" })
+local timedPlantVFXTokens = setmetatable({}, { __mode = "k" })
 local flashingZombies = setmetatable({}, { __mode = "k" })
 local warnedProjectileIssues = {}
 local warnedAnimationIssues = {}
@@ -48,6 +50,7 @@ local activeProjectileCounts = {
 }
 local visualConnection = nil
 local carrotCannonDebugPrintCount = 0
+local fireMarkerProjectileShot = nil
 local visualSettings = {
     EffectsSelf = true,
     EffectsOthers = true,
@@ -341,6 +344,7 @@ local function cleanupAttackTrack(plant)
     if not cached then return end
 
     if cached.markerConnection then cached.markerConnection:Disconnect() end
+    if cached.fireMarkerConnection then cached.fireMarkerConnection:Disconnect() end
     if cached.cleanupConnection then cached.cleanupConnection:Disconnect() end
     if cached.track then
         cached.track:Stop(0.05)
@@ -348,6 +352,31 @@ local function cleanupAttackTrack(plant)
     end
 
     attackTracks[plant] = nil
+end
+
+local function cleanupMarkerProjectileContext(plant, expectedContext)
+    local context = activeMarkerProjectileContexts[plant]
+    if not context or (expectedContext and context ~= expectedContext) then
+        return
+    end
+
+    activeMarkerProjectileContexts[plant] = nil
+    for _, connection in ipairs(context.Connections or {}) do
+        connection:Disconnect()
+    end
+    context.Connections = nil
+end
+
+local function isMarkerProjectilePlantActive(plant)
+    if not plant or not plant.Parent then
+        return false
+    end
+    if plant:GetAttribute("IsCombatPlant") ~= true or plant:GetAttribute("IsDead") == true then
+        return false
+    end
+
+    local health = tonumber(plant:GetAttribute("Health"))
+    return health == nil or health > 0
 end
 
 local function countAttackTracks()
@@ -594,7 +623,7 @@ local function debugCarrotCannonMotors(plant, label, track, animationId)
     printCarrotCannonDebug(tostring(label) .. " | " .. table.concat(parts, " | "))
 end
 
-local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
+local function playAttackAnimation(plant, animationId, speedMult, ownerUserId, attackToken)
     local debugCarrot = shouldDebugCarrotCannonAttack(plant, animationId)
     if not plant or not plant.Parent then
         if debugCarrot then
@@ -694,8 +723,17 @@ local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
 
         cached.markerConnection = track:GetMarkerReachedSignal("VFX"):Connect(function()
             local currentOwnerId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
-            if plant and plant.Parent and areEffectsEnabled(currentOwnerId) then
+            local plantId = plant and (plant:GetAttribute("PlantId") or plant.Name)
+            if plantId ~= "GloomShroom"
+                and plant and plant.Parent and areEffectsEnabled(currentOwnerId)
+            then
                 EffectUtil.PlayAttackVFX(plant)
+            end
+        end)
+
+        cached.fireMarkerConnection = track:GetMarkerReachedSignal("Fire"):Connect(function()
+            if fireMarkerProjectileShot then
+                fireMarkerProjectileShot(plant, cached.attackToken, true)
             end
         end)
 
@@ -718,6 +756,7 @@ local function playAttackAnimation(plant, animationId, speedMult, ownerUserId)
 
     cached.ownerUserId = ownerUserId
     cached.lastUsedAt = os.clock()
+    cached.attackToken = attackToken
     if debugCarrot then
         printCarrotCannonDebug(("play plant=%s animation=%s owner=%s speed=%.2f"):format(
             tostring(plant:GetFullName()),
@@ -773,6 +812,49 @@ local function playPlantVFX(plant, ownerUserId)
     if effectsEnabled then
         EffectUtil.PlayAttackVFX(plant)
     end
+end
+
+-- 在一次攻击动作期间重复喷发模型内 VFX；新 token 会让上一轮任务立即失效。
+local function playTimedPlantVFX(plant, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId)
+    if not plant or not plant.Parent then
+        return
+    end
+
+    local token = (timedPlantVFXTokens[plant] or 0) + 1
+    timedPlantVFXTokens[plant] = token
+
+    delaySeconds = math.max(0, tonumber(delaySeconds) or 0)
+    durationSeconds = math.max(0, tonumber(durationSeconds) or 0)
+    pulseInterval = math.max(0.01, tonumber(pulseInterval) or 0.1)
+    speedMult = math.max(0.01, tonumber(speedMult) or 1)
+    ownerUserId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
+
+    task.spawn(function()
+        if delaySeconds > 0 then
+            task.wait(delaySeconds / speedMult)
+        end
+
+        local elapsed = 0
+        while elapsed <= durationSeconds do
+            if timedPlantVFXTokens[plant] ~= token
+                or not plant.Parent
+                or plant:GetAttribute("IsCombatPlant") ~= true
+                or plant:GetAttribute("IsDead") == true
+                or (tonumber(plant:GetAttribute("Health")) or 0) <= 0
+                or not areEffectsEnabled(ownerUserId)
+            then
+                break
+            end
+
+            EffectUtil.PlayAttackVFX(plant)
+            task.wait(pulseInterval / speedMult)
+            elapsed += pulseInterval
+        end
+
+        if timedPlantVFXTokens[plant] == token then
+            timedPlantVFXTokens[plant] = nil
+        end
+    end)
 end
 
 local function getProjectileParts(projectile)
@@ -1032,6 +1114,136 @@ local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPo
         end
 
         finishProjectile()
+    end)
+end
+
+local function getMarkerProjectileFireCFrame(plant)
+    if not plant or not plant.Parent then
+        return nil
+    end
+
+    local posNode = plant:FindFirstChild("pos", true) or plant:FindFirstChild("Pos", true)
+    if posNode then
+        if posNode:IsA("Attachment") then
+            return posNode.WorldCFrame
+        elseif posNode:IsA("BasePart") then
+            return posNode.CFrame
+        end
+    end
+
+    local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+    return rootPart and (rootPart.CFrame * CFrame.new(0, 1.5, -1.5)) or nil
+end
+
+fireMarkerProjectileShot = function(plant, attackToken, fromMarker)
+    local context = activeMarkerProjectileContexts[plant]
+    if not context or context.AttackToken ~= attackToken then
+        return false
+    end
+    if fromMarker and context.InFallback then
+        return false
+    end
+    if not isMarkerProjectilePlantActive(plant) then
+        cleanupMarkerProjectileContext(plant, context)
+        return false
+    end
+    if context.FiredCount >= context.ExpectedCount then
+        cleanupMarkerProjectileContext(plant, context)
+        return false
+    end
+
+    local fireCFrame = getMarkerProjectileFireCFrame(plant)
+    if not fireCFrame then
+        cleanupMarkerProjectileContext(plant, context)
+        return false
+    end
+
+    context.FiredCount += 1
+    spawnProjectileVisual(
+        context.ProjectileName,
+        fireCFrame,
+        context.TargetPosition,
+        context.TargetZombieModel,
+        context.ArcHeight,
+        context.SpeedMult,
+        context.OwnerUserId,
+        nil
+    )
+
+    if context.FiredCount >= context.ExpectedCount then
+        cleanupMarkerProjectileContext(plant, context)
+    end
+    return true
+end
+
+local function startMarkerProjectileBatch(plant, contextData)
+    if not isMarkerProjectilePlantActive(plant) or type(contextData) ~= "table" then
+        cleanupMarkerProjectileContext(plant)
+        return
+    end
+
+    local attackToken = tonumber(contextData.AttackToken)
+    local projectileName = contextData.ProjectileName
+    local targetPosition = contextData.TargetPosition
+    if not attackToken
+        or contextData.MarkerName ~= "Fire"
+        or type(projectileName) ~= "string"
+        or projectileName == ""
+        or typeof(targetPosition) ~= "Vector3"
+    then
+        cleanupMarkerProjectileContext(plant)
+        return
+    end
+
+    cleanupMarkerProjectileContext(plant)
+    local context = {
+        AttackToken = attackToken,
+        MarkerName = contextData.MarkerName,
+        ExpectedCount = math.max(1, math.floor(tonumber(contextData.ExpectedCount) or 1)),
+        FallbackInterval = math.max(0, tonumber(contextData.FallbackInterval) or 0),
+        FallbackTimeout = math.max(0, tonumber(contextData.FallbackTimeout) or 0.35),
+        FallbackStartDelay = math.max(0, tonumber(contextData.FallbackStartDelay) or 0),
+        ProjectileName = projectileName,
+        TargetZombieModel = contextData.TargetZombieModel,
+        TargetPosition = targetPosition,
+        ArcHeight = tonumber(contextData.ArcHeight) or 0,
+        SpeedMult = math.max(0.01, tonumber(contextData.SpeedMult) or 1),
+        OwnerUserId = tonumber(contextData.OwnerUserId),
+        FiredCount = 0,
+        InFallback = false,
+        Connections = {},
+    }
+    activeMarkerProjectileContexts[plant] = context
+
+    local function cleanupIfPlantStopped()
+        if not isMarkerProjectilePlantActive(plant) then
+            cleanupMarkerProjectileContext(plant, context)
+        end
+    end
+
+    table.insert(context.Connections, plant.AncestryChanged:Connect(cleanupIfPlantStopped))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("Health"):Connect(cleanupIfPlantStopped))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsDead"):Connect(cleanupIfPlantStopped))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsCombatPlant"):Connect(cleanupIfPlantStopped))
+
+    local cached = attackTracks[plant]
+    local hasMatchingTrack = cached and cached.track and cached.attackToken == attackToken
+    local fallbackDelay = hasMatchingTrack and context.FallbackTimeout or context.FallbackStartDelay
+    task.delay(fallbackDelay / context.SpeedMult, function()
+        if activeMarkerProjectileContexts[plant] ~= context or not isMarkerProjectilePlantActive(plant) then
+            cleanupMarkerProjectileContext(plant, context)
+            return
+        end
+
+        context.InFallback = true
+        while activeMarkerProjectileContexts[plant] == context and context.FiredCount < context.ExpectedCount do
+            if not fireMarkerProjectileShot(plant, attackToken, false) then
+                break
+            end
+            if activeMarkerProjectileContexts[plant] == context and context.FiredCount < context.ExpectedCount then
+                task.wait(context.FallbackInterval / context.SpeedMult)
+            end
+        end
     end)
 end
 
@@ -1603,10 +1815,14 @@ function PlantAttackVisualController.Init()
     visualConnection = visualRE.OnClientEvent:Connect(function(action, ...)
         if action == "Attack" then
             playAttackAnimation(...)
+        elseif action == "PlantVFXTimed" then
+            playTimedPlantVFX(...)
         elseif action == "PlantVFX" then
             playPlantVFX(...)
         elseif action == "Projectile" then
             spawnProjectileVisual(...)
+        elseif action == "MarkerProjectileBatch" then
+            startMarkerProjectileBatch(...)
         elseif action == "Hit" then
             playHitVisual(...)
         elseif action == "DamageText" then

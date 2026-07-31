@@ -2,6 +2,7 @@ local ZombossShopConfig = {}
 
 ZombossShopConfig.RefreshIntervalSeconds = 12 * 60 * 60
 ZombossShopConfig.BossSpawnIntervalSeconds = 30 * 60
+ZombossShopConfig.BossEventEnabled = false -- 僵王 Boss 定时事件总开关；临时关闭时不再自动拉起入场和 Boss 战。
 
 ZombossShopConfig.RemoteNames = {
     GetState = "GetZombossShopStateRF",
@@ -64,12 +65,25 @@ function ZombossShopConfig.GetRefreshAt(now)
     return (ZombossShopConfig.GetCurrentWindowId(now) + 1) * ZombossShopConfig.RefreshIntervalSeconds
 end
 
+function ZombossShopConfig.IsBossEventEnabled()
+    return ZombossShopConfig.BossEventEnabled == true
+end
+
 function ZombossShopConfig.GetBossSpawnWindowId(now)
+    if not ZombossShopConfig.IsBossEventEnabled() then
+        return nil
+    end
+
     return math.floor((tonumber(now) or os.time()) / ZombossShopConfig.BossSpawnIntervalSeconds)
 end
 
 function ZombossShopConfig.GetNextBossSpawnAt(now)
-    return (ZombossShopConfig.GetBossSpawnWindowId(now) + 1) * ZombossShopConfig.BossSpawnIntervalSeconds
+    local windowId = ZombossShopConfig.GetBossSpawnWindowId(now)
+    if not windowId then
+        return nil
+    end
+
+    return (windowId + 1) * ZombossShopConfig.BossSpawnIntervalSeconds
 end
 
 function ZombossShopConfig.GetOffer(offerId)

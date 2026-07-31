@@ -151,6 +151,25 @@ local function getFrontHealAmount(plantConfig, mutationLevel)
     return math.max(1, math.floor(baseHeal * healMul + 0.5))
 end
 
+-- 直接读取全局僵尸易伤光环配置，UI 不重复维护战斗数值。
+local function getGlobalZombieDamageTakenBonusText(plantConfig, mutationLevel)
+    local auraConfig = plantConfig and plantConfig.GlobalZombieDamageTakenAura
+    local bonusByMutation = auraConfig and auraConfig.BonusByMutation
+    if type(bonusByMutation) ~= "table" then
+        return nil
+    end
+
+    local level = tonumber(mutationLevel) or 1
+    local bonus = tonumber(bonusByMutation[level])
+    if not bonus then
+        return nil
+    end
+
+    local percentText = string.format("%.2f", math.max(0, bonus) * 100)
+    percentText = percentText:gsub("0+$", ""):gsub("%.$", "")
+    return percentText
+end
+
 function PlantHoverController.Init()
     local player = Players.LocalPlayer
     local mouse = player:GetMouse()
@@ -270,6 +289,7 @@ function PlantHoverController.Init()
     -- 动态逻辑处理
     local currentTarget = nil
     local hpConnection = nil
+    local mutationConnection = nil
     local lastHoverUpdate = 0
 
     local function updateUI()
@@ -338,9 +358,15 @@ function PlantHoverController.Init()
             nameLabel.Position = UDim2.new(0, 0, 0.35, 0)
             barBg.Position = UDim2.new(0.075, 0, 0.75, 0)
         else
-            -- 无攻击力（如向日葵）：隐藏 DPS，缩减面板高度 (58)
+            -- 无普通攻击时按支持能力决定是否复用顶部属性行。
+            local globalDamageBonusText = plantId == "Clover"
+                and getGlobalZombieDamageTakenBonusText(plantConfig, mutationLevel)
+                or nil
             local ownAuraConfig = plantConfig and plantConfig.AttackBuffAura
-            if type(ownAuraConfig) == "table" then
+            if globalDamageBonusText then
+                dpsLabel.Text = "伤害增幅: " .. globalDamageBonusText .. "%"
+                dpsLabel.Visible = true
+            elseif type(ownAuraConfig) == "table" then
                 local auraMultiplier = getAuraDamageMultiplier(ownAuraConfig, mutationLevel)
                 local bonusPercent = math.max(0, math.floor((auraMultiplier - 1) * 100 + 0.5))
                 dpsLabel.Text = "Buff: +" .. tostring(bonusPercent) .. "%"
@@ -350,7 +376,8 @@ function PlantHoverController.Init()
             end
 
             -- 动态面板大小与位置，消除空白
-            local compactHeight = type(ownAuraConfig) == "table" and 83 or 58
+            local showsSupportStat = globalDamageBonusText ~= nil or type(ownAuraConfig) == "table"
+            local compactHeight = showsSupportStat and 83 or 58
             bgFrame.Size = UDim2.new(1, 0, 0, compactHeight)
             bgFrame.Position = UDim2.new(0, 0, 1, -58) -- 面板整体上移
 
@@ -358,7 +385,7 @@ function PlantHoverController.Init()
             nameLabel.Position = UDim2.new(0, 0, 0.15, 0)
             barBg.Position = UDim2.new(0.075, 0, 0.62, 0)
             bgFrame.Position = UDim2.new(0, 0, 1, -compactHeight)
-            if type(ownAuraConfig) == "table" then
+            if showsSupportStat then
                 nameLabel.Position = UDim2.new(0, 0, 0.35, 0)
                 barBg.Position = UDim2.new(0.075, 0, 0.75, 0)
             end
@@ -386,7 +413,9 @@ function PlantHoverController.Init()
                 billboard.Adornee = foundPlant.PrimaryPart or foundPlant:FindFirstChildWhichIsA("BasePart") or foundPlant
                 billboard.Enabled = true
                 if hpConnection then hpConnection:Disconnect() end
+                if mutationConnection then mutationConnection:Disconnect() end
                 hpConnection = currentTarget:GetAttributeChangedSignal("Health"):Connect(updateUI)
+                mutationConnection = currentTarget:GetAttributeChangedSignal("MutationLevel"):Connect(updateUI)
                 updateUI()
                 lastHoverUpdate = os.clock()
             elseif os.clock() - lastHoverUpdate >= HOVER_REFRESH_INTERVAL then
@@ -399,6 +428,7 @@ function PlantHoverController.Init()
                 billboard.Enabled = false
                 billboard.Adornee = nil
                 if hpConnection then hpConnection:Disconnect(); hpConnection = nil end
+                if mutationConnection then mutationConnection:Disconnect(); mutationConnection = nil end
             end
         end
     end)

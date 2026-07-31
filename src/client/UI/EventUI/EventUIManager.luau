@@ -157,7 +157,11 @@ local function formatRefreshTime(seconds)
     return string.format("Shop refreshes in %02d:%02d:%02d", hours, minutes, remainingSeconds)
 end
 
-local function formatBossAppearTime(seconds)
+local function formatBossAppearTime(seconds, isEnabled)
+    if isEnabled == false then
+        return "Dr. Zomboss is temporarily unavailable."
+    end
+
     seconds = math.max(0, math.floor(tonumber(seconds) or 0))
     local hours = math.floor(seconds / 3600)
     local minutes = math.floor((seconds % 3600) / 60)
@@ -165,7 +169,11 @@ local function formatBossAppearTime(seconds)
     return string.format("Dr. Zomboss will appear in %02d:%02d:%02d", hours, minutes, remainingSeconds)
 end
 
-local function formatBossAppearHudTime(seconds)
+local function formatBossAppearHudTime(seconds, isEnabled)
+    if isEnabled == false then
+        return "Dr. Zomboss: Offline"
+    end
+
     seconds = math.max(0, math.floor(tonumber(seconds) or 0))
     local hours = math.floor(seconds / 3600)
     local minutes = math.floor((seconds % 3600) / 60)
@@ -176,6 +184,8 @@ end
 local function buildFallbackZombossState()
     local now = os.time()
     local offers = {}
+    local bossEventEnabled = ZombossShopConfig.IsBossEventEnabled()
+    local nextBossSpawnAt = bossEventEnabled and ZombossShopConfig.GetNextBossSpawnAt(now) or nil
 
     for _, offerId in ipairs(ZombossShopConfig.OfferOrder or {}) do
         local offer = ZombossShopConfig.GetOffer(offerId)
@@ -197,8 +207,9 @@ local function buildFallbackZombossState()
         RefreshAt = ZombossShopConfig.GetRefreshAt(now),
         RefreshRemainingSeconds = math.max(0, ZombossShopConfig.GetRefreshAt(now) - now),
         ServerNow = now,
-        NextBossSpawnAt = ZombossShopConfig.GetNextBossSpawnAt(now),
-        BossSpawnRemainingSeconds = math.max(0, ZombossShopConfig.GetNextBossSpawnAt(now) - now),
+        BossEventEnabled = bossEventEnabled,
+        NextBossSpawnAt = nextBossSpawnAt,
+        BossSpawnRemainingSeconds = nextBossSpawnAt and math.max(0, nextBossSpawnAt - now) or nil,
         Offers = offers,
     }
 end
@@ -236,6 +247,7 @@ function EventUIManager.Init()
     local banner = zombossShop and zombossShop:FindFirstChild("Banner")
     local timeText = findNamedTextObject(banner, "Time")
     local drTimeText = findNamedTextObject(banner, "DrTime")
+    local bossEventEnabled = ZombossShopConfig.IsBossEventEnabled()
     local nextBossSpawnAt = nil
     local serverTimeOffsetSeconds = 0
 
@@ -260,6 +272,16 @@ function EventUIManager.Init()
     end
 
     local function updateBossAppearCountdownText()
+        if bossEventEnabled == false then
+            if drTimeText then
+                drTimeText.Text = formatBossAppearTime(nil, false)
+            end
+            if eventTimeText then
+                eventTimeText.Text = formatBossAppearHudTime(nil, false)
+            end
+            return nil
+        end
+
         local remaining = 0
         local serverNow = os.time() + serverTimeOffsetSeconds
         if nextBossSpawnAt then
@@ -267,10 +289,10 @@ function EventUIManager.Init()
         end
 
         if drTimeText then
-            drTimeText.Text = formatBossAppearTime(remaining)
+            drTimeText.Text = formatBossAppearTime(remaining, true)
         end
         if eventTimeText then
-            eventTimeText.Text = formatBossAppearHudTime(remaining)
+            eventTimeText.Text = formatBossAppearHudTime(remaining, true)
         end
 
         return remaining
@@ -308,10 +330,15 @@ function EventUIManager.Init()
         if not refreshAt then
             refreshAt = os.time() + math.max(0, math.floor(tonumber(state.RefreshRemainingSeconds) or 0))
         end
-        nextBossSpawnAt = tonumber(state.NextBossSpawnAt)
-        if not nextBossSpawnAt then
-            local serverNow = os.time() + serverTimeOffsetSeconds
-            nextBossSpawnAt = serverNow + math.max(0, math.floor(tonumber(state.BossSpawnRemainingSeconds) or 0))
+        bossEventEnabled = state.BossEventEnabled ~= false
+        if bossEventEnabled then
+            nextBossSpawnAt = tonumber(state.NextBossSpawnAt)
+            if not nextBossSpawnAt then
+                local serverNow = os.time() + serverTimeOffsetSeconds
+                nextBossSpawnAt = serverNow + math.max(0, math.floor(tonumber(state.BossSpawnRemainingSeconds) or 0))
+            end
+        else
+            nextBossSpawnAt = nil
         end
 
         updateTacoText()

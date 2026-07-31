@@ -46,6 +46,15 @@ local lastStartedBossWindowId = nil
 local remoteEvent = nil
 local studioTestChatConnections = {}
 
+-- 读取共享配置里的僵王事件总开关，方便临时关闭整套入场和 Boss 战。
+local function isBossEventEnabled()
+    if type(ZombossShopConfig.IsBossEventEnabled) == "function" then
+        return ZombossShopConfig.IsBossEventEnabled()
+    end
+
+    return ZombossShopConfig.BossEventEnabled ~= false
+end
+
 local function getOrCreateRemoteEvent()
     local existing = ReplicatedStorage:FindFirstChild(REMOTE_NAME)
     if existing then
@@ -458,6 +467,10 @@ local function waitForAnyReadyPlot()
 end
 
 local function runIntro(bossWindowId)
+    if not isBossEventEnabled() then
+        return
+    end
+
     if bossWindowId ~= nil then
         if lastStartedBossWindowId == bossWindowId then
             return
@@ -648,6 +661,11 @@ end
 
 function ZombossIntroService.Init()
     remoteEvent = getOrCreateRemoteEvent()
+    if not isBossEventEnabled() then
+        print("[ZombossIntroService] Zomboss boss event is disabled by config.")
+        return
+    end
+
     if RunService:IsStudio() then
         for _, player in ipairs(Players:GetPlayers()) do
             bindStudioTestCommand(player)

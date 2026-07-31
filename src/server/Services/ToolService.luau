@@ -573,11 +573,16 @@ function ToolService.Init()
                 local targetModel = target.Model
                 local targetHum = target.Humanoid
                 if targetModel and targetHum and targetHum.Health > 0 then
-                    targetHum.Health = math.max(0, targetHum.Health - damage)
+                    local didDamage, finalDamage = PlantCombatAI.ApplyPlantDamageToZombie(
+                        plot,
+                        targetModel,
+                        damage,
+                        player.UserId
+                    )
 
-                        -- 伤害飘字
-                    if PlantCombatAI.ShowDamageText then
-                        PlantCombatAI.ShowDamageText(targetModel, damage)
+                    -- 仅植物投掷爆炸享受 Clover 增伤；铲子/武器近战保持原伤害。
+                    if didDamage and PlantCombatAI.ShowDamageText then
+                        PlantCombatAI.ShowDamageText(targetModel, finalDamage)
                     end
                 end
             end

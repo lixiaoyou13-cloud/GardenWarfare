@@ -79,6 +79,25 @@ local function formatStatNumber(value)
     return NumberFormatUtil.FormatNumber(math.max(0, math.floor((tonumber(value) or 0) + 0.5)))
 end
 
+-- 图鉴直接读取 Clover 光环配置，避免与实际战斗增幅出现两套数值。
+local function getGlobalZombieDamageTakenBonusText(plantDetail, mutationLevel)
+    local auraConfig = plantDetail and plantDetail.GlobalZombieDamageTakenAura
+    local bonusByMutation = auraConfig and auraConfig.BonusByMutation
+    if type(bonusByMutation) ~= "table" then
+        return nil
+    end
+
+    local level = tonumber(mutationLevel) or 1
+    local bonus = tonumber(bonusByMutation[level])
+    if not bonus then
+        return nil
+    end
+
+    local percentText = string.format("%.2f", math.max(0, bonus) * 100)
+    percentText = percentText:gsub("0+$", ""):gsub("%.$", "")
+    return percentText
+end
+
 local function isMutationUnlocked(unlockedMutations, plantId, mutationLevel)
     local mutationMap = type(unlockedMutations) == "table" and unlockedMutations[plantId]
     if type(mutationMap) ~= "table" then
@@ -376,7 +395,12 @@ function EncyclopediaController.Init()
             detailHpText.Text = "HP: " .. tostring(finalHp)
         end
         if detailDpsText and detailDpsText:IsA("TextLabel") then
-            if finalHeal then
+            local globalDamageBonusText = plantId == "Clover"
+                and getGlobalZombieDamageTakenBonusText(plantDetail, mutationLevel)
+                or nil
+            if globalDamageBonusText then
+                detailDpsText.Text = "伤害增幅: " .. globalDamageBonusText .. "%"
+            elseif finalHeal then
                 detailDpsText.Text = "Heal: " .. formatStatNumber(finalHeal)
             elseif finalAttack then
                 if intervalValue and intervalValue > 0 then

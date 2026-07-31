@@ -1,6 +1,9 @@
 -- src/server/Services/CombatRegistry.luau
 local CombatRegistry = {}
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+
 local registryByPlot = setmetatable({}, { __mode = "k" })
 local recordByModel = setmetatable({}, { __mode = "k" })
 local cachedPartsByModel = setmetatable({}, { __mode = "k" })
@@ -26,11 +29,99 @@ local function getPlotState(plot)
             Zombies = {},
             PlantsByRow = {},
             ZombiesByRow = {},
+            ZombieDamageTakenMultiplier = 1,
         }
         registryByPlot[plot] = state
     end
 
     return state
+end
+
+local function getPlantGlobalDamageAura(plant)
+    if not plant then
+        return nil
+    end
+
+    local plantId = plant:GetAttribute("PlantId") or plant.Name
+    local detail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+    local aura = detail and detail.GlobalZombieDamageTakenAura
+    if type(aura) ~= "table" or type(aura.BonusByMutation) ~= "table" then
+        return nil
+    end
+
+    local mutationLevel = math.max(1, math.floor(tonumber(plant:GetAttribute("MutationLevel")) or 1))
+    local bonus = math.max(0, tonumber(aura.BonusByMutation[mutationLevel]) or 0)
+    if bonus <= 0 then
+        return nil
+    end
+
+    return {
+        Group = tostring(aura.Group or plantId),
+        MaxStacks = math.max(1, math.floor(tonumber(aura.MaxStacks) or 1)),
+        Bonus = bonus,
+    }
+end
+
+local function hasPlantGlobalDamageAura(plant)
+    if not plant then
+        return false
+    end
+
+    local plantId = plant:GetAttribute("PlantId") or plant.Name
+    local detail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+    local aura = detail and detail.GlobalZombieDamageTakenAura
+    return type(aura) == "table" and type(aura.BonusByMutation) == "table"
+end
+
+-- 缓存同一玩家地块上的全局植物增伤；每组取数值最高的限定株数。
+local function refreshZombieDamageTakenMultiplier(plot, state)
+    if not plot or not state then
+        return 1
+    end
+
+    local plotOwnerId = tonumber(plot:GetAttribute("OwnerId"))
+    local auraGroups = {}
+
+    for _, record in pairs(state.Plants) do
+        local plant = record.Model
+        local plantOwnerId = plant and tonumber(plant:GetAttribute("OwnerId"))
+        local belongsToPlotOwner = not plotOwnerId or plotOwnerId <= 0 or plantOwnerId == plotOwnerId
+        if plant
+            and plant.Parent
+            and belongsToPlotOwner
+            and plant:GetAttribute("IsCombatPlant") == true
+            and plant:GetAttribute("IsDead") ~= true
+            and (tonumber(plant:GetAttribute("Health")) or 0) > 0
+        then
+            local aura = getPlantGlobalDamageAura(plant)
+            if aura then
+                local group = auraGroups[aura.Group]
+                if not group then
+                    group = {
+                        MaxStacks = aura.MaxStacks,
+                        Bonuses = {},
+                    }
+                    auraGroups[aura.Group] = group
+                else
+                    group.MaxStacks = math.min(group.MaxStacks, aura.MaxStacks)
+                end
+                table.insert(group.Bonuses, aura.Bonus)
+            end
+        end
+    end
+
+    local totalBonus = 0
+    for _, group in pairs(auraGroups) do
+        table.sort(group.Bonuses, function(a, b)
+            return a > b
+        end)
+        for index = 1, math.min(group.MaxStacks, #group.Bonuses) do
+            totalBonus += group.Bonuses[index]
+        end
+    end
+
+    state.ZombieDamageTakenMultiplier = 1 + totalBonus
+    return state.ZombieDamageTakenMultiplier
 end
 
 local function getFlatVector(vector)
@@ -137,6 +228,11 @@ local function removeRecord(record)
         return
     end
 
+    if record.MutationLevelConnection then
+        record.MutationLevelConnection:Disconnect()
+        record.MutationLevelConnection = nil
+    end
+
     local state = registryByPlot[record.Plot]
     if state then
         local allBucket = record.Kind == "Zombie" and state.Zombies or state.Plants
@@ -149,6 +245,10 @@ local function removeRecord(record)
             if next(rowBucket) == nil then
                 rowBuckets[record.RowKey] = nil
             end
+        end
+
+        if record.Kind == "Plant" then
+            refreshZombieDamageTakenMultiplier(record.Plot, state)
         end
     end
 
@@ -199,9 +299,27 @@ local function registerModel(kind, plot, model, rowNum, humanoid, rootPart)
         state.Plants[model] = record
         state.PlantsByRow[rowKey] = state.PlantsByRow[rowKey] or {}
         state.PlantsByRow[rowKey][model] = record
+
+        record.MutationLevelConnection = model:GetAttributeChangedSignal("MutationLevel"):Connect(function()
+            if recordByModel[model] ~= record or not hasPlantGlobalDamageAura(model) then
+                return
+            end
+
+            local currentState = registryByPlot[plot]
+            if currentState then
+                refreshZombieDamageTakenMultiplier(plot, currentState)
+            end
+        end)
+
+        refreshZombieDamageTakenMultiplier(plot, state)
     end
 
     return record
+end
+
+function CombatRegistry.GetZombieDamageTakenMultiplier(plot)
+    local state = plot and registryByPlot[plot]
+    return math.max(1, tonumber(state and state.ZombieDamageTakenMultiplier) or 1)
 end
 
 function CombatRegistry.RegisterPlant(plot, plant, rowNum, rootPart)

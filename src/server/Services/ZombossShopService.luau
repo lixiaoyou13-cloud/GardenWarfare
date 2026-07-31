@@ -77,7 +77,8 @@ end
 local function buildStateFromData(data)
     local now = os.time()
     local refreshAt = ZombossShopConfig.GetRefreshAt(now)
-    local nextBossSpawnAt = ZombossShopConfig.GetNextBossSpawnAt(now)
+    local bossEventEnabled = ZombossShopConfig.IsBossEventEnabled()
+    local nextBossSpawnAt = bossEventEnabled and ZombossShopConfig.GetNextBossSpawnAt(now) or nil
     local purchases = type(data) == "table"
         and type(data.ZombossShop) == "table"
         and type(data.ZombossShop.Purchases) == "table"
@@ -109,8 +110,9 @@ local function buildStateFromData(data)
         WindowId = ZombossShopConfig.GetCurrentWindowId(now),
         RefreshAt = refreshAt,
         RefreshRemainingSeconds = math.max(0, refreshAt - now),
+        BossEventEnabled = bossEventEnabled,
         NextBossSpawnAt = nextBossSpawnAt,
-        BossSpawnRemainingSeconds = math.max(0, nextBossSpawnAt - now),
+        BossSpawnRemainingSeconds = nextBossSpawnAt and math.max(0, nextBossSpawnAt - now) or nil,
         OfferOrder = cloneValue(ZombossShopConfig.OfferOrder),
         Offers = offers,
     }
