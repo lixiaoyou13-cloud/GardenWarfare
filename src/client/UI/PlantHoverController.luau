@@ -364,7 +364,7 @@ function PlantHoverController.Init()
                 or nil
             local ownAuraConfig = plantConfig and plantConfig.AttackBuffAura
             if globalDamageBonusText then
-                dpsLabel.Text = "伤害增幅: " .. globalDamageBonusText .. "%"
+                dpsLabel.Text = "Damage Boost: " .. globalDamageBonusText .. "%"
                 dpsLabel.Visible = true
             elseif type(ownAuraConfig) == "table" then
                 local auraMultiplier = getAuraDamageMultiplier(ownAuraConfig, mutationLevel)

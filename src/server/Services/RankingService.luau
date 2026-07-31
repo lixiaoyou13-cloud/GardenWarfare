@@ -12,6 +12,9 @@ local RankingSeasonConfig = require(ReplicatedStorage:WaitForChild("Shared"):Wai
 local CURRENT_STORE_NAME = RankingSeasonConfig.CurrentStoreName or "LevelRanking_v2"
 local RankingStore = DataStoreService:GetOrderedDataStore(CURRENT_STORE_NAME)
 local ResetStateStore = DataStoreService:GetDataStore(RankingSeasonConfig.CurrentStoreResetStateStoreName or "RankingStoreResetState_v1")
+local MIGRATION_SOURCE_STORE_NAME = RankingSeasonConfig.CurrentStoreMigrationSourceName or RankingSeasonConfig.PreviousStoreName or CURRENT_STORE_NAME
+local MigrationSourceStore = DataStoreService:GetOrderedDataStore(MIGRATION_SOURCE_STORE_NAME)
+local MigrationStateStore = DataStoreService:GetDataStore(RankingSeasonConfig.CurrentStoreMigrationStateStoreName or "RankingStoreMigrationState_v1")
 
 local EntryTemplate = ReplicatedStorage:WaitForChild("UITemplates"):WaitForChild("EntryTemplate")
 
@@ -26,8 +29,11 @@ local profileWaiters = {}
 local lastSyncedScores = {}
 local displayRefreshQueued = false
 local currentStoreResetRunning = false
+local currentStoreMigrationRunning = false
 local RESET_LOCK_TIMEOUT_SECONDS = 1800
 local RESET_STATE_POLL_SECONDS = 5
+local MIGRATION_LOCK_TIMEOUT_SECONDS = 3600
+local MIGRATION_STATE_POLL_SECONDS = 5
 
 local function IsRankingRoot(obj)
     return string.sub(obj.Name, 1, #"Ranking_Level") == "Ranking_Level"
@@ -192,6 +198,10 @@ end
 
 -- 功能 刷新排行榜显示
 local function RefreshDisplay()
+    if currentStoreResetRunning or currentStoreMigrationRunning then
+        return
+    end
+
     -- 1. 从数据库获取排行榜数据
     local success, pages = pcall(function()
         return RankingStore:GetSortedAsync(false, TOP_COUNT) -- false 为降序
@@ -314,8 +324,7 @@ local function waitForCurrentStoreResetCompletion(resetId)
     return false
 end
 
-local function resumeRankingAfterCurrentStoreReset()
-    currentStoreResetRunning = false
+local function refreshAndSyncOnlinePlayers()
     lastSyncedScores = {}
     RefreshDisplay()
 
@@ -324,6 +333,16 @@ local function resumeRankingAfterCurrentStoreReset()
             RankingService.SyncData(player)
         end)
     end
+end
+
+local function resumeRankingAfterCurrentStoreReset()
+    currentStoreResetRunning = false
+    refreshAndSyncOnlinePlayers()
+end
+
+local function resumeRankingAfterCurrentStoreMigration()
+    currentStoreMigrationRunning = false
+    refreshAndSyncOnlinePlayers()
 end
 
 local function clearCurrentRankingStore()
@@ -422,6 +441,252 @@ local function runCurrentStoreResetIfNeeded()
     end
 end
 
+local function acquireCurrentStoreMigrationLock(migrationId)
+    local now = os.time()
+    local acquired = false
+    local completed = false
+
+    local success, err = pcall(function()
+        MigrationStateStore:UpdateAsync(migrationId, function(state)
+            if type(state) ~= "table" then
+                state = {}
+            end
+
+            if state.Completed == true then
+                completed = true
+                return state
+            end
+
+            local lockedAt = tonumber(state.LockedAt) or 0
+            if state.Status == "InProgress" and now - lockedAt < MIGRATION_LOCK_TIMEOUT_SECONDS then
+                return state
+            end
+
+            acquired = true
+            state.Status = "InProgress"
+            state.LockedAt = now
+            state.JobId = game.JobId
+            state.SourceStoreName = MIGRATION_SOURCE_STORE_NAME
+            state.TargetStoreName = CURRENT_STORE_NAME
+            return state
+        end)
+    end)
+
+    if not success then
+        return false, completed, err
+    end
+
+    return acquired, completed, nil
+end
+
+local function markCurrentStoreMigrationComplete(migrationId, migratedCount, cappedCount, pageCount)
+    local success, err = pcall(function()
+        MigrationStateStore:UpdateAsync(migrationId, function(state)
+            if type(state) ~= "table" then
+                state = {}
+            end
+
+            state.Completed = true
+            state.Status = "Completed"
+            state.CompletedAt = os.time()
+            state.MigratedCount = migratedCount
+            state.CappedCount = cappedCount
+            state.PageCount = pageCount
+            state.SourceStoreName = MIGRATION_SOURCE_STORE_NAME
+            state.TargetStoreName = CURRENT_STORE_NAME
+            state.JobId = game.JobId
+            return state
+        end)
+    end)
+
+    if not success then
+        warn("[RankingMigration] Failed to mark migration complete: " .. tostring(err))
+        return false
+    end
+
+    return true
+end
+
+local function getCurrentStoreMigrationState(migrationId)
+    local success, stateOrErr = pcall(function()
+        return MigrationStateStore:GetAsync(migrationId)
+    end)
+
+    if not success then
+        return nil, stateOrErr
+    end
+
+    return stateOrErr, nil
+end
+
+local function waitForCurrentStoreMigrationCompletion(migrationId)
+    local deadline = os.time() + MIGRATION_LOCK_TIMEOUT_SECONDS
+
+    while os.time() < deadline do
+        local state, err = getCurrentStoreMigrationState(migrationId)
+        if err then
+            warn("[RankingMigration] Failed to read migration state while waiting: " .. tostring(err))
+        end
+
+        if type(state) == "table" and state.Completed == true then
+            print("[RankingMigration] Migration completed by another server: " .. migrationId)
+            return true
+        end
+
+        if type(state) ~= "table" or state.Status ~= "InProgress" then
+            return false
+        end
+
+        local lockedAt = tonumber(state.LockedAt) or 0
+        if lockedAt > 0 and os.time() - lockedAt >= MIGRATION_LOCK_TIMEOUT_SECONDS then
+            return false
+        end
+
+        task.wait(MIGRATION_STATE_POLL_SECONDS)
+    end
+
+    return false
+end
+
+local function getMigrationCapLevel()
+    return math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationCapClearedLevel)
+        or tonumber(RankingSeasonConfig.SeasonCarryOverMaxClearedLevel)
+        or 1000)
+end
+
+local function migrateCurrentRankingStore()
+    local pageSize = math.clamp(math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationPageSize) or 100), 1, 100)
+    local maxPages = math.max(1, math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationMaxPages) or 1000))
+    local writeDelaySeconds = math.max(0, tonumber(RankingSeasonConfig.CurrentStoreMigrationWriteDelaySeconds) or 0.05)
+    local capLevel = getMigrationCapLevel()
+    local migratedCount = 0
+    local cappedCount = 0
+    local pageCount = 0
+
+    local success, pagesOrErr = pcall(function()
+        return MigrationSourceStore:GetSortedAsync(false, pageSize)
+    end)
+
+    if not success or not pagesOrErr then
+        return false, tostring(pagesOrErr), migratedCount, cappedCount, pageCount
+    end
+
+    local pages = pagesOrErr
+    while pageCount < maxPages do
+        local entries = pages:GetCurrentPage()
+        if #entries <= 0 then
+            return true, nil, migratedCount, cappedCount, pageCount
+        end
+
+        pageCount += 1
+        for _, entry in ipairs(entries) do
+            local key = tostring(entry.key)
+            local oldScore = math.max(0, math.floor(tonumber(entry.value) or 0))
+            local cappedScore = capLevel > 0 and math.min(oldScore, capLevel) or oldScore
+
+            if cappedScore > 0 then
+                local writeOk, writeErr = pcall(function()
+                    RankingStore:UpdateAsync(key, function(currentScore)
+                        local currentNumber = math.max(0, math.floor(tonumber(currentScore) or 0))
+                        return math.max(currentNumber, cappedScore)
+                    end)
+                end)
+
+                if not writeOk then
+                    return false, tostring(writeErr), migratedCount, cappedCount, pageCount
+                end
+            end
+
+            migratedCount += 1
+            if cappedScore ~= oldScore then
+                cappedCount += 1
+            end
+            task.wait(writeDelaySeconds)
+        end
+
+        if pages.IsFinished then
+            return true, nil, migratedCount, cappedCount, pageCount
+        end
+
+        local advanceOk, advanceErr = pcall(function()
+            pages:AdvanceToNextPageAsync()
+        end)
+        if not advanceOk then
+            return false, tostring(advanceErr), migratedCount, cappedCount, pageCount
+        end
+
+        task.wait(1)
+    end
+
+    return false, "max pages reached", migratedCount, cappedCount, pageCount
+end
+
+local function runCurrentStoreMigrationIfNeeded()
+    if RankingSeasonConfig.CurrentStoreMigrationEnabled ~= true then
+        return
+    end
+
+    if CURRENT_STORE_NAME == MIGRATION_SOURCE_STORE_NAME then
+        warn("[RankingMigration] Skipped because source and target stores are the same: " .. CURRENT_STORE_NAME)
+        return
+    end
+
+    if RunService:IsStudio() and RankingSeasonConfig.CurrentStoreMigrationInStudio ~= true then
+        warn("[RankingMigration] Skipped in Studio. Current store migration only runs in live servers.")
+        return
+    end
+
+    local migrationId = tostring(RankingSeasonConfig.CurrentStoreMigrationId or "")
+    if migrationId == "" then
+        warn("[RankingMigration] CurrentStoreMigrationId is missing.")
+        return
+    end
+
+    currentStoreMigrationRunning = true
+
+    while true do
+        local acquired, completed, lockErr = acquireCurrentStoreMigrationLock(migrationId)
+        if completed then
+            print("[RankingMigration] Already completed: " .. migrationId)
+            resumeRankingAfterCurrentStoreMigration()
+            return
+        end
+
+        if acquired then
+            local success, err, migratedCount, cappedCount, pageCount = migrateCurrentRankingStore()
+            if success then
+                while not markCurrentStoreMigrationComplete(migrationId, migratedCount, cappedCount, pageCount) do
+                    warn("[RankingMigration] Store migrated but completion mark failed; ranking writes remain paused.")
+                    task.wait(MIGRATION_STATE_POLL_SECONDS)
+                end
+
+                print("[RankingMigration] Migrated " .. MIGRATION_SOURCE_STORE_NAME .. " to " .. CURRENT_STORE_NAME
+                    .. ". Entries=" .. tostring(migratedCount) .. " capped=" .. tostring(cappedCount) .. ".")
+                resumeRankingAfterCurrentStoreMigration()
+                return
+            end
+
+            warn("[RankingMigration] Migration incomplete from " .. MIGRATION_SOURCE_STORE_NAME .. " to " .. CURRENT_STORE_NAME
+                .. ": " .. tostring(err) .. " migrated=" .. tostring(migratedCount)
+                .. " capped=" .. tostring(cappedCount) .. " pages=" .. tostring(pageCount))
+        elseif lockErr then
+            warn("[RankingMigration] Failed to acquire migration lock: " .. tostring(lockErr))
+        else
+            print("[RankingMigration] Another server is migrating " .. MIGRATION_SOURCE_STORE_NAME
+                .. " to " .. CURRENT_STORE_NAME .. "; pausing writes.")
+        end
+
+        local completedWhileWaiting = waitForCurrentStoreMigrationCompletion(migrationId)
+        if completedWhileWaiting then
+            resumeRankingAfterCurrentStoreMigration()
+            return
+        end
+
+        warn("[RankingMigration] Migration wait ended before completion; retrying lock for " .. migrationId .. ".")
+        task.wait(1)
+    end
+end
+
 local function QueueDisplayRefresh()
     if displayRefreshQueued then
         return
@@ -436,7 +701,7 @@ end
 
 -- 功能 同步在线玩家数据
 function RankingService.SyncData(player)
-    if currentStoreResetRunning then
+    if currentStoreResetRunning or currentStoreMigrationRunning then
         return
     end
 
@@ -469,6 +734,7 @@ function RankingService.SyncData(player)
 end
 
 function RankingService.Init()
+    task.spawn(runCurrentStoreMigrationIfNeeded)
     task.spawn(runCurrentStoreResetIfNeeded)
 
     Workspace.DescendantAdded:Connect(MarkRankingListsDirty)

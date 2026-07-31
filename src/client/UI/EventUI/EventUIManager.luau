@@ -627,10 +627,10 @@ function EventUIManager.Init()
                 local bossRemaining = updateBossAppearCountdownText()
                 if zombossShop.Visible then
                     local remaining = updateRefreshCountdownText()
-                    if remaining <= 0 or bossRemaining <= 0 then
+                    if remaining <= 0 or (bossRemaining ~= nil and bossRemaining <= 0) then
                         refreshZombossShopState(true)
                     end
-                elseif bossRemaining <= 0 then
+                elseif bossRemaining ~= nil and bossRemaining <= 0 then
                     refreshZombossShopState(true)
                 end
             end
@@ -640,7 +640,7 @@ function EventUIManager.Init()
             while player.Parent do
                 task.wait(1)
                 local bossRemaining = updateBossAppearCountdownText()
-                if bossRemaining <= 0 then
+                if bossRemaining ~= nil and bossRemaining <= 0 then
                     applyZombossShopState(buildFallbackZombossState())
                 end
             end

@@ -58,6 +58,26 @@ local PASS_V1_MAX_LEVEL = 10
 local PASS_V1_EXP_PER_LEVEL = 200
 local DATA_LOAD_KICK_MESSAGE = "Your data could not be loaded. Please rejoin the game."
 local STALE_SESSION_KICK_MESSAGE = "Your data is active in a newer server. Please rejoin the game."
+local ILLEGAL_MUTATION_DETECTION_VERSION = "illegal-no-seed-no-mutation-v1"
+local ILLEGAL_MUTATION_ADMIN_USER_IDS = {
+    [10972923838] = true,
+}
+local ILLEGAL_MUTATION_DISPLAY_REASON = table.concat({
+    "Illegal plant detected.",
+    "You will be removed from the game.",
+    "If you believe this ban was issued in error, please join our Discord and contact an administrator.",
+}, "\n")
+local ILLEGAL_MUTATION_BAN_MAX_ATTEMPTS = 3
+local ILLEGAL_MUTATION_BAN_RETRY_DELAY = 2
+local ILLEGAL_MUTATION_PRIVATE_REASON_LIMIT = 900
+local ILLEGAL_MUTATION_SOURCE_ORDER = {
+    "Inventory.Plants",
+    "CombatPlants.Primary",
+    "CombatPlants.PumpkinShield",
+    "PlantedPlants",
+    "Hotbar",
+    "UnlockedMutations",
+}
 local IS_STUDIO = RunService:IsStudio()
 local SERVER_SESSION_ID = HttpService:GenerateGUID(false)
 local SERVER_JOB_ID = if IS_STUDIO then "Studio-" .. SERVER_SESSION_ID elseif game.JobId and game.JobId ~= "" then game.JobId else SERVER_SESSION_ID
@@ -73,6 +93,17 @@ local function isStudioRuntime()
     end)
 
     return IS_STUDIO or (ok and isStudioNow == true)
+end
+
+local function isIllegalMutationAdmin(playerOrUserId)
+    local userId = nil
+    if type(playerOrUserId) == "number" then
+        userId = playerOrUserId
+    elseif typeof(playerOrUserId) == "Instance" and playerOrUserId:IsA("Player") then
+        userId = playerOrUserId.UserId
+    end
+
+    return type(userId) == "number" and ILLEGAL_MUTATION_ADMIN_USER_IDS[userId] == true
 end
 
 local function kickPlayerForDataIssue(player, message, reasonTag)
@@ -511,8 +542,8 @@ local function normalizeSunBalances(data)
 end
 
 local function normalizeRankingSeasonProgress(data)
-    RankingSeasonConfig.NormalizeSeasonUnlockedLevels(data)
-    return data
+    local _, changed = RankingSeasonConfig.NormalizeSeasonUnlockedLevels(data)
+    return changed == true
 end
 
 local function getRankingSeasonClearedLevel(data)
@@ -541,6 +572,398 @@ local function normalizePlantMutationLevel(plantId, mutationLevel)
     end
 
     return normalizeMutationLevel(mutationLevel)
+end
+
+local function getIllegalMutationPlantIds()
+    local plantIds = {}
+    for plantId, plantDetail in pairs(ItemConfig.Plants or {}) do
+        if type(plantId) == "string"
+            and type(plantDetail) == "table"
+            and plantDetail.NoSeed == true
+            and plantDetail.NoMutation == true
+        then
+            plantIds[plantId] = true
+        end
+    end
+
+    return plantIds
+end
+
+local function getIllegalMutationLevel(value)
+    local mutationLevel = tonumber(value)
+    if mutationLevel and mutationLevel > 1 then
+        return mutationLevel
+    end
+
+    return nil
+end
+
+local function formatIllegalMutationLevel(mutationLevel)
+    if mutationLevel == math.huge then
+        return "infinity"
+    end
+
+    return tostring(mutationLevel)
+end
+
+local function normalizeIllegalMutationQuantity(value)
+    local quantity = tonumber(value)
+    if not quantity or quantity ~= quantity or quantity <= 0 then
+        return 0
+    end
+    if quantity == math.huge then
+        return 2147483647
+    end
+
+    return math.min(2147483647, math.floor(quantity))
+end
+
+local function addIllegalMutationEvidence(report, source, plantId, mutationLevel, quantity)
+    local sourceReport = report.Sources[source]
+    if not sourceReport then
+        sourceReport = {
+            EntryCount = 0,
+            Quantity = 0,
+            Plants = {},
+        }
+        report.Sources[source] = sourceReport
+    end
+
+    local plantReport = sourceReport.Plants[plantId]
+    if not plantReport then
+        plantReport = {
+            EntryCount = 0,
+            Quantity = 0,
+            Levels = {},
+        }
+        sourceReport.Plants[plantId] = plantReport
+    end
+
+    local levelKey = formatIllegalMutationLevel(mutationLevel)
+    local safeQuantity = normalizeIllegalMutationQuantity(quantity)
+    plantReport.EntryCount += 1
+    plantReport.Quantity += safeQuantity
+    plantReport.Levels[levelKey] = (plantReport.Levels[levelKey] or 0) + 1
+    sourceReport.EntryCount += 1
+    sourceReport.Quantity += safeQuantity
+    report.TotalEntries += 1
+    report.TotalQuantity += safeQuantity
+    report.Detected = true
+end
+
+local function resolvePlantedPlantId(plantData)
+    if type(plantData) ~= "table" then
+        return nil
+    end
+
+    local seedId = plantData.SeedId
+    local seedDetail = type(seedId) == "string" and ItemConfig.Seeds and ItemConfig.Seeds[seedId]
+    if type(seedDetail) == "table" and type(seedDetail.YieldPlant) == "string" then
+        return seedDetail.YieldPlant
+    end
+
+    local plantId = plantData.PlantId
+    if type(plantId) == "string" and ItemConfig.Plants and ItemConfig.Plants[plantId] then
+        return plantId
+    end
+
+    if type(seedId) == "string" and ItemConfig.Plants and ItemConfig.Plants[seedId] then
+        return seedId
+    end
+
+    return nil
+end
+
+local function removeTableKeysPreservingArray(target, keys)
+    local numericKeys = {}
+    for _, key in ipairs(keys) do
+        if type(key) == "number" and key % 1 == 0 and key >= 1 then
+            table.insert(numericKeys, key)
+        else
+            target[key] = nil
+        end
+    end
+
+    table.sort(numericKeys, function(a, b)
+        return a > b
+    end)
+    for _, key in ipairs(numericKeys) do
+        if key <= #target then
+            table.remove(target, key)
+        else
+            target[key] = nil
+        end
+    end
+end
+
+-- 在任何变异归一化之前检查原始存档。applyChanges=false 必须保持输入完全不变。
+local function scanIllegalMutationData(savedData, applyChanges)
+    local report = {
+        DetectionVersion = ILLEGAL_MUTATION_DETECTION_VERSION,
+        Detected = false,
+        Changed = false,
+        TotalEntries = 0,
+        TotalQuantity = 0,
+        Sources = {},
+    }
+    if type(savedData) ~= "table" then
+        return report
+    end
+
+    local illegalPlantIds = getIllegalMutationPlantIds()
+    local cleanup = {
+        InventoryPlantIndices = {},
+        CombatSlots = {},
+        PlantedPlantKeys = {},
+        HotbarKeys = {},
+        UnlockedMutationKeys = {},
+    }
+
+    local inventoryPlants = savedData.Inventory and savedData.Inventory.Plants
+    if type(inventoryPlants) == "table" then
+        for index, plantData in pairs(inventoryPlants) do
+            local plantId = type(plantData) == "table" and plantData.ID or nil
+            local mutationLevel = type(plantData) == "table" and getIllegalMutationLevel(plantData.Mutation) or nil
+            if type(plantId) == "string" and illegalPlantIds[plantId] == true and mutationLevel then
+                addIllegalMutationEvidence(
+                    report,
+                    "Inventory.Plants",
+                    plantId,
+                    mutationLevel,
+                    plantData.Quantity
+                )
+                table.insert(cleanup.InventoryPlantIndices, index)
+            end
+        end
+    end
+
+    if type(savedData.CombatPlants) == "table" then
+        for slotKey, plantData in pairs(savedData.CombatPlants) do
+            if type(plantData) == "table" then
+                local primaryPlantId = plantData.PlantId
+                local primaryMutation = getIllegalMutationLevel(plantData.Mutation)
+                local removePrimary = type(primaryPlantId) == "string"
+                    and illegalPlantIds[primaryPlantId] == true
+                    and primaryMutation ~= nil
+                if removePrimary then
+                    addIllegalMutationEvidence(
+                        report,
+                        "CombatPlants.Primary",
+                        primaryPlantId,
+                        primaryMutation,
+                        1
+                    )
+                end
+
+                local shieldData = plantData.PumpkinShield
+                local shieldPlantId = type(shieldData) == "table" and shieldData.PlantId or nil
+                local shieldMutation = type(shieldData) == "table" and getIllegalMutationLevel(shieldData.Mutation) or nil
+                local removeShield = type(shieldPlantId) == "string"
+                    and illegalPlantIds[shieldPlantId] == true
+                    and shieldMutation ~= nil
+                if removeShield then
+                    addIllegalMutationEvidence(
+                        report,
+                        "CombatPlants.PumpkinShield",
+                        shieldPlantId,
+                        shieldMutation,
+                        1
+                    )
+                end
+
+                if removePrimary or removeShield then
+                    cleanup.CombatSlots[slotKey] = {
+                        RemovePrimary = removePrimary,
+                        RemoveShield = removeShield,
+                    }
+                end
+            end
+        end
+    end
+
+    if type(savedData.PlantedPlants) == "table" then
+        for plantedKey, plantData in pairs(savedData.PlantedPlants) do
+            local plantId = resolvePlantedPlantId(plantData)
+            local mutationLevel = type(plantData) == "table" and getIllegalMutationLevel(plantData.Mutation) or nil
+            if type(plantId) == "string" and illegalPlantIds[plantId] == true and mutationLevel then
+                addIllegalMutationEvidence(report, "PlantedPlants", plantId, mutationLevel, 1)
+                table.insert(cleanup.PlantedPlantKeys, plantedKey)
+            end
+        end
+    end
+
+    if type(savedData.Hotbar) == "table" then
+        for hotbarKey, compositeId in pairs(savedData.Hotbar) do
+            if type(compositeId) == "string" then
+                local plantId, rawMutation = string.match(compositeId, "^Plant_(.+)_([^_]+)$")
+                local mutationLevel = getIllegalMutationLevel(rawMutation)
+                if type(plantId) == "string" and illegalPlantIds[plantId] == true and mutationLevel then
+                    addIllegalMutationEvidence(report, "Hotbar", plantId, mutationLevel, 1)
+                    table.insert(cleanup.HotbarKeys, hotbarKey)
+                end
+            end
+        end
+    end
+
+    if type(savedData.UnlockedMutations) == "table" then
+        for plantId in pairs(illegalPlantIds) do
+            local mutationMap = savedData.UnlockedMutations[plantId]
+            if type(mutationMap) == "table" then
+                for levelKey, unlocked in pairs(mutationMap) do
+                    local mutationLevel = unlocked == true and getIllegalMutationLevel(levelKey) or nil
+                    if mutationLevel then
+                        addIllegalMutationEvidence(report, "UnlockedMutations", plantId, mutationLevel, 1)
+                        table.insert(cleanup.UnlockedMutationKeys, {
+                            PlantId = plantId,
+                            LevelKey = levelKey,
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    if applyChanges ~= true or not report.Detected then
+        return report
+    end
+
+    removeTableKeysPreservingArray(inventoryPlants, cleanup.InventoryPlantIndices)
+
+    for slotKey, cleanupDetail in pairs(cleanup.CombatSlots) do
+        local plantData = savedData.CombatPlants[slotKey]
+        if type(plantData) == "table" then
+            local shieldData = plantData.PumpkinShield
+            if cleanupDetail.RemoveShield then
+                shieldData = nil
+            end
+
+            local hasPrimary = not cleanupDetail.RemovePrimary
+                and type(plantData.PlantId) == "string"
+                and plantData.PlantId ~= ""
+            local hasShield = type(shieldData) == "table"
+                and type(shieldData.PlantId) == "string"
+                and shieldData.PlantId ~= ""
+
+            if cleanupDetail.RemovePrimary then
+                if hasShield then
+                    savedData.CombatPlants[slotKey] = { PumpkinShield = shieldData }
+                else
+                    savedData.CombatPlants[slotKey] = nil
+                end
+            elseif hasPrimary then
+                plantData.PumpkinShield = shieldData
+            elseif hasShield then
+                savedData.CombatPlants[slotKey] = { PumpkinShield = shieldData }
+            else
+                savedData.CombatPlants[slotKey] = nil
+            end
+        end
+    end
+
+    for _, plantedKey in ipairs(cleanup.PlantedPlantKeys) do
+        savedData.PlantedPlants[plantedKey] = nil
+    end
+
+    removeTableKeysPreservingArray(savedData.Hotbar, cleanup.HotbarKeys)
+
+    for _, cleanupDetail in ipairs(cleanup.UnlockedMutationKeys) do
+        local mutationMap = savedData.UnlockedMutations[cleanupDetail.PlantId]
+        if type(mutationMap) == "table" then
+            mutationMap[cleanupDetail.LevelKey] = nil
+        end
+    end
+
+    report.Changed = true
+    return report
+end
+
+local function logIllegalMutationReport(player, report, mode, outcome, detail)
+    local payload = {
+        DetectionVersion = ILLEGAL_MUTATION_DETECTION_VERSION,
+        Mode = mode,
+        Outcome = outcome,
+        UserId = player and player.UserId or 0,
+        Report = report,
+    }
+    if detail ~= nil then
+        payload.Detail = tostring(detail)
+    end
+
+    local encodedOk, encodedReport = pcall(function()
+        return HttpService:JSONEncode(payload)
+    end)
+    if encodedOk then
+        warn("[IllegalMutation] " .. encodedReport)
+    else
+        warn("[IllegalMutation] report_encode_failed userId=" .. tostring(payload.UserId)
+            .. " mode=" .. tostring(mode)
+            .. " outcome=" .. tostring(outcome))
+    end
+end
+
+local function buildIllegalMutationPrivateReason(player, report)
+    local parts = {
+        ILLEGAL_MUTATION_DETECTION_VERSION,
+        "userId=" .. tostring(player and player.UserId or 0),
+    }
+
+    for _, source in ipairs(ILLEGAL_MUTATION_SOURCE_ORDER) do
+        local sourceReport = report.Sources[source]
+        if sourceReport then
+            local plantIds = {}
+            for plantId in pairs(sourceReport.Plants) do
+                table.insert(plantIds, plantId)
+            end
+            table.sort(plantIds)
+
+            for _, plantId in ipairs(plantIds) do
+                local plantReport = sourceReport.Plants[plantId]
+                local levels = {}
+                for level in pairs(plantReport.Levels) do
+                    table.insert(levels, level)
+                end
+                table.sort(levels)
+                table.insert(parts, source .. ":" .. plantId
+                    .. ":levels=" .. table.concat(levels, ",")
+                    .. ":entries=" .. tostring(plantReport.EntryCount)
+                    .. ":quantity=" .. tostring(plantReport.Quantity))
+            end
+        end
+    end
+
+    return string.sub(table.concat(parts, "|"), 1, ILLEGAL_MUTATION_PRIVATE_REASON_LIMIT)
+end
+
+local function banPlayerForIllegalMutations(player, report)
+    local banConfig = {
+        UserIds = { player.UserId },
+        Duration = -1,
+        ApplyToUniverse = true,
+        ExcludeAltAccounts = true,
+        DisplayReason = ILLEGAL_MUTATION_DISPLAY_REASON,
+        PrivateReason = buildIllegalMutationPrivateReason(player, report),
+    }
+    local lastError = nil
+
+    for attempt = 1, ILLEGAL_MUTATION_BAN_MAX_ATTEMPTS do
+        local success, err = pcall(function()
+            Players:BanAsync(banConfig)
+        end)
+        if success then
+            logIllegalMutationReport(player, report, "live", "ban_succeeded", "attempt=" .. tostring(attempt))
+            return true
+        end
+
+        lastError = err
+        logIllegalMutationReport(player, report, "live", "ban_attempt_failed", "attempt="
+            .. tostring(attempt) .. ";error=" .. tostring(err))
+        if attempt < ILLEGAL_MUTATION_BAN_MAX_ATTEMPTS then
+            task.wait(ILLEGAL_MUTATION_BAN_RETRY_DELAY)
+        end
+    end
+
+    logIllegalMutationReport(player, report, "live", "ban_failed", lastError)
+    return false, lastError
 end
 
 local function isValidInventorySeedId(seedId)
@@ -611,7 +1034,7 @@ local function normalizeUnlockedMutations(data)
     end
 end
 
-local function backfillUnlockedMutationsFromOwnedPlants(data)
+local function backfillUnlockedMutationsFromOwnedPlants(data, allowIllegalMutations)
     if type(data) ~= "table" then
         return
     end
@@ -621,7 +1044,9 @@ local function backfillUnlockedMutationsFromOwnedPlants(data)
     if data.Inventory and type(data.Inventory.Plants) == "table" then
         for _, plantData in ipairs(data.Inventory.Plants) do
             if type(plantData) == "table" and type(plantData.ID) == "string" and (tonumber(plantData.Quantity) or 0) > 0 then
-                plantData.Mutation = normalizePlantMutationLevel(plantData.ID, plantData.Mutation or 1)
+                plantData.Mutation = if allowIllegalMutations == true
+                    then normalizeMutationLevel(plantData.Mutation or 1)
+                    else normalizePlantMutationLevel(plantData.ID, plantData.Mutation or 1)
                 markMutationUnlocked(data, plantData.ID, plantData.Mutation)
             end
         end
@@ -641,12 +1066,16 @@ local function backfillUnlockedMutationsFromOwnedPlants(data)
     if type(data.CombatPlants) == "table" then
         for _, plantData in pairs(data.CombatPlants) do
             if type(plantData) == "table" and type(plantData.PlantId) == "string" then
-                plantData.Mutation = normalizePlantMutationLevel(plantData.PlantId, plantData.Mutation or 1)
+                plantData.Mutation = if allowIllegalMutations == true
+                    then normalizeMutationLevel(plantData.Mutation or 1)
+                    else normalizePlantMutationLevel(plantData.PlantId, plantData.Mutation or 1)
                 markMutationUnlocked(data, plantData.PlantId, plantData.Mutation)
             end
             local shieldData = type(plantData) == "table" and plantData.PumpkinShield
             if type(shieldData) == "table" and type(shieldData.PlantId) == "string" then
-                shieldData.Mutation = normalizePlantMutationLevel(shieldData.PlantId, shieldData.Mutation or 1)
+                shieldData.Mutation = if allowIllegalMutations == true
+                    then normalizeMutationLevel(shieldData.Mutation or 1)
+                    else normalizePlantMutationLevel(shieldData.PlantId, shieldData.Mutation or 1)
                 markMutationUnlocked(data, shieldData.PlantId, shieldData.Mutation)
             end
         end
@@ -1158,6 +1587,19 @@ local function acquireSessionData(player)
     local userId = player and player.UserId
     if not userId then
         return false, nil, "invalid_player"
+    end
+
+    -- Studio 命中非法变异时只能只读检查，不能通过会话锁 UpdateAsync 改写线上存档。
+    if isStudioRuntime() and not isIllegalMutationAdmin(player) then
+        local readOk, studioData = pcall(function()
+            return PlayerDataStore:GetAsync(userId)
+        end)
+        if readOk and type(studioData) == "table" then
+            local dryRunReport = scanIllegalMutationData(studioData, false)
+            if dryRunReport.Detected then
+                return true, cloneValue(studioData), nil
+            end
+        end
     end
 
     local lastError = nil
@@ -2250,10 +2692,51 @@ local function onPlayerAdded(player)
             isLoaded = true
             if success then
                 if savedData then
+                local illegalMutationAdmin = isIllegalMutationAdmin(player)
+                local illegalMutationReport = nil
+                if illegalMutationAdmin then
+                    print("[IllegalMutation] Admin whitelist bypass for userId " .. tostring(player.UserId) .. ".")
+                else
+                    illegalMutationReport = scanIllegalMutationData(savedData, not isStudioRuntime())
+                end
+
+                if illegalMutationReport and illegalMutationReport.Detected then
+                    if isStudioRuntime() then
+                        logIllegalMutationReport(player, illegalMutationReport, "studio_dry_run", "detected", nil)
+                        return
+                    end
+
+                    sessionData[player.UserId] = savedData
+                    dataSaveAllowed[player.UserId] = true
+                    logIllegalMutationReport(player, illegalMutationReport, "live", "cleanup_applied", nil)
+
+                    local cleanupSaved, cleanupSaveErr = savePlayerSession(player, {
+                        RespectMinInterval = false,
+                    })
+                    if cleanupSaved then
+                        logIllegalMutationReport(player, illegalMutationReport, "live", "cleanup_save_succeeded", nil)
+                        banPlayerForIllegalMutations(player, illegalMutationReport)
+                    else
+                        logIllegalMutationReport(
+                            player,
+                            illegalMutationReport,
+                            "live",
+                            "cleanup_save_failed_ban_skipped",
+                            cleanupSaveErr
+                        )
+                    end
+
+                    if player.Parent then
+                        player:Kick(ILLEGAL_MUTATION_DISPLAY_REASON)
+                    end
+                    return
+                end
+
                 local sunResetApplied = false
                 local sunBalancesNormalized = false
                 local inventorySeedsNormalized = false
                 local passShopTokensNormalized = false
+                local rankingSeasonNormalized = false
                 savedData.Hotbar = {"Tool_Shovel", "System_Backpack", "Tool_WeaponBlock"}
                 if type(savedData.Inventory) ~= "table" then savedData.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} } end
                 if type(savedData.Inventory.Seeds) ~= "table" then savedData.Inventory.Seeds = {} end
@@ -2268,7 +2751,7 @@ local function onPlayerAdded(player)
                 if not savedData.CombatPlants then savedData.CombatPlants = {} end
                 if type(savedData.UnlockedSeeds) ~= "table" then savedData.UnlockedSeeds = { ["Peashooter"] = true } end
                 if type(savedData.UnlockedMutations) ~= "table" then savedData.UnlockedMutations = {} end
-                backfillUnlockedMutationsFromOwnedPlants(savedData)
+                backfillUnlockedMutationsFromOwnedPlants(savedData, illegalMutationAdmin)
                 if type(savedData.ClaimedAchieve) ~= "table" then savedData.ClaimedAchieve = {} end
                 if type(savedData.NewbieGiftStartTime) ~= "number" then savedData.NewbieGiftStartTime = 0 end
                 if type(savedData.NewbieGiftPurchased) ~= "boolean" then savedData.NewbieGiftPurchased = false end
@@ -2283,7 +2766,7 @@ local function onPlayerAdded(player)
                 if type(savedData.ClaimedGiftIds) ~= "table" then savedData.ClaimedGiftIds = {} end
                 if type(savedData.RankingSeasonBaselines) ~= "table" then savedData.RankingSeasonBaselines = {} end
                 if type(savedData.RankingSeasonUnlockedLevels) ~= "table" then savedData.RankingSeasonUnlockedLevels = {} end
-                normalizeRankingSeasonProgress(savedData)
+                rankingSeasonNormalized = normalizeRankingSeasonProgress(savedData)
                 if type(savedData.LastSeenNoticeId) ~= "string" then savedData.LastSeenNoticeId = "" end
                 normalizeProcessedReceipts(savedData)
                 if type(savedData.RollTickets) ~= "table" then savedData.RollTickets = {0, 0} end
@@ -2349,6 +2832,10 @@ local function onPlayerAdded(player)
                 if passShopTokensNormalized then
                     markSessionDataChanged(player, "pass shop token season reset")
                     print("[Data] Player " .. player.Name .. " pass shop tokens reset for current season.")
+                end
+                if rankingSeasonNormalized then
+                    markSessionDataChanged(player, "ranking season carry over")
+                    print("[Data] Player " .. player.Name .. " ranking season progress carried over for " .. RankingSeasonConfig.GetSeasonId() .. ".")
                 end
                 print("[Data] Player " .. player.Name .. " data loaded successfully!")
 

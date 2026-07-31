@@ -32,6 +32,7 @@ local CARROT_CANNON_DEBUG_MOTOR_NAMES = { "luobo ", "chelun1", "chelun2", "cheto
 
 local attackTracks = setmetatable({}, { __mode = "k" })
 local activeMarkerProjectileContexts = setmetatable({}, { __mode = "k" })
+local activeMarkerPlantVFXContexts = setmetatable({}, { __mode = "k" })
 local timedPlantVFXTokens = setmetatable({}, { __mode = "k" })
 local flashingZombies = setmetatable({}, { __mode = "k" })
 local warnedProjectileIssues = {}
@@ -51,6 +52,7 @@ local activeProjectileCounts = {
 local visualConnection = nil
 local carrotCannonDebugPrintCount = 0
 local fireMarkerProjectileShot = nil
+local startMarkerTimedPlantVFX = nil
 local visualSettings = {
     EffectsSelf = true,
     EffectsOthers = true,
@@ -735,6 +737,9 @@ local function playAttackAnimation(plant, animationId, speedMult, ownerUserId, a
             if fireMarkerProjectileShot then
                 fireMarkerProjectileShot(plant, cached.attackToken, true)
             end
+            if startMarkerTimedPlantVFX then
+                startMarkerTimedPlantVFX(plant, cached.attackToken, track)
+            end
         end)
 
         cached.cleanupConnection = plant.AncestryChanged:Connect(function(_, parent)
@@ -814,21 +819,7 @@ local function playPlantVFX(plant, ownerUserId)
     end
 end
 
--- 在一次攻击动作期间重复喷发模型内 VFX；新 token 会让上一轮任务立即失效。
-local function playTimedPlantVFX(plant, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId)
-    if not plant or not plant.Parent then
-        return
-    end
-
-    local token = (timedPlantVFXTokens[plant] or 0) + 1
-    timedPlantVFXTokens[plant] = token
-
-    delaySeconds = math.max(0, tonumber(delaySeconds) or 0)
-    durationSeconds = math.max(0, tonumber(durationSeconds) or 0)
-    pulseInterval = math.max(0.01, tonumber(pulseInterval) or 0.1)
-    speedMult = math.max(0.01, tonumber(speedMult) or 1)
-    ownerUserId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
-
+local function runTimedPlantVFX(plant, token, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId)
     task.spawn(function()
         if delaySeconds > 0 then
             task.wait(delaySeconds / speedMult)
@@ -853,8 +844,116 @@ local function playTimedPlantVFX(plant, delaySeconds, durationSeconds, pulseInte
 
         if timedPlantVFXTokens[plant] == token then
             timedPlantVFXTokens[plant] = nil
+            activeMarkerPlantVFXContexts[plant] = nil
         end
     end)
+end
+
+local function stopMarkerContinuousPlantVFX(plant, expectedContext)
+    local context = activeMarkerPlantVFXContexts[plant]
+    if not context or (expectedContext and context ~= expectedContext) then
+        return
+    end
+
+    activeMarkerPlantVFXContexts[plant] = nil
+    for _, connection in ipairs(context.Connections or {}) do
+        connection:Disconnect()
+    end
+    context.Connections = nil
+
+    if context.Started then
+        EffectUtil.SetAttackVFXContinuous(plant, false)
+    end
+end
+
+-- Marker 正常到达时立即开始连续喷发；Marker 缺失时才按配置延迟降级。
+local function playTimedPlantVFX(plant, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId, markerName, attackToken)
+    if not plant or not plant.Parent then
+        return
+    end
+
+    local token = (timedPlantVFXTokens[plant] or 0) + 1
+    timedPlantVFXTokens[plant] = token
+
+    delaySeconds = math.max(0, tonumber(delaySeconds) or 0)
+    durationSeconds = math.max(0, tonumber(durationSeconds) or 0)
+    pulseInterval = math.max(0.01, tonumber(pulseInterval) or 0.1)
+    speedMult = math.max(0.01, tonumber(speedMult) or 1)
+    ownerUserId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
+    stopMarkerContinuousPlantVFX(plant)
+
+    attackToken = tonumber(attackToken)
+    if type(markerName) ~= "string" or markerName == "" or not attackToken then
+        runTimedPlantVFX(plant, token, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId)
+        return
+    end
+
+    local context = {
+        AttackToken = attackToken,
+        MarkerName = markerName,
+        Token = token,
+        Duration = durationSeconds,
+        SpeedMult = speedMult,
+        OwnerUserId = ownerUserId,
+        Started = false,
+        Connections = {},
+    }
+    activeMarkerPlantVFXContexts[plant] = context
+
+    local function stopIfPlantInactive()
+        if not isMarkerProjectilePlantActive(plant) then
+            stopMarkerContinuousPlantVFX(plant, context)
+        end
+    end
+    table.insert(context.Connections, plant.AncestryChanged:Connect(stopIfPlantInactive))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("Health"):Connect(stopIfPlantInactive))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsDead"):Connect(stopIfPlantInactive))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsCombatPlant"):Connect(stopIfPlantInactive))
+
+    local cached = attackTracks[plant]
+    if cached and cached.attackToken == attackToken and cached.track then
+        context.Track = cached.track
+        table.insert(context.Connections, cached.track.Stopped:Connect(function()
+            stopMarkerContinuousPlantVFX(plant, context)
+        end))
+        table.insert(context.Connections, cached.track.Ended:Connect(function()
+            stopMarkerContinuousPlantVFX(plant, context)
+        end))
+    end
+
+    task.delay((delaySeconds + 0.03) / speedMult, function()
+        if activeMarkerPlantVFXContexts[plant] == context and not context.Started and startMarkerTimedPlantVFX then
+            startMarkerTimedPlantVFX(plant, attackToken, nil)
+        end
+    end)
+end
+
+startMarkerTimedPlantVFX = function(plant, attackToken, track)
+    local context = activeMarkerPlantVFXContexts[plant]
+    if not context or context.AttackToken ~= attackToken or context.Started then
+        return false
+    end
+
+    if not isMarkerProjectilePlantActive(plant) or not areEffectsEnabled(context.OwnerUserId) then
+        stopMarkerContinuousPlantVFX(plant, context)
+        return false
+    end
+
+    context.Started = true
+    EffectUtil.SetAttackVFXContinuous(plant, true)
+    local duration = context.Duration
+    track = track or context.Track
+    if track and tonumber(track.Length) and track.Length > 0 then
+        local remainingDuration = math.max(0, track.Length - track.TimePosition)
+        if remainingDuration > 0 then
+            duration = remainingDuration
+        end
+    end
+
+    task.delay(duration / context.SpeedMult, function()
+        stopMarkerContinuousPlantVFX(plant, context)
+    end)
+    return true
 end
 
 local function getProjectileParts(projectile)
@@ -1176,6 +1275,20 @@ fireMarkerProjectileShot = function(plant, attackToken, fromMarker)
     return true
 end
 
+local function fillMarkerProjectileContext(plant, context, targetCount)
+    if activeMarkerProjectileContexts[plant] ~= context then
+        return
+    end
+
+    context.InFallback = true
+    targetCount = math.min(context.ExpectedCount, math.max(0, tonumber(targetCount) or context.ExpectedCount))
+    while activeMarkerProjectileContexts[plant] == context and context.FiredCount < targetCount do
+        if not fireMarkerProjectileShot(plant, context.AttackToken, false) then
+            break
+        end
+    end
+end
+
 local function startMarkerProjectileBatch(plant, contextData)
     if not isMarkerProjectilePlantActive(plant) or type(contextData) ~= "table" then
         cleanupMarkerProjectileContext(plant)
@@ -1195,7 +1308,12 @@ local function startMarkerProjectileBatch(plant, contextData)
         return
     end
 
-    cleanupMarkerProjectileContext(plant)
+    local previousContext = activeMarkerProjectileContexts[plant]
+    if previousContext then
+        -- 新一轮到达边界时先封口上一轮，避免 1.50 秒末发被轨道重播吞掉。
+        fillMarkerProjectileContext(plant, previousContext, previousContext.ExpectedCount)
+        cleanupMarkerProjectileContext(plant, previousContext)
+    end
     local context = {
         AttackToken = attackToken,
         MarkerName = contextData.MarkerName,
@@ -1226,23 +1344,22 @@ local function startMarkerProjectileBatch(plant, contextData)
     table.insert(context.Connections, plant:GetAttributeChangedSignal("IsDead"):Connect(cleanupIfPlantStopped))
     table.insert(context.Connections, plant:GetAttributeChangedSignal("IsCombatPlant"):Connect(cleanupIfPlantStopped))
 
-    local cached = attackTracks[plant]
-    local hasMatchingTrack = cached and cached.track and cached.attackToken == attackToken
-    local fallbackDelay = hasMatchingTrack and context.FallbackTimeout or context.FallbackStartDelay
-    task.delay(fallbackDelay / context.SpeedMult, function()
-        if activeMarkerProjectileContexts[plant] ~= context or not isMarkerProjectilePlantActive(plant) then
-            cleanupMarkerProjectileContext(plant, context)
-            return
-        end
+    for expectedIndex = 1, context.ExpectedCount do
+        local fallbackAt = context.FallbackStartDelay + ((expectedIndex - 1) * context.FallbackInterval)
+        task.delay(fallbackAt / context.SpeedMult, function()
+            if activeMarkerProjectileContexts[plant] ~= context or not isMarkerProjectilePlantActive(plant) then
+                cleanupMarkerProjectileContext(plant, context)
+                return
+            end
+            if context.FiredCount < expectedIndex then
+                fillMarkerProjectileContext(plant, context, expectedIndex)
+            end
+        end)
+    end
 
-        context.InFallback = true
-        while activeMarkerProjectileContexts[plant] == context and context.FiredCount < context.ExpectedCount do
-            if not fireMarkerProjectileShot(plant, attackToken, false) then
-                break
-            end
-            if activeMarkerProjectileContexts[plant] == context and context.FiredCount < context.ExpectedCount then
-                task.wait(context.FallbackInterval / context.SpeedMult)
-            end
+    task.delay(context.FallbackTimeout / context.SpeedMult, function()
+        if activeMarkerProjectileContexts[plant] == context then
+            fillMarkerProjectileContext(plant, context, context.ExpectedCount)
         end
     end)
 end
@@ -1797,6 +1914,12 @@ function PlantAttackVisualController.SetVisualSettings(newSettings)
         local ownerUserId = getOwnerUserIdFromInstance(plant)
         if not arePlantAnimationsEnabled(ownerUserId) then
             cleanupAttackTrack(plant)
+        end
+    end
+
+    for plant, context in pairs(activeMarkerPlantVFXContexts) do
+        if not areEffectsEnabled(context.OwnerUserId) then
+            stopMarkerContinuousPlantVFX(plant, context)
         end
     end
 end

@@ -23,7 +23,10 @@ local DEDUCT_SUN_USAGE = "Usage: " .. ADMIN_DEDUCT_SUN_COMMAND .. " player amoun
 
 local claimingPlayers = {}
 local chatConnections = {}
+local importingInboxPlayers = {}
+local importingInboxGiftIds = {}
 local importGlobalGifts
+local importInboxGifts
 
 local function getOrCreateRemoteFunction(name)
     local remote = ReplicatedStorage:FindFirstChild(name)
@@ -317,11 +320,14 @@ local function serializeGift(gift)
     }
 end
 
-local function buildStateFromData(data)
+local function buildStateFromData(data, player)
     local gifts = normalizePendingGifts(data)
+    local inFlightGiftIds = player and importingInboxGiftIds[player] or nil
     local state = {}
     for _, gift in ipairs(gifts) do
-        table.insert(state, serializeGift(gift))
+        if not (inFlightGiftIds and inFlightGiftIds[gift.Id] == true) then
+            table.insert(state, serializeGift(gift))
+        end
     end
     return state
 end
@@ -335,12 +341,15 @@ local function buildState(player)
     if importGlobalGifts then
         importGlobalGifts(player, data)
     end
+    if importInboxGifts then
+        importInboxGifts(player, data)
+    end
 
-    return buildStateFromData(data)
+    return buildStateFromData(data, player)
 end
 
 local function fireGiftingUpdate(player, data)
-    getOrCreateRemoteEvent(GiftingConfig.UpdateRemoteName):FireClient(player, buildStateFromData(data))
+    getOrCreateRemoteEvent(GiftingConfig.UpdateRemoteName):FireClient(player, buildStateFromData(data, player))
 end
 
 local function normalizeClaimedGiftIds(data)
@@ -468,7 +477,39 @@ local function cleanupInboxGifts(userId, removableGiftIds)
     return true
 end
 
-local function importInboxGifts(player, data)
+local function rollbackImportedInboxGifts(data, insertedGiftIds)
+    local gifts = type(data) == "table" and data[DATA_KEY] or nil
+    if type(gifts) ~= "table" or type(insertedGiftIds) ~= "table" then
+        return
+    end
+
+    for index = #gifts, 1, -1 do
+        local gift = gifts[index]
+        local giftId = type(gift) == "table" and gift.Id or nil
+        if type(giftId) == "string" and insertedGiftIds[giftId] == true then
+            table.remove(gifts, index)
+            insertedGiftIds[giftId] = nil
+        end
+    end
+end
+
+local function acquireInboxImportLock(player)
+    while importingInboxPlayers[player] == true do
+        if not player.Parent then
+            return false, "Gift inbox import cancelled: player left the game."
+        end
+        task.wait(0.05)
+    end
+
+    if not player.Parent then
+        return false, "Gift inbox import cancelled: player left the game."
+    end
+
+    importingInboxPlayers[player] = true
+    return true
+end
+
+local function importInboxGiftsLocked(player, data, transaction)
     if not player or not player.Parent or type(data) ~= "table" then
         return false, "missing player data"
     end
@@ -493,7 +534,6 @@ local function importInboxGifts(player, data)
     local pendingGiftIds = buildGiftIdMap(gifts)
     local cleanupIds = {}
     local importedCount = 0
-    local snapshot = deepCopy(data)
 
     for _, gift in ipairs(inbox.Gifts) do
         if claimedGiftIds[gift.Id] == true or pendingGiftIds[gift.Id] == true then
@@ -502,25 +542,83 @@ local function importInboxGifts(player, data)
             table.insert(gifts, deepCopy(gift))
             pendingGiftIds[gift.Id] = true
             cleanupIds[gift.Id] = true
+            transaction.InsertedGiftIds[gift.Id] = true
             importedCount += 1
         end
     end
 
-    if importedCount > 0 then
-        local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "gift inbox import")
-        if not saveQueued then
-            restoreTable(data, snapshot)
-            fireInventoryUpdate(player, data)
-            warn("[GiftingService] Failed to queue save after imported gift inbox for "
-                .. tostring(player.Name) .. ": " .. tostring(saveErr))
-            return false, saveErr
-        end
-
-        fireGiftingUpdate(player, data)
+    transaction.ImportedCount = importedCount
+    local saveCallOk, saved, saveErr = pcall(function()
+        return PlayerDataManager.ForceSave(player)
+    end)
+    if not saveCallOk then
+        saveErr = saved
+        saved = false
     end
 
-    cleanupInboxGifts(player.UserId, cleanupIds)
+    if saved ~= true then
+        rollbackImportedInboxGifts(data, transaction.InsertedGiftIds)
+        warn("[GiftingService] Failed to persist imported gift inbox for "
+            .. tostring(player.Name) .. ": " .. tostring(saveErr))
+        return false, "Gift inbox import failed: save unavailable. Please try again later."
+    end
+
+    transaction.Persisted = true
+    local cleaned, cleanupErr = cleanupInboxGifts(player.UserId, cleanupIds)
+    if not cleaned then
+        warn("[GiftingService] Gift inbox cleanup deferred for userId "
+            .. tostring(player.UserId) .. ": " .. tostring(cleanupErr))
+    end
+
     return true, importedCount
+end
+
+importInboxGifts = function(player, data)
+    if not player or type(data) ~= "table" then
+        return false, "missing player data"
+    end
+
+    local lockAcquired, lockErr = acquireInboxImportLock(player)
+    if not lockAcquired then
+        return false, lockErr
+    end
+
+    local transaction = {
+        InsertedGiftIds = {},
+        ImportedCount = 0,
+        Persisted = false,
+    }
+    importingInboxGiftIds[player] = transaction.InsertedGiftIds
+    local callOk, success, result = xpcall(function()
+        return importInboxGiftsLocked(player, data, transaction)
+    end, debug.traceback)
+
+    if not callOk then
+        if not transaction.Persisted then
+            rollbackImportedInboxGifts(data, transaction.InsertedGiftIds)
+        end
+        warn("[GiftingService] Gift inbox import crashed for "
+            .. tostring(player.Name) .. ": " .. tostring(success))
+    end
+
+    local shouldPublish = transaction.Persisted and transaction.ImportedCount > 0 and player.Parent
+    importingInboxGiftIds[player] = nil
+    if shouldPublish then
+        local publishOk, publishErr = pcall(function()
+            fireGiftingUpdate(player, data)
+        end)
+        if not publishOk then
+            warn("[GiftingService] Failed to publish imported gift inbox state for "
+                .. tostring(player.Name) .. ": " .. tostring(publishErr))
+        end
+    end
+    importingInboxPlayers[player] = nil
+
+    if not callOk then
+        return false, "Gift inbox import failed. Please try again later."
+    end
+
+    return success, result
 end
 
 local function queueInboxGiftsForUserId(userId, rawGifts)
@@ -698,7 +796,7 @@ local function claimGift(player, giftId)
 
     if not PlayerDataManager.IsDataSafeToSave(player) then
         claimingPlayers[player] = nil
-        return false, "Save unavailable. Please try again later.", buildStateFromData(data)
+        return false, "Save unavailable. Please try again later.", buildStateFromData(data, player)
     end
 
     local gifts = normalizePendingGifts(data)
@@ -706,6 +804,12 @@ local function claimGift(player, giftId)
     local giftIndex = nil
     local gift = nil
     local targetId = tostring(giftId or "")
+    local inFlightGiftIds = importingInboxGiftIds[player]
+    if inFlightGiftIds and inFlightGiftIds[targetId] == true then
+        claimingPlayers[player] = nil
+        return false, "Gift is still being prepared. Please try again.", buildStateFromData(data, player)
+    end
+
     for index, pendingGift in ipairs(gifts) do
         if tostring(pendingGift.Id) == targetId then
             giftIndex = index
@@ -716,7 +820,7 @@ local function claimGift(player, giftId)
 
     if not gift then
         claimingPlayers[player] = nil
-        return false, "Gift is no longer available.", buildStateFromData(data)
+        return false, "Gift is no longer available.", buildStateFromData(data, player)
     end
 
     if claimedGiftIds[gift.Id] == true then
@@ -724,7 +828,7 @@ local function claimGift(player, giftId)
         PlayerDataManager.RequestSave(player, "stale gift cleanup")
         claimingPlayers[player] = nil
         fireGiftingUpdate(player, data)
-        return false, "Gift is no longer available.", buildStateFromData(data)
+        return false, "Gift is no longer available.", buildStateFromData(data, player)
     end
 
     local snapshot = deepCopy(data)
@@ -735,7 +839,7 @@ local function claimGift(player, giftId)
         restoreTable(data, snapshot)
         claimingPlayers[player] = nil
         fireInventoryUpdate(player, data)
-        return false, rewardName or "Claim failed.", buildStateFromData(data)
+        return false, rewardName or "Claim failed.", buildStateFromData(data, player)
     end
 
     claimedGiftIds[gift.Id] = true
@@ -747,7 +851,7 @@ local function claimGift(player, giftId)
         claimingPlayers[player] = nil
         fireInventoryUpdate(player, data)
         fireGiftingUpdate(player, data)
-        return false, "Claim failed: save unavailable. Please try again.", buildStateFromData(data)
+        return false, "Claim failed: save unavailable. Please try again.", buildStateFromData(data, player)
     end
 
     claimingPlayers[player] = nil
@@ -755,7 +859,7 @@ local function claimGift(player, giftId)
     playObtainEffect(player, message)
     fireInventoryUpdate(player, data)
     fireGiftingUpdate(player, data)
-    return true, message, buildStateFromData(data)
+    return true, message, buildStateFromData(data, player)
 end
 
 local function isAdmin(player)
@@ -1088,6 +1192,8 @@ function GiftingService.Init()
     Players.PlayerAdded:Connect(bindPlayer)
     Players.PlayerRemoving:Connect(function(player)
         claimingPlayers[player] = nil
+        importingInboxPlayers[player] = nil
+        importingInboxGiftIds[player] = nil
         if chatConnections[player] then
             chatConnections[player]:Disconnect()
             chatConnections[player] = nil

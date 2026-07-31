@@ -6,6 +6,34 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- Each notice creates one tag button in Notice.TypeButtons.
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
+    {
+        Id = "notice-2026-07-31",
+        TagText = "2026/7/31",
+        PublishedAt = "2026-07-31",
+        Title = "July 31 Update",
+        Sections = {
+            {
+                Title = "Three New Plants",
+                Content = "Clover increases all plant damage dealt to zombies on the same plot. Up to five Clovers can stack.\nGatling Pea fires a rapid four-pea burst, dealing one powerful hit with each attack.\nGloom-shroom unleashes a piercing attack that damages every zombie within the surrounding 3x3 lawn area.\nClover Seeds and Gatling Pea Seeds can now appear as rare special stock in Dave's Shop.",
+            },
+            {
+                Title = "Difficulty Progression",
+                Content = "Zombies now gradually gain increased knockback resistance as you progress through later levels.",
+            },
+            {
+                Title = "New Leaderboard Season",
+                Content = "Rewards from the previous leaderboard season have been delivered to eligible players. Check the Gift page to claim them.\nA new leaderboard season is now live. Climb the rankings for a chance to earn special rewards!",
+            },
+            {
+                Title = "Zomboss Event",
+                Content = "The Zomboss event has been temporarily disabled while we prepare future improvements. It will return in a later update.",
+            },
+            {
+                Title = "Fair Play Improvements",
+                Content = "Server-side anti-cheat and invalid-item detection have been strengthened to provide a safer and fairer experience for everyone.",
+            },
+        },
+    },
     -- 2026/7/23 更新公告：修复南瓜罩偶尔不保护内部植物的问题。
     {
         Id = "notice-2026-07-23",

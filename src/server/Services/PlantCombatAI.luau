@@ -33,6 +33,8 @@ local EVENT_BOSS_PROJECTILE_MIN_HEIGHT_SCALE = 0.45
 local EVENT_BOSS_PROJECTILE_MAX_HEIGHT_SCALE = 0.7
 local EVENT_BOSS_PROJECTILE_XZ_JITTER_RADIUS = 1.75
 local DAMAGE_TEXT_BATCH_WINDOW = 0.05
+local KNOCKBACK_RESISTANCE_MAX_LEVEL = 1000
+local KNOCKBACK_RESISTANCE_MAX_RATIO = 0.5
 local SUNSHROOM_HEAL_VFX_DEBUG = false
 local CARROT_CANNON_ATTACK_DEBUG = false -- 临时调试萝卜加农炮攻击动画事件。
 local warnedProjectileIssues = {}
@@ -912,6 +914,19 @@ local function applyKnockbackOnHit(zombieModel, rootPart, itemDetail, plot, shot
         return
     end
 
+    local levelId = zombieModel:GetAttribute("BossLevel")
+    if levelId == nil and plot then
+        levelId = plot:GetAttribute("CurrentLevel")
+    end
+
+    levelId = math.max(1, math.floor(tonumber(levelId) or 1))
+    local progress = math.clamp((levelId - 1) / math.max(1, KNOCKBACK_RESISTANCE_MAX_LEVEL - 1), 0, 1)
+    local resistanceRatio = progress * KNOCKBACK_RESISTANCE_MAX_RATIO
+    gridDistance *= math.max(0, 1 - resistanceRatio)
+    if gridDistance <= 0 then
+        return
+    end
+
     local lawnPart = findContainingLawnForPosition(plot, rootPart.Position)
     if knockback.OnlyWhenTargetOnLawn and not lawnPart then
         return
@@ -1545,6 +1560,10 @@ local function getMarkerProjectileConfig(itemDetail)
     return {
         MarkerName = markerName,
         ExpectedCount = math.max(1, math.floor(tonumber(itemDetail.ExpectedMarkerShots) or tonumber(itemDetail.ProjectileVisualCount) or 1)),
+        FallbackStartDelay = math.max(
+            0,
+            tonumber(itemDetail.MarkerFallbackStartDelay) or tonumber(itemDetail.AttackWindUpTime) or 0
+        ),
         FallbackInterval = math.clamp(
             tonumber(itemDetail.MarkerFallbackInterval) or tonumber(itemDetail.ProjectileVisualInterval) or 0,
             0,
@@ -1565,12 +1584,12 @@ local function getMarkerProjectileSettlementDelay(itemDetail, markerConfig, proj
     actionDelay = math.max(0, actionDelay or 0)
 
     -- 服务端不知道客户端是否成功加载轨道，按“轨道存在但 Marker 缺失”的最晚补发路径结算。
-    local noTrackFallbackStart = math.max(0, tonumber(itemDetail and itemDetail.AttackWindUpTime) or 0)
-    local latestFallbackStart = math.max(noTrackFallbackStart, markerConfig.FallbackTimeout)
-    local remainingFallbackWait = math.max(0, latestFallbackStart - actionDelay) / speedMult
-    local visualSpan = ((markerConfig.ExpectedCount - 1) * markerConfig.FallbackInterval) / speedMult
+    local fallbackWindowEnd = markerConfig.FallbackStartDelay
+        + ((markerConfig.ExpectedCount - 1) * markerConfig.FallbackInterval)
+    local latestVisualStart = math.max(fallbackWindowEnd, markerConfig.FallbackTimeout)
+    local remainingFallbackWait = math.max(0, latestVisualStart - actionDelay) / speedMult
     local flightTime = math.max(0.05, projectileDistance / (PROJECTILE_SPEED * speedMult))
-    return remainingFallbackWait + visualSpan + flightTime
+    return remainingFallbackWait + flightTime
 end
 
 local function fireMarkerProjectileBatch(plant, targetZombieModel, itemDetail, plot, speedMult, attackToken)
@@ -1595,7 +1614,7 @@ local function fireMarkerProjectileBatch(plant, targetZombieModel, itemDetail, p
             ExpectedCount = markerConfig.ExpectedCount,
             FallbackInterval = markerConfig.FallbackInterval,
             FallbackTimeout = markerConfig.FallbackTimeout,
-            FallbackStartDelay = math.max(0, tonumber(itemDetail.AttackWindUpTime) or 0),
+            FallbackStartDelay = markerConfig.FallbackStartDelay,
             ProjectileName = projectileName,
             TargetZombieModel = targetZombieModel,
             TargetPosition = getProjectileTargetPosition(targetZombieModel, targetRoot),
@@ -2027,8 +2046,10 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
 
             if targetZombieModel and targetHum then
                 local markerProjectileConfig = getMarkerProjectileConfig(itemDetail)
+                local attackVFXMarker = itemDetail.AttackVFXMarker
+                local hasAttackVFXMarker = type(attackVFXMarker) == "string" and attackVFXMarker ~= ""
                 local markerAttackToken = nil
-                if markerProjectileConfig then
+                if markerProjectileConfig or hasAttackVFXMarker then
                     nextMarkerProjectileAttackToken += 1
                     markerAttackToken = nextMarkerProjectileAttackToken
                 end
@@ -2077,7 +2098,9 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                         attackVFXDuration,
                         math.max(0.01, tonumber(itemDetail.AttackVFXPulseInterval) or 0.1),
                         speedMult,
-                        plot and plot:GetAttribute("OwnerId")
+                        plot and plot:GetAttribute("OwnerId"),
+                        hasAttackVFXMarker and attackVFXMarker or nil,
+                        markerAttackToken
                     )
                 end
 

@@ -4,6 +4,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local SUNSHROOM_HEAL_VFX_DEBUG = false
+local continuousAttackEmitterCache = setmetatable({}, { __mode = "k" })
 
 -- 定义所有变异特效的标签名称
 local MUTATION_TAGS = { "Glow", "Lightning", "HolyLight" }
@@ -171,6 +172,58 @@ function EffectUtil.PlayAttackVFX(model)
             emittedCount
         ))
     end
+end
+
+local function getContinuousAttackEmitters(model)
+    local cached = continuousAttackEmitterCache[model]
+    if cached then
+        local validEmitters = {}
+        for _, emitter in ipairs(cached) do
+            if emitter and emitter.Parent and emitter:IsDescendantOf(model) then
+                table.insert(validEmitters, emitter)
+            end
+        end
+        if #validEmitters > 0 then
+            continuousAttackEmitterCache[model] = validEmitters
+            return validEmitters
+        end
+    end
+
+    local emitters = {}
+    local seen = {}
+    for _, node in ipairs(model:GetDescendants()) do
+        if string.upper(node.Name) == "VFX" then
+            if node:IsA("ParticleEmitter") and not seen[node] then
+                seen[node] = true
+                table.insert(emitters, node)
+            end
+            for _, descendant in ipairs(node:GetDescendants()) do
+                if descendant:IsA("ParticleEmitter") and not seen[descendant] then
+                    seen[descendant] = true
+                    table.insert(emitters, descendant)
+                end
+            end
+        end
+    end
+
+    continuousAttackEmitterCache[model] = emitters
+    return emitters
+end
+
+-- 持续启停模型 VFX 节点内的粒子；关闭时保留现有粒子自然结束。
+function EffectUtil.SetAttackVFXContinuous(model, enabled)
+    if not model then
+        return 0
+    end
+
+    local changedCount = 0
+    for _, emitter in ipairs(getContinuousAttackEmitters(model)) do
+        if emitter and emitter.Parent and emitter:IsDescendantOf(model) then
+            emitter.Enabled = enabled == true
+            changedCount += 1
+        end
+    end
+    return changedCount
 end
 
 return EffectUtil

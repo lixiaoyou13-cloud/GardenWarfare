@@ -399,7 +399,7 @@ function EncyclopediaController.Init()
                 and getGlobalZombieDamageTakenBonusText(plantDetail, mutationLevel)
                 or nil
             if globalDamageBonusText then
-                detailDpsText.Text = "伤害增幅: " .. globalDamageBonusText .. "%"
+                detailDpsText.Text = "Damage Boost: " .. globalDamageBonusText .. "%"
             elseif finalHeal then
                 detailDpsText.Text = "Heal: " .. formatStatNumber(finalHeal)
             elseif finalAttack then

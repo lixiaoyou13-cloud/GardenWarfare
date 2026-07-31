@@ -112,6 +112,11 @@ local function isModelVFXContainer(part)
 	return part and part:IsA("BasePart") and string.upper(part.Name) == "VFX"
 end
 
+-- 独立发射定位点必须保持静止，避免动画模型解除锚定后受重力下落。
+local function isStaticProjectileOrigin(part)
+	return part and part:IsA("BasePart") and string.lower(part.Name) == "pos"
+end
+
 -- 把未参与骨骼/关节的 VFX 容器固定到主节点，防止进入战斗后掉落。
 local function weldModelVFXContainer(part, rootPart)
 	if not (part and rootPart) or part == rootPart then
@@ -223,6 +228,7 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 	for _, part in pairs(cachedParts.BaseParts) do
 		if part:IsA("BasePart") then
 			local isVFXContainer = isModelVFXContainer(part)
+			local isProjectileOrigin = isStaticProjectileOrigin(part)
 			-- 记录原始透明度
 			if not part:GetAttribute("OriginalTransparency") then
 				part:SetAttribute("OriginalTransparency", part.Transparency)
@@ -240,7 +246,7 @@ function CombatService.SpawnCombatPlant(lawnPart, plantId, currentHP, maxHP, mut
 			else
 				part.CanQuery = true
 			end
-			part.Anchored = (not hasAnyAnim or part == newFighter.PrimaryPart)
+			part.Anchored = (isProjectileOrigin or not hasAnyAnim or part == newFighter.PrimaryPart)
 		end
 	end
 
