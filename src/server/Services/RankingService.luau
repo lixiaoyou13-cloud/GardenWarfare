@@ -100,6 +100,46 @@ local function ClearList(list)
     end
 end
 
+local function getMigrationCapLevel()
+    return math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationCapClearedLevel)
+        or tonumber(RankingSeasonConfig.SeasonCarryOverMaxClearedLevel)
+        or 1000)
+end
+
+local function readTopRankingEntries(store)
+    local success, pagesOrErr = pcall(function()
+        return store:GetSortedAsync(false, TOP_COUNT)
+    end)
+    if not success or not pagesOrErr then
+        return nil, pagesOrErr
+    end
+
+    local pageSuccess, entriesOrErr = pcall(function()
+        return pagesOrErr:GetCurrentPage()
+    end)
+    if not pageSuccess or type(entriesOrErr) ~= "table" then
+        return nil, entriesOrErr
+    end
+
+    return entriesOrErr, nil
+end
+
+local function buildMigrationDisplayEntries(entries)
+    local capLevel = getMigrationCapLevel()
+    local displayEntries = {}
+
+    for _, entry in ipairs(entries) do
+        local sourceScore = math.max(0, math.floor(tonumber(entry.value) or 0))
+        local displayScore = capLevel > 0 and math.min(sourceScore, capLevel) or sourceScore
+        table.insert(displayEntries, {
+            key = entry.key,
+            value = displayScore,
+        })
+    end
+
+    return displayEntries
+end
+
 local function ApplyProfile(item, profile)
     if not item.Parent then
         return
@@ -198,18 +238,31 @@ end
 
 -- 功能 刷新排行榜显示
 local function RefreshDisplay()
-    if currentStoreResetRunning or currentStoreMigrationRunning then
+    if currentStoreResetRunning then
         return
     end
 
-    -- 1. 从数据库获取排行榜数据
-    local success, pages = pcall(function()
-        return RankingStore:GetSortedAsync(false, TOP_COUNT) -- false 为降序
-    end)
-
-    if not success or not pages then return end
-
-    local data = pages:GetCurrentPage()
+    local data
+    if currentStoreMigrationRunning then
+        local sourceData, sourceErr = readTopRankingEntries(MigrationSourceStore)
+        if sourceData and #sourceData > 0 then
+            data = buildMigrationDisplayEntries(sourceData)
+        else
+            local currentData, currentErr = readTopRankingEntries(RankingStore)
+            if currentData and #currentData > 0 then
+                data = currentData
+            else
+                warn("[RankingMigration] Failed to refresh temporary ranking display. Source: "
+                    .. tostring(sourceErr or "empty") .. "; current: " .. tostring(currentErr or "empty"))
+                return
+            end
+        end
+    else
+        data = readTopRankingEntries(RankingStore)
+        if not data then
+            return
+        end
+    end
 
     -- 2. 每次刷新时间重新遍历 Workspace，找到所有 Ranking_Level* 排行榜对象
     local lists = GetRankingLists()
@@ -548,12 +601,6 @@ local function waitForCurrentStoreMigrationCompletion(migrationId)
     return false
 end
 
-local function getMigrationCapLevel()
-    return math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationCapClearedLevel)
-        or tonumber(RankingSeasonConfig.SeasonCarryOverMaxClearedLevel)
-        or 1000)
-end
-
 local function migrateCurrentRankingStore()
     local pageSize = math.clamp(math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationPageSize) or 100), 1, 100)
     local maxPages = math.max(1, math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationMaxPages) or 1000))
@@ -643,6 +690,7 @@ local function runCurrentStoreMigrationIfNeeded()
     end
 
     currentStoreMigrationRunning = true
+    RefreshDisplay()
 
     while true do
         local acquired, completed, lockErr = acquireCurrentStoreMigrationLock(migrationId)
