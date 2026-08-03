@@ -4,7 +4,7 @@ RankingSeasonConfig.SettlementId = "LevelRanking_v2_20260731"
 RankingSeasonConfig.SeasonId = "LevelRanking_v3_20260731_Cap1000"
 RankingSeasonConfig.PreviousSeasonId = "LevelRanking_v2_20260707_Reset1"
 RankingSeasonConfig.PreviousStoreName = "LevelRanking_v2"
-RankingSeasonConfig.CurrentStoreName = "LevelRanking_v3"
+RankingSeasonConfig.CurrentStoreName = "LevelRanking_v3_lazy_v1"
 RankingSeasonConfig.SettlementStateStoreName = "LeaderboardSettlementState_v1"
 RankingSeasonConfig.TopCount = 60
 RankingSeasonConfig.RankValuePrefix = "Lv."
@@ -24,7 +24,7 @@ RankingSeasonConfig.SeasonCarryOverFromSeasonId = RankingSeasonConfig.PreviousSe
 RankingSeasonConfig.SeasonCarryOverMaxClearedLevel = 1000
 RankingSeasonConfig.SeasonCarryOverFallbackToUnlockedLevel = true
 
-RankingSeasonConfig.CurrentStoreMigrationEnabled = true
+RankingSeasonConfig.CurrentStoreMigrationEnabled = false
 RankingSeasonConfig.CurrentStoreMigrationId = "LevelRanking_v2_to_v3_cap1000_20260731"
 RankingSeasonConfig.CurrentStoreMigrationSourceName = "LevelRanking_v2"
 RankingSeasonConfig.CurrentStoreMigrationStateStoreName = "RankingStoreMigrationState_v1"
@@ -33,6 +33,13 @@ RankingSeasonConfig.CurrentStoreMigrationPageSize = 100
 RankingSeasonConfig.CurrentStoreMigrationMaxPages = 1000
 RankingSeasonConfig.CurrentStoreMigrationWriteDelaySeconds = 0.05
 RankingSeasonConfig.CurrentStoreMigrationCapClearedLevel = 1000
+
+RankingSeasonConfig.LazyRankingMigrationEnabled = true
+RankingSeasonConfig.LazyRankingMigrationSourceStoreName = "LevelRanking_v2"
+RankingSeasonConfig.LazyRankingMigrationInStudio = false
+RankingSeasonConfig.LazyRankingMigrationCapClearedLevel = 1000
+RankingSeasonConfig.LazyRankingMigrationInitialRetryDelaySeconds = 30
+RankingSeasonConfig.LazyRankingMigrationRetryIntervalSeconds = 5
 
 RankingSeasonConfig.CurrentStoreResetEnabled = false
 RankingSeasonConfig.CurrentStoreResetId = "LevelRanking_v3_unused_reset_20260731"

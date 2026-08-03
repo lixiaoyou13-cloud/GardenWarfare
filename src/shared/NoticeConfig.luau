@@ -7,6 +7,18 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
     {
+        Id = "notice-2026-08-03",
+        TagText = "2026/8/3",
+        PublishedAt = "2026-08-03",
+        Title = "August 3 Bug Fixes",
+        Sections = {
+            {
+                Title = "Bug Fixes",
+                Content = "Fixed an issue where the new season leaderboard did not refresh correctly.\nFixed missing animations for some plants.",
+            },
+        },
+    },
+    {
         Id = "notice-2026-07-31",
         TagText = "2026/7/31",
         PublishedAt = "2026-07-31",

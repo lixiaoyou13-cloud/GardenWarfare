@@ -15,6 +15,8 @@ local ResetStateStore = DataStoreService:GetDataStore(RankingSeasonConfig.Curren
 local MIGRATION_SOURCE_STORE_NAME = RankingSeasonConfig.CurrentStoreMigrationSourceName or RankingSeasonConfig.PreviousStoreName or CURRENT_STORE_NAME
 local MigrationSourceStore = DataStoreService:GetOrderedDataStore(MIGRATION_SOURCE_STORE_NAME)
 local MigrationStateStore = DataStoreService:GetDataStore(RankingSeasonConfig.CurrentStoreMigrationStateStoreName or "RankingStoreMigrationState_v1")
+local LAZY_MIGRATION_SOURCE_STORE_NAME = RankingSeasonConfig.LazyRankingMigrationSourceStoreName or "LevelRanking_v2"
+local LazyMigrationSourceStore = DataStoreService:GetOrderedDataStore(LAZY_MIGRATION_SOURCE_STORE_NAME)
 
 local EntryTemplate = ReplicatedStorage:WaitForChild("UITemplates"):WaitForChild("EntryTemplate")
 
@@ -27,6 +29,9 @@ local rankingListsDirty = true
 local profileCache = {}
 local profileWaiters = {}
 local lastSyncedScores = {}
+local rankingSyncStates = {}
+local lazyMigrationStates = {}
+local departingPlayers = setmetatable({}, { __mode = "k" })
 local displayRefreshQueued = false
 local currentStoreResetRunning = false
 local currentStoreMigrationRunning = false
@@ -34,6 +39,10 @@ local RESET_LOCK_TIMEOUT_SECONDS = 1800
 local RESET_STATE_POLL_SECONDS = 5
 local MIGRATION_LOCK_TIMEOUT_SECONDS = 3600
 local MIGRATION_STATE_POLL_SECONDS = 5
+local LAZY_MIGRATION_INITIAL_RETRY_SECONDS = math.max(1,
+    tonumber(RankingSeasonConfig.LazyRankingMigrationInitialRetryDelaySeconds) or 30)
+local LAZY_MIGRATION_RETRY_SECONDS = math.max(1,
+    tonumber(RankingSeasonConfig.LazyRankingMigrationRetryIntervalSeconds) or 5)
 
 local function IsRankingRoot(obj)
     return string.sub(obj.Name, 1, #"Ranking_Level") == "Ranking_Level"
@@ -102,6 +111,12 @@ end
 
 local function getMigrationCapLevel()
     return math.floor(tonumber(RankingSeasonConfig.CurrentStoreMigrationCapClearedLevel)
+        or tonumber(RankingSeasonConfig.SeasonCarryOverMaxClearedLevel)
+        or 1000)
+end
+
+local function getLazyMigrationCapLevel()
+    return math.floor(tonumber(RankingSeasonConfig.LazyRankingMigrationCapClearedLevel)
         or tonumber(RankingSeasonConfig.SeasonCarryOverMaxClearedLevel)
         or 1000)
 end
@@ -748,41 +763,237 @@ local function QueueDisplayRefresh()
 end
 
 -- 功能 同步在线玩家数据
+local function writeRankingScoreMax(userId, score)
+    local normalizedScore = math.max(0, math.floor(tonumber(score) or 0))
+    if normalizedScore <= 0 then
+        return true, nil
+    end
+
+    local success, resultOrErr = pcall(function()
+        return RankingStore:UpdateAsync(tostring(userId), function(currentScore)
+            local currentNumber = math.max(0, math.floor(tonumber(currentScore) or 0))
+            return math.max(currentNumber, normalizedScore)
+        end)
+    end)
+    if not success then
+        return false, resultOrErr
+    end
+
+    return true, nil
+end
+
+local function shouldRunLazyRankingMigration()
+    if RankingSeasonConfig.LazyRankingMigrationEnabled ~= true then
+        return false
+    end
+
+    if RunService:IsStudio() and RankingSeasonConfig.LazyRankingMigrationInStudio ~= true then
+        return false
+    end
+
+    return LAZY_MIGRATION_SOURCE_STORE_NAME ~= CURRENT_STORE_NAME
+end
+
+local function isLazyMigrationStateActive(userId, state)
+    local player = state and state.Player
+    return lazyMigrationStates[userId] == state
+        and player ~= nil
+        and player.Parent == Players
+        and departingPlayers[player] ~= true
+end
+
+local function runLazyRankingMigration(userId, state)
+    while isLazyMigrationStateActive(userId, state) do
+        local retryDelaySeconds = LAZY_MIGRATION_RETRY_SECONDS
+
+        if state.LegacyReadCompleted ~= true then
+            local readOk, legacyScoreOrErr = pcall(function()
+                return LazyMigrationSourceStore:GetAsync(tostring(userId))
+            end)
+
+            if not isLazyMigrationStateActive(userId, state) then
+                return
+            end
+
+            if readOk then
+                local legacyScore = math.max(0, math.floor(tonumber(legacyScoreOrErr) or 0))
+                local capLevel = getLazyMigrationCapLevel()
+                state.LegacyScore = capLevel > 0 and math.min(legacyScore, capLevel) or legacyScore
+                state.LegacyReadCompleted = true
+            else
+                state.ReadFailures += 1
+                if state.ReadFailures == 1 or state.ReadFailures % 12 == 0 then
+                    warn("[RankingLazyMigration] Failed to read legacy score for user " .. tostring(userId)
+                        .. ": " .. tostring(legacyScoreOrErr))
+                end
+                retryDelaySeconds = state.ReadFailures == 1
+                    and LAZY_MIGRATION_INITIAL_RETRY_SECONDS
+                    or LAZY_MIGRATION_RETRY_SECONDS
+            end
+        end
+
+        if state.LegacyReadCompleted == true then
+            local player = state.Player
+            local playerData = PlayerDataManager.GetPlayerData(player)
+            if playerData then
+                local personalScore = RankingSeasonConfig.GetSeasonClearedLevel(playerData)
+                local mergedScore = math.max(
+                    math.max(0, math.floor(tonumber(personalScore) or 0)),
+                    math.max(0, math.floor(tonumber(state.LegacyScore) or 0))
+                )
+                if not isLazyMigrationStateActive(userId, state) then
+                    return
+                end
+
+                local writeOk, writeErr = writeRankingScoreMax(userId, mergedScore)
+                if writeOk then
+                    if isLazyMigrationStateActive(userId, state) then
+                        state.Completed = true
+                        state.Running = false
+                        QueueDisplayRefresh()
+                    end
+                    return
+                end
+
+                state.WriteFailures += 1
+                if state.WriteFailures == 1 or state.WriteFailures % 12 == 0 then
+                    warn("[RankingLazyMigration] Failed to write migrated score for user " .. tostring(userId)
+                        .. ": " .. tostring(writeErr))
+                end
+            end
+        end
+
+        if isLazyMigrationStateActive(userId, state) then
+            task.wait(retryDelaySeconds)
+        end
+    end
+end
+
+local function scheduleLazyRankingMigration(player)
+    if not shouldRunLazyRankingMigration()
+        or not player
+        or player.Parent ~= Players
+        or departingPlayers[player] == true then
+        return
+    end
+
+    local userId = player.UserId
+    local existingState = lazyMigrationStates[userId]
+    if existingState and existingState.Player == player then
+        return
+    end
+
+    local state = {
+        Player = player,
+        Running = true,
+        Completed = false,
+        LegacyReadCompleted = false,
+        LegacyScore = 0,
+        ReadFailures = 0,
+        WriteFailures = 0,
+        Thread = nil,
+    }
+    lazyMigrationStates[userId] = state
+
+    state.Thread = task.spawn(function()
+        local success, err = xpcall(function()
+            runLazyRankingMigration(userId, state)
+        end, debug.traceback)
+
+        if not success then
+            warn("[RankingLazyMigration] Unexpected migration error for user " .. tostring(userId)
+                .. ": " .. tostring(err))
+        end
+
+        if lazyMigrationStates[userId] == state and state.Completed ~= true then
+            lazyMigrationStates[userId] = nil
+        end
+    end)
+end
+
+local function cancelLazyRankingMigration(player)
+    local userId = player and player.UserId
+    local state = userId and lazyMigrationStates[userId]
+    if not state or state.Player ~= player then
+        return
+    end
+
+    lazyMigrationStates[userId] = nil
+    local thread = state.Thread
+    if thread and coroutine.status(thread) ~= "dead" then
+        pcall(task.cancel, thread)
+    end
+end
+
+local function syncOnePlayerRanking(player)
+    local playerData = PlayerDataManager.GetPlayerData(player)
+    if not playerData then
+        return
+    end
+
+    local userId = player.UserId
+    local seasonScore = math.max(0,
+        math.floor(tonumber(RankingSeasonConfig.GetSeasonClearedLevel(playerData)) or 0))
+    if lastSyncedScores[userId] ~= seasonScore then
+        local writeOk, writeErr = writeRankingScoreMax(userId, seasonScore)
+        if writeOk then
+            if departingPlayers[player] ~= true then
+                lastSyncedScores[userId] = seasonScore
+            end
+            QueueDisplayRefresh()
+        else
+            warn("[RankingService] Failed to sync score for user " .. tostring(userId)
+                .. ": " .. tostring(writeErr))
+        end
+    end
+
+    scheduleLazyRankingMigration(player)
+end
+
 function RankingService.SyncData(player)
-    if currentStoreResetRunning or currentStoreMigrationRunning then
+    if currentStoreResetRunning or currentStoreMigrationRunning or not player then
         return
     end
 
-    local pData = PlayerDataManager.GetPlayerData(player)
-    if not pData then
+    local userId = player.UserId
+    local existingState = rankingSyncStates[userId]
+    if existingState then
+        existingState.PendingPlayer = player
         return
     end
 
-    local seasonScore = RankingSeasonConfig.GetSeasonClearedLevel(pData)
-    if lastSyncedScores[player.UserId] == seasonScore then
-        return
+    local state = {
+        PendingPlayer = nil,
+    }
+    rankingSyncStates[userId] = state
+
+    local success, err = xpcall(function()
+        local currentPlayer = player
+        while currentPlayer do
+            state.PendingPlayer = nil
+            if currentStoreResetRunning or currentStoreMigrationRunning then
+                break
+            end
+
+            syncOnePlayerRanking(currentPlayer)
+            currentPlayer = state.PendingPlayer
+        end
+    end, debug.traceback)
+
+    if rankingSyncStates[userId] == state then
+        rankingSyncStates[userId] = nil
     end
 
-    local success = false
-    if seasonScore <= 0 then
-        success = pcall(function()
-            RankingStore:RemoveAsync(tostring(player.UserId))
-        end)
-        seasonScore = 0
-    else
-        success = pcall(function()
-            RankingStore:SetAsync(tostring(player.UserId), seasonScore)
-        end)
-    end
-
-    if success then
-        lastSyncedScores[player.UserId] = seasonScore
-        QueueDisplayRefresh()
+    if not success then
+        warn("[RankingService] Unexpected sync error for user " .. tostring(userId)
+            .. ": " .. tostring(err))
     end
 end
 
 function RankingService.Init()
-    task.spawn(runCurrentStoreMigrationIfNeeded)
+    if RankingSeasonConfig.CurrentStoreMigrationEnabled == true then
+        task.spawn(runCurrentStoreMigrationIfNeeded)
+    end
     task.spawn(runCurrentStoreResetIfNeeded)
 
     Workspace.DescendantAdded:Connect(MarkRankingListsDirty)
@@ -798,11 +1009,14 @@ function RankingService.Init()
 
     -- 玩家离开时间保持存
     Players.PlayerRemoving:Connect(function(player)
+        departingPlayers[player] = true
+        cancelLazyRankingMigration(player)
         RankingService.SyncData(player)
         lastSyncedScores[player.UserId] = nil
     end)
 
     Players.PlayerAdded:Connect(function(player)
+        departingPlayers[player] = nil
         task.spawn(function()
             PlayerDataManager.WaitForPlayerData(player, 30)
             if player.Parent then
