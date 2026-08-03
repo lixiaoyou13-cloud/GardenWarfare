@@ -16,6 +16,10 @@ NoticeConfig.Notices = {
                 Title = "Bug Fixes",
                 Content = "Fixed an issue where the new season leaderboard did not refresh correctly.\nFixed missing animations for some plants.",
             },
+            {
+                Title = "Season Pass Extension",
+                Content = "The current Season Pass has been extended until August 7.",
+            },
         },
     },
     {
