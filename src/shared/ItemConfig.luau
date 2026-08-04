@@ -1027,6 +1027,7 @@ local ItemConfig = {
 			Attack = 2000,
 			AttackInterval = 2,
 			NoSeed = true,
+			NoMutation = true,
 			HideFromStandardCodex = true,
 			CodexCategory = 5,
 			CodexLabel = "Mutant",

@@ -372,6 +372,18 @@ local function getPotionTargetInfo(player, targetPlant)
         local plantId = if isPumpkinShield
             then (targetPlant:GetAttribute("PlantId") or targetPlant.Name)
             else ((combatInfo and combatInfo.PlantId) or targetPlant.Name)
+        if isPumpkinShield then
+            if not lawnPart:IsA("BasePart") or lawnPart.Name ~= gridName then
+                return nil, "This plant cannot mutate right now."
+            end
+            local shieldInfo = type(combatInfo) == "table" and combatInfo.PumpkinShield
+            if type(shieldInfo) ~= "table" or shieldInfo.PlantId ~= plantId then
+                return nil, "This plant cannot mutate right now."
+            end
+            if type(combatInfo.PlantId) == "string" and combatInfo.PlantId ~= "" then
+                return nil, "Remove the plant inside before using a mutation potion on this Pumpkin Shield."
+            end
+        end
         local plantConfig = ItemConfig.Plants and ItemConfig.Plants[plantId]
         if plantConfig and plantConfig.NoMutation == true then
             return nil, "This plant cannot mutate."

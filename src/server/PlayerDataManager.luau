@@ -58,6 +58,7 @@ local PASS_V1_MAX_LEVEL = 10
 local PASS_V1_EXP_PER_LEVEL = 200
 local DATA_LOAD_KICK_MESSAGE = "Your data could not be loaded. Please rejoin the game."
 local STALE_SESSION_KICK_MESSAGE = "Your data is active in a newer server. Please rejoin the game."
+local ILLEGAL_MUTATION_ENFORCEMENT_ENABLED = false
 local ILLEGAL_MUTATION_DETECTION_VERSION = "illegal-no-seed-no-mutation-v1"
 local ILLEGAL_MUTATION_ADMIN_USER_IDS = {
     [10972923838] = true,
@@ -1590,7 +1591,7 @@ local function acquireSessionData(player)
     end
 
     -- Studio 命中非法变异时只能只读检查，不能通过会话锁 UpdateAsync 改写线上存档。
-    if isStudioRuntime() and not isIllegalMutationAdmin(player) then
+    if ILLEGAL_MUTATION_ENFORCEMENT_ENABLED and isStudioRuntime() and not isIllegalMutationAdmin(player) then
         local readOk, studioData = pcall(function()
             return PlayerDataStore:GetAsync(userId)
         end)
@@ -2694,42 +2695,44 @@ local function onPlayerAdded(player)
                 if savedData then
                 local illegalMutationAdmin = isIllegalMutationAdmin(player)
                 local illegalMutationReport = nil
-                if illegalMutationAdmin then
-                    print("[IllegalMutation] Admin whitelist bypass for userId " .. tostring(player.UserId) .. ".")
-                else
-                    illegalMutationReport = scanIllegalMutationData(savedData, not isStudioRuntime())
-                end
+                if ILLEGAL_MUTATION_ENFORCEMENT_ENABLED then
+                    if illegalMutationAdmin then
+                        print("[IllegalMutation] Admin whitelist bypass for userId " .. tostring(player.UserId) .. ".")
+                    else
+                        illegalMutationReport = scanIllegalMutationData(savedData, not isStudioRuntime())
+                    end
 
-                if illegalMutationReport and illegalMutationReport.Detected then
-                    if isStudioRuntime() then
-                        logIllegalMutationReport(player, illegalMutationReport, "studio_dry_run", "detected", nil)
+                    if illegalMutationReport and illegalMutationReport.Detected then
+                        if isStudioRuntime() then
+                            logIllegalMutationReport(player, illegalMutationReport, "studio_dry_run", "detected", nil)
+                            return
+                        end
+
+                        sessionData[player.UserId] = savedData
+                        dataSaveAllowed[player.UserId] = true
+                        logIllegalMutationReport(player, illegalMutationReport, "live", "cleanup_applied", nil)
+
+                        local cleanupSaved, cleanupSaveErr = savePlayerSession(player, {
+                            RespectMinInterval = false,
+                        })
+                        if cleanupSaved then
+                            logIllegalMutationReport(player, illegalMutationReport, "live", "cleanup_save_succeeded", nil)
+                            banPlayerForIllegalMutations(player, illegalMutationReport)
+                        else
+                            logIllegalMutationReport(
+                                player,
+                                illegalMutationReport,
+                                "live",
+                                "cleanup_save_failed_ban_skipped",
+                                cleanupSaveErr
+                            )
+                        end
+
+                        if player.Parent then
+                            player:Kick(ILLEGAL_MUTATION_DISPLAY_REASON)
+                        end
                         return
                     end
-
-                    sessionData[player.UserId] = savedData
-                    dataSaveAllowed[player.UserId] = true
-                    logIllegalMutationReport(player, illegalMutationReport, "live", "cleanup_applied", nil)
-
-                    local cleanupSaved, cleanupSaveErr = savePlayerSession(player, {
-                        RespectMinInterval = false,
-                    })
-                    if cleanupSaved then
-                        logIllegalMutationReport(player, illegalMutationReport, "live", "cleanup_save_succeeded", nil)
-                        banPlayerForIllegalMutations(player, illegalMutationReport)
-                    else
-                        logIllegalMutationReport(
-                            player,
-                            illegalMutationReport,
-                            "live",
-                            "cleanup_save_failed_ban_skipped",
-                            cleanupSaveErr
-                        )
-                    end
-
-                    if player.Parent then
-                        player:Kick(ILLEGAL_MUTATION_DISPLAY_REASON)
-                    end
-                    return
                 end
 
                 local sunResetApplied = false
