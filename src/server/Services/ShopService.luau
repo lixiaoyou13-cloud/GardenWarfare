@@ -1,15 +1,59 @@
 -- src/server/Services/ShopService.luau
 local ShopService = {}
 local AnalyticsService = game:GetService("AnalyticsService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+local ShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ShopConfig"))
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
+
+local RestockConfig = ShopConfig.Restock
+local RestockMessages = RestockConfig.Messages
 
 local REFRESH_INTERVAL = 300 -- 5分钟补货一次数
 
 local currentShopItems = {}
 local playerSpecificStock = {}
+local paidRestockExpiresAt = {}
 local nextRefreshTime = 0
+local restockRequestLocks = {}
+local lastRestockRequestAt = {}
+
+local GetPlayerStockData
+
+local function clearExpiredPaidRestock(userId, now)
+    local expiresAt = paidRestockExpiresAt[userId]
+    if expiresAt == nil then
+        return false
+    end
+
+    expiresAt = tonumber(expiresAt)
+    if expiresAt and expiresAt > now then
+        return false
+    end
+
+    paidRestockExpiresAt[userId] = nil
+    playerSpecificStock[userId] = nil
+    return true
+end
+
+local function getActivePaidRestockExpiresAt(userId, now)
+    clearExpiredPaidRestock(userId, now)
+
+    local expiresAt = tonumber(paidRestockExpiresAt[userId])
+    if expiresAt and expiresAt > now then
+        return expiresAt
+    end
+    return nil
+end
+
+local function getPlayerRefreshTime(player)
+    if not player then
+        return nextRefreshTime
+    end
+
+    return getActivePaidRestockExpiresAt(player.UserId, os.time()) or nextRefreshTime
+end
 
 local function getSpecialShopConfig(seedDetail)
     local specialShop = seedDetail and seedDetail.SpecialShop
@@ -86,7 +130,7 @@ local function saveShopTransaction(player, data, snapshot, stockSnapshot, contex
 
     local updateShopRE = ReplicatedStorage:FindFirstChild("UpdateShopRE")
     if updateShopRE and stockSnapshot and player and player.Parent then
-        updateShopRE:FireClient(player, playerSpecificStock[player.UserId], nextRefreshTime)
+        updateShopRE:FireClient(player, GetPlayerStockData(player), getPlayerRefreshTime(player))
     end
 
     local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "rollback " .. tostring(context))
@@ -100,7 +144,6 @@ end
 
 function ShopService.RefreshStock()
     currentShopItems = {}
-    playerSpecificStock = {}
     local stockedSeeds = {}
 
     for _, seedId in ipairs(ItemConfig.IdToSeedKey or {}) do
@@ -168,22 +211,51 @@ function ShopService.RefreshStock()
         end
     end
 
-    nextRefreshTime = os.time() + REFRESH_INTERVAL
+    local now = os.time()
+    nextRefreshTime = now + REFRESH_INTERVAL
+
+    -- 全服自然刷新只重置普通库存，仍在保护期内的付费库存继续保留。
+    for userId in pairs(playerSpecificStock) do
+        if not getActivePaidRestockExpiresAt(userId, now) then
+            playerSpecificStock[userId] = nil
+            paidRestockExpiresAt[userId] = nil
+        end
+    end
+    for userId in pairs(paidRestockExpiresAt) do
+        if playerSpecificStock[userId] == nil then
+            paidRestockExpiresAt[userId] = nil
+        end
+    end
+
     ShopService.BroadcastStockUpdate()
 end
 
-local function GetPlayerStockData(player)
-    if not playerSpecificStock[player.UserId] then
-        local personal = {}
-        for i, item in ipairs(currentShopItems) do
-            table.insert(personal, {
-                SeedId = item.SeedId,
-                Stock = item.MaxStock,
-                SpecialShop = item.SpecialShop == true,
-                ShopStyle = item.ShopStyle,
-            })
+local function createPlayerStock(rerollSpecialStock)
+    local personal = {}
+
+    for _, item in ipairs(currentShopItems) do
+        local stock = item.MaxStock
+        if item.SpecialShop == true and rerollSpecialStock == true then
+            local itemDetail = ItemConfig.Seeds[item.SeedId]
+            local specialShop = getSpecialShopConfig(itemDetail)
+            stock = specialShop and (math.random() < specialShop.Chance and specialShop.Stock or 0) or 0
         end
-        playerSpecificStock[player.UserId] = personal
+
+        table.insert(personal, {
+            SeedId = item.SeedId,
+            Stock = math.max(0, math.floor(tonumber(stock) or 0)),
+            SpecialShop = item.SpecialShop == true,
+            ShopStyle = item.ShopStyle,
+        })
+    end
+
+    return personal
+end
+
+GetPlayerStockData = function(player)
+    getActivePaidRestockExpiresAt(player.UserId, os.time())
+    if not playerSpecificStock[player.UserId] then
+        playerSpecificStock[player.UserId] = createPlayerStock(false)
     end
     return playerSpecificStock[player.UserId]
 end
@@ -193,8 +265,107 @@ function ShopService.BroadcastStockUpdate()
     if not updateShopRE then return end
 
     for _, player in ipairs(game.Players:GetPlayers()) do
-        updateShopRE:FireClient(player, GetPlayerStockData(player), nextRefreshTime)
+        updateShopRE:FireClient(player, GetPlayerStockData(player), getPlayerRefreshTime(player))
     end
+end
+
+local function firePlayerStockUpdate(player)
+    local updateShopRE = ReplicatedStorage:FindFirstChild("UpdateShopRE")
+    if updateShopRE and player and player.Parent then
+        updateShopRE:FireClient(player, GetPlayerStockData(player), getPlayerRefreshTime(player))
+    end
+end
+
+local function refreshPlayerStock(player)
+    local data = PlayerDataManager.GetPlayerData(player)
+    if not data then
+        return false, RestockMessages.DataLoading
+    end
+    if not PlayerDataManager.IsDataSafeToSave(player) then
+        return false, RestockMessages.SaveUnavailable
+    end
+    if #currentShopItems <= 0 then
+        return false, RestockMessages.ShopUnavailable
+    end
+
+    local restockPrice = math.max(0, math.floor(tonumber(RestockConfig.Price) or 0))
+    if restockPrice <= 0 then
+        warn("[ShopService] Paid restock price is invalid.")
+        return false, RestockMessages.ShopUnavailable
+    end
+
+    local currentCoins = math.max(0, math.floor(tonumber(data.Coins) or 0))
+    if currentCoins < restockPrice then
+        return false, RestockMessages.NotEnoughSun
+    end
+
+    local userId = player.UserId
+    local previousCoins = data.Coins
+    local previousStock = cloneValue(GetPlayerStockData(player))
+    local previousPaidRestockExpiresAt = paidRestockExpiresAt[userId]
+    local refreshedStock = createPlayerStock(true)
+    local paidStockDuration = math.max(1, math.floor(tonumber(RestockConfig.PaidStockDurationSeconds) or REFRESH_INTERVAL))
+    local refreshedStockExpiresAt = os.time() + paidStockDuration
+
+    local transactionOk, saveQueued, saveErr = pcall(function()
+        data.Coins = currentCoins - restockPrice
+        playerSpecificStock[userId] = refreshedStock
+        paidRestockExpiresAt[userId] = refreshedStockExpiresAt
+        return PlayerDataManager.RequestSave(player, "paid shop restock")
+    end)
+    if not transactionOk or not saveQueued then
+        data.Coins = previousCoins
+        if player.Parent == Players then
+            playerSpecificStock[userId] = previousStock
+            paidRestockExpiresAt[userId] = previousPaidRestockExpiresAt
+            PlayerDataManager.FireDataPatch(player, { Coins = data.Coins })
+            firePlayerStockUpdate(player)
+        else
+            playerSpecificStock[userId] = nil
+            paidRestockExpiresAt[userId] = nil
+        end
+
+        warn("[ShopService] Failed to queue paid restock save for "
+            .. tostring(player and player.Name or "unknown") .. ": "
+            .. tostring(transactionOk and saveErr or saveQueued))
+        return false, RestockMessages.SaveUnavailable
+    end
+
+    PlayerDataManager.FireDataPatch(player, { Coins = data.Coins })
+    firePlayerStockUpdate(player)
+
+    return true, RestockMessages.Success, refreshedStock, getPlayerRefreshTime(player)
+end
+
+local function safeRefreshPlayerStock(player)
+    local userId = player and player.UserId
+    if not userId then
+        return false, RestockMessages.PlayerUnavailable
+    end
+
+    local now = os.clock()
+    local cooldownSeconds = math.max(0, tonumber(RestockConfig.RequestCooldownSeconds) or 1)
+    if restockRequestLocks[userId] then
+        return false, RestockMessages.Processing
+    end
+    if now - (lastRestockRequestAt[userId] or -math.huge) < cooldownSeconds then
+        return false, RestockMessages.Cooldown
+    end
+
+    restockRequestLocks[userId] = true
+    lastRestockRequestAt[userId] = now
+    local ok, success, message, stock, refreshTime = pcall(function()
+        return refreshPlayerStock(player)
+    end)
+    restockRequestLocks[userId] = nil
+
+    if not ok then
+        warn("[ShopService] Paid restock crashed for "
+            .. tostring(player and player.Name or "unknown") .. ": " .. tostring(success))
+        return false, RestockMessages.Failed
+    end
+
+    return success, message, stock, refreshTime
 end
 
 -- 服务端校验价格计算器 (防止外挂篡改价格)
@@ -233,10 +404,27 @@ function ShopService.Init()
 
     local getShopDataRF = ReplicatedStorage:FindFirstChild("GetShopDataRF") or Instance.new("RemoteFunction")
     getShopDataRF.Name = "GetShopDataRF"; getShopDataRF.Parent = ReplicatedStorage
-    getShopDataRF.OnServerInvoke = function(player) return GetPlayerStockData(player), nextRefreshTime end
+    getShopDataRF.OnServerInvoke = function(player)
+        return GetPlayerStockData(player), getPlayerRefreshTime(player)
+    end
 
     local buyItemRF = ReplicatedStorage:FindFirstChild("BuyItemRF") or Instance.new("RemoteFunction")
     buyItemRF.Name = "BuyItemRF"; buyItemRF.Parent = ReplicatedStorage
+
+    local restockRemoteName = tostring(RestockConfig.RemoteName)
+    local refreshShopStockRF = ReplicatedStorage:FindFirstChild(restockRemoteName)
+    if refreshShopStockRF and not refreshShopStockRF:IsA("RemoteFunction") then
+        warn("[ShopService] " .. restockRemoteName .. " exists but is not a RemoteFunction.")
+        refreshShopStockRF = nil
+    elseif not refreshShopStockRF then
+        refreshShopStockRF = Instance.new("RemoteFunction")
+        refreshShopStockRF.Name = restockRemoteName
+        refreshShopStockRF.Parent = ReplicatedStorage
+    end
+
+    if refreshShopStockRF then
+        refreshShopStockRF.OnServerInvoke = safeRefreshPlayerStock
+    end
 
     buyItemRF.OnServerInvoke = function(player, slotIndex, amount)
         amount = math.max(1, math.floor(tonumber(amount) or 1))
@@ -274,7 +462,7 @@ function ShopService.Init()
                 player:SetAttribute("CurrentShopSessionId", nil)
             end
 
-            updateShopRE:FireClient(player, personalStock, nextRefreshTime)
+            updateShopRE:FireClient(player, GetPlayerStockData(player), getPlayerRefreshTime(player))
 
             fireInventoryUpdate(player, data)
 
@@ -420,8 +608,25 @@ function ShopService.Init()
         ShopService.RefreshStock()
         while true do
             task.wait(1)
-            if os.time() >= nextRefreshTime then ShopService.RefreshStock() end
+            local now = os.time()
+            if now >= nextRefreshTime then
+                ShopService.RefreshStock()
+                now = os.time()
+            end
+
+            for _, player in ipairs(Players:GetPlayers()) do
+                if clearExpiredPaidRestock(player.UserId, now) then
+                    firePlayerStockUpdate(player)
+                end
+            end
         end
+    end)
+
+    Players.PlayerRemoving:Connect(function(player)
+        playerSpecificStock[player.UserId] = nil
+        paidRestockExpiresAt[player.UserId] = nil
+        restockRequestLocks[player.UserId] = nil
+        lastRestockRequestAt[player.UserId] = nil
     end)
 end
 

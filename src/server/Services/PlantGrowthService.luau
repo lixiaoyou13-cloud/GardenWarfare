@@ -223,7 +223,7 @@ end
 -- 生成幼苗
 function PlantGrowthService.CreateSeedling(seedId, soil, itemDetail, plantedTime, plot, plantsFolder)
     local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
-    local seedModelName = itemDetail.SeedId or "PlantSeed"
+    local seedModelName = "PlantSeed"
     local realModel = itemModelsFolder:FindFirstChild(seedModelName)
 
     if not realModel then return nil end

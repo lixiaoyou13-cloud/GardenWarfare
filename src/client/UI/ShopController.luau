@@ -5,9 +5,15 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
+local UserInputService = game:GetService("UserInputService")
 
 local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+local ShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ShopConfig"))
 local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
+
+local RestockConfig = ShopConfig.Restock
+local RestockMessages = RestockConfig.Messages
+local PopupUtil = require(script.Parent.Parent.Utils.PopupUtil)
 
 local SHOP_TIMER_UPDATE_INTERVAL = 1
 local DISTANCE_CHECK_INTERVAL = 0.2
@@ -78,6 +84,8 @@ function ShopController.Init()
     local closeBtn = shopFrame:WaitForChild("CloseBtn")
     local itemList = shopFrame:WaitForChild("ItemList")
     local timerLabel = shopFrame:WaitForChild("HeadUp"):WaitForChild("TimeText")
+    local restockButton = shopFrame:WaitForChild("BuyBtn")
+    local restockTextButton = restockButton:WaitForChild("BuyBtnText")
 
     -- 对话框及按钮
     local dialogPage = basicGui:WaitForChild("DialogPage")
@@ -100,6 +108,22 @@ function ShopController.Init()
     local currentStockData = {}
     local targetRefreshTime = 0
     local localPlayerData = nil
+
+    local restockPending = false
+    local hoveredRestockTargets = {}
+    local alwaysShowRestockPrice = UserInputService.TouchEnabled
+
+    local function updateRestockButtonText()
+        if restockPending then
+            restockTextButton.Text = RestockConfig.PendingText
+        elseif alwaysShowRestockPrice or next(hoveredRestockTargets) ~= nil then
+            restockTextButton.Text = RestockConfig.PriceText
+        else
+            restockTextButton.Text = RestockConfig.ButtonText
+        end
+    end
+
+    updateRestockButtonText()
 
     -- 渲染逻辑
     local function RenderShop()
@@ -208,6 +232,59 @@ function ShopController.Init()
         RenderShop()
     end
     UpdateData()
+
+    local refreshShopStockRF = ReplicatedStorage:WaitForChild(
+        RestockConfig.RemoteName
+    )
+
+    local function requestPaidRestock()
+        if restockPending then
+            return
+        end
+
+        restockPending = true
+        updateRestockButtonText()
+
+        local invokeOk, success, message, refreshedStock, refreshTime = pcall(function()
+            return refreshShopStockRF:InvokeServer()
+        end)
+
+        if invokeOk and success then
+            if type(refreshedStock) == "table" then
+                currentStockData = refreshedStock
+            end
+            if tonumber(refreshTime) then
+                targetRefreshTime = tonumber(refreshTime)
+            end
+            RenderShop()
+            UIEffectUtil.ShowTip(tostring(message or RestockMessages.Success))
+        elseif invokeOk then
+            UIEffectUtil.ShowTip(tostring(message or RestockMessages.Failed))
+        else
+            warn("[ShopController] Paid restock request failed: " .. tostring(success))
+            UIEffectUtil.ShowTip(RestockMessages.Failed)
+        end
+
+        restockPending = false
+        updateRestockButtonText()
+    end
+
+    local function bindRestockTarget(target)
+        target.Activated:Connect(requestPaidRestock)
+        target.MouseEnter:Connect(function()
+            hoveredRestockTargets[target] = true
+            updateRestockButtonText()
+        end)
+        target.MouseLeave:Connect(function()
+            hoveredRestockTargets[target] = nil
+            updateRestockButtonText()
+        end)
+    end
+
+    bindRestockTarget(restockButton)
+    if restockTextButton ~= restockButton then
+        bindRestockTarget(restockTextButton)
+    end
 
     task.spawn(function()
         while shopGui.Parent do
@@ -359,12 +436,18 @@ function ShopController.Init()
 
     -- SellAll 按钮逻辑
     sellAllBtn.Activated:Connect(function()
-        local success, msg = ReplicatedStorage:WaitForChild("SellAllHotbarRF"):InvokeServer()
-        if success then
-            UIEffectUtil.ShowTip(msg)
-            if priceTagGui then priceTagGui:Destroy(); priceTagGui = nil end
-        else
-            UIEffectUtil.ShowTip(msg)
+        local shown = PopupUtil.ShowConfirm("Are you sure you want to sell all sellable items in your hotbar?", function()
+            local success, msg = ReplicatedStorage:WaitForChild("SellAllHotbarRF"):InvokeServer()
+            if success then
+                UIEffectUtil.ShowTip(msg)
+                if priceTagGui then priceTagGui:Destroy(); priceTagGui = nil end
+            else
+                UIEffectUtil.ShowTip(msg)
+            end
+        end)
+
+        if not shown then
+            UIEffectUtil.ShowTip("Popup is unavailable right now")
         end
     end)
 

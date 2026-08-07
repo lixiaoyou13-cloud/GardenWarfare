@@ -7,6 +7,58 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
     {
+        Id = "notice-2026-08-07",
+        TagText = "2026/8/7",
+        PublishedAt = "2026-08-07",
+        Title = "August 7 Update Notice",
+        Sections = {
+            {
+                Title = "New Features",
+                Content = "Players can now spend 1B Sun to refresh the stock in Dave's Shop. The Sell All option in Dave's Shop now displays a confirmation prompt before selling all eligible items in your hotbar.",
+            },
+            {
+                Title = "Bug Fixes",
+                Content = "Fixed an issue where growth-stage models were missing for some plants.",
+            },
+            {
+                Title = "Season Pass",
+                Content = "The Season Pass is temporarily unavailable. Stay tuned for its return in a future update!",
+            },
+        },
+    },
+    {
+        Id = "notice-2026-08-05",
+        TagText = "2026/8/5",
+        PublishedAt = "2026-08-05",
+        Title = "August 5 Event Notice",
+        Sections = {
+            {
+                Title = "Dr. Zomboss Returns!",
+                Content = "Zomboss is back! Join the battle, earn Tacos, and exchange them for special rewards in the Zomboss Shop!",
+            },
+        },
+    },
+    {
+        Id = "notice-2026-08-04",
+        TagText = "2026/8/4",
+        PublishedAt = "2026-08-04",
+        Title = "August 4 Update Notice",
+        Sections = {
+            {
+                Title = "Bug Fix",
+                Content = "Fixed an issue where Pumpkin Shields could cause the plant inside to receive an unintended mutation.",
+            },
+            {
+                Title = "Incorrect Ban Compensation",
+                Content = "Compensation for players affected by incorrect bans will arrive on August 7.",
+            },
+            {
+                Title = "Coming August 7",
+                Content = "A new feature will allow players to spend Sun to refresh Dave's Shop stock.",
+            },
+        },
+    },
+    {
         Id = "notice-2026-08-03",
         TagText = "2026/8/3",
         PublishedAt = "2026-08-03",

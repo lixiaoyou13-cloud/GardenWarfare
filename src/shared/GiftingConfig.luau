@@ -33,6 +33,14 @@ GiftingConfig.GlobalGifts = {
         Amount = 3,
         RewardText = "3x Divine Potion",
     },
+    {
+        Id = "official-divine-potion-2026-08-04-false-ban-compensation",
+        Title = "Incorrect Ban Compensation",
+        RewardType = GiftingConfig.RewardTypes.Item,
+        ItemId = "DivinePotion",
+        Amount = 5,
+        RewardText = "5x Divine Potion",
+    },
 }
 
 return GiftingConfig

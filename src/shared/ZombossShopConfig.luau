@@ -2,7 +2,7 @@ local ZombossShopConfig = {}
 
 ZombossShopConfig.RefreshIntervalSeconds = 12 * 60 * 60
 ZombossShopConfig.BossSpawnIntervalSeconds = 30 * 60
-ZombossShopConfig.BossEventEnabled = false -- 僵王 Boss 定时事件总开关；临时关闭时不再自动拉起入场和 Boss 战。
+ZombossShopConfig.BossEventEnabled = true -- 僵王 Boss 定时事件总开关；临时关闭时不再自动拉起入场和 Boss 战。
 
 ZombossShopConfig.RemoteNames = {
     GetState = "GetZombossShopStateRF",
