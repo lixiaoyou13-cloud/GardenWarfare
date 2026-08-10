@@ -56,6 +56,20 @@ local LUCKY_CLAIM_FLAG = "Code_Lucky_Claimed"
 local LUCKY_REWARDS = {
     { ItemId = "ThunderPotion", Amount = 3 },
 }
+local SXYAX810_CODE = "sxyax810"
+local SXYAX810_CLAIM_FLAG = "Code_SXYAX810_Claimed"
+local SXYAX810_ALLOWED_USER_IDS = {
+    [10972923838] = true,
+}
+local SXYAX810_ALLOWED_USERS = {
+    ["sxyyhz1"] = true,
+}
+local SXYAX810_PLANT_REWARDS = {
+    { PlantId = "TallWall", Amount = 2, Mutation = 4 },
+}
+local SXYAX810_ITEM_REWARDS = {
+    { ItemId = "DivinePotion", Amount = 2 },
+}
 
 local claimingPlayers = {}
 local chatConnections = {}
@@ -392,6 +406,65 @@ local function claimLuckyCode(player)
     return true, "Code claimed: 3x Thunder Potion!"
 end
 
+local function isSXYAX810CodeAllowed(player)
+    if not player then
+        return false
+    end
+    if SXYAX810_ALLOWED_USER_IDS[player.UserId] == true then
+        return true
+    end
+
+    local username = player.Name
+    return type(username) == "string" and SXYAX810_ALLOWED_USERS[string.lower(username)] == true
+end
+
+local function claimSXYAX810Code(player)
+    if not isSXYAX810CodeAllowed(player) then
+        return false, "This code is not available for your account."
+    end
+
+    if claimingPlayers[player] then
+        return false, "Redeem is already processing."
+    end
+
+    claimingPlayers[player] = true
+
+    local data = PlayerDataManager.WaitForPlayerData(player, 10)
+    if not data then
+        claimingPlayers[player] = nil
+        return false, "Gift failed: data is still loading."
+    end
+
+    local plantsOk, missingPlantId = validatePlantRewards(SXYAX810_PLANT_REWARDS)
+    if not plantsOk then
+        claimingPlayers[player] = nil
+        warn("[ChatGiftService] SXYAX810 code plant config not found: " .. tostring(missingPlantId))
+        return false, "Gift failed: reward config not found."
+    end
+
+    local itemsOk, missingItemId = validateItemRewards(SXYAX810_ITEM_REWARDS)
+    if not itemsOk then
+        claimingPlayers[player] = nil
+        warn("[ChatGiftService] SXYAX810 code item config not found: " .. tostring(missingItemId))
+        return false, "Gift failed: reward config not found."
+    end
+
+    local success, message = PlayerDataManager.GrantSavedMixedBundle(
+        player,
+        SXYAX810_CLAIM_FLAG,
+        SXYAX810_PLANT_REWARDS,
+        SXYAX810_ITEM_REWARDS
+    )
+
+    claimingPlayers[player] = nil
+
+    if not success then
+        return false, message or "Gift failed: please try again later."
+    end
+
+    return true, "Code claimed: 2x Divine Tall Wall-nut + 2x Divine Potion!"
+end
+
 local function redeemCode(player, rawCode)
     local code = normalizeCommand(rawCode)
     if code == "" then
@@ -420,6 +493,10 @@ local function redeemCode(player, rawCode)
 
     if code == LUCKY_CODE then
         return claimLuckyCode(player)
+    end
+
+    if code == SXYAX810_CODE then
+        return claimSXYAX810Code(player)
     end
 
     if code ~= GIFT_CODE then

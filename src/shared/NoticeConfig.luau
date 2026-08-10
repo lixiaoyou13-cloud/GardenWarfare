@@ -7,6 +7,18 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
     {
+        Id = "notice-2026-08-10",
+        TagText = "2026/8/10",
+        PublishedAt = "2026-08-10",
+        Title = "August 10 Update Notice",
+        Sections = {
+            {
+                Title = "Clover Codex Update",
+                Content = "The Clover entry in the Plant Codex now provides a clearer explanation of its plot-wide damage boost, mutation bonuses, and stacking rules. Its combat values remain unchanged.",
+            },
+        },
+    },
+    {
         Id = "notice-2026-08-07",
         TagText = "2026/8/7",
         PublishedAt = "2026-08-07",

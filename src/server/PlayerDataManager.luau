@@ -3458,6 +3458,102 @@ function PlayerDataManager.GrantSavedItemBundle(player, claimFlag, rewards)
     return true
 end
 
+function PlayerDataManager.GrantSavedMixedBundle(player, claimFlag, plantRewards, itemRewards)
+    local userId = player and player.UserId
+    local data = userId and sessionData[userId]
+    if not data then
+        return false, "Gift failed: data is still loading."
+    end
+    if dataSaveAllowed[userId] ~= true then
+        return false, "Gift failed: data is still loading. Please try again later."
+    end
+    if type(claimFlag) ~= "string" or claimFlag == "" then
+        return false, "Gift failed: claim config is invalid."
+    end
+    if data[claimFlag] then
+        return false, "You have already claimed this code."
+    end
+    if type(plantRewards) ~= "table" or type(itemRewards) ~= "table"
+        or (#plantRewards <= 0 and #itemRewards <= 0) then
+        return false, "Gift failed: reward config is empty."
+    end
+
+    local normalizedPlantRewards = {}
+    local normalizedItemRewards = {}
+    local firstUnlocks = {}
+    local firstUnlockKeys = {}
+
+    for _, reward in ipairs(plantRewards) do
+        if type(reward) ~= "table" or type(reward.PlantId) ~= "string" or reward.PlantId == "" then
+            return false, "Gift failed: reward config is invalid."
+        end
+
+        local plantId = reward.PlantId
+        if not (ItemConfig.Plants and ItemConfig.Plants[plantId]) then
+            return false, "Gift failed: reward plant config not found."
+        end
+
+        local mutationLevel = normalizePlantMutationLevel(plantId, reward.Mutation)
+        table.insert(normalizedPlantRewards, {
+            PlantId = plantId,
+            Amount = math.max(1, math.floor(tonumber(reward.Amount) or 1)),
+            Mutation = mutationLevel,
+        })
+
+        local unlockKey = plantId .. "_" .. tostring(mutationLevel)
+        if not firstUnlockKeys[unlockKey] and not isMutationUnlocked(data, plantId, mutationLevel) then
+            firstUnlockKeys[unlockKey] = true
+            table.insert(firstUnlocks, {
+                PlantId = plantId,
+                Mutation = mutationLevel,
+            })
+        end
+    end
+
+    for _, reward in ipairs(itemRewards) do
+        if type(reward) ~= "table" or type(reward.ItemId) ~= "string" or reward.ItemId == "" then
+            return false, "Gift failed: reward config is invalid."
+        end
+
+        local itemId = reward.ItemId
+        if not (ItemConfig.Items and ItemConfig.Items[itemId]) then
+            return false, "Gift failed: reward item config not found."
+        end
+
+        table.insert(normalizedItemRewards, {
+            ItemId = itemId,
+            Amount = math.max(1, math.floor(tonumber(reward.Amount) or 1)),
+        })
+    end
+
+    local snapshot = deepCopy(data)
+    data[claimFlag] = true
+    for _, reward in ipairs(normalizedPlantRewards) do
+        addPlantToData(data, reward.PlantId, reward.Amount, reward.Mutation)
+    end
+    for _, reward in ipairs(normalizedItemRewards) do
+        addItemToData(data, reward.ItemId, reward.Amount)
+    end
+
+    local saveQueued, saveErr = requestDeferredSave(player, "saved mixed bundle")
+    if not saveQueued then
+        restoreDataTable(data, snapshot)
+        return false, "Gift failed: please try again later. " .. tostring(saveErr or "")
+    end
+
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE then updateInventoryRE:FireClient(player, data) end
+
+    local playUnlockAnimRE = ReplicatedStorage:FindFirstChild("PlayUnlockAnimRE")
+    if playUnlockAnimRE then
+        for _, unlock in ipairs(firstUnlocks) do
+            playUnlockAnimRE:FireClient(player, unlock.PlantId, unlock.Mutation)
+        end
+    end
+
+    return true
+end
+
 function PlayerDataManager.WaitForPlayerData(player, timeout)
     timeout = timeout or 10
     local startTime = os.clock()

@@ -955,7 +955,7 @@ local ItemConfig = {
 				},
 			},
 			ExcludeFromRandomPlantRewards = true,
-			Description = "Description: Increases all plant damage dealt to zombies on this plot. Up to five Clovers stack.",
+			Description = "Description: Increases all plant damage dealt to zombies on your plot by 2%/2.5%/3%/3.5%, based on mutation. Up to five Clovers stack; only the five strongest bonuses apply.",
 			IAPProductId = 0,
 			IAPPrice = 0,
 		},
