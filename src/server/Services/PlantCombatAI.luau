@@ -679,6 +679,10 @@ local function isFrontAreaAttack(itemDetail)
 	return itemDetail and (itemDetail.AttackMode == "FrontArea" or type(itemDetail.FrontArea) == "table")
 end
 
+local function isGlobalSingleTargetAttack(itemDetail)
+	return itemDetail and itemDetail.AttackMode == "GlobalSingleTarget"
+end
+
 local function isCenteredGridAreaAttack(itemDetail)
     return itemDetail and (itemDetail.AttackMode == "CenteredGridArea" or type(itemDetail.CenteredGridArea) == "table")
 end
@@ -824,9 +828,36 @@ local function collectFrontAreaTargets(plant, rootPart, itemDetail, plot)
         addTarget(target.Model)
     end
 
+    if config.BossMustBeInArea == true then
+        local bossModel, bossHumanoid, bossRoot = getActiveEventBossTarget(plot)
+        if bossModel and bossHumanoid and bossRoot then
+            local flatOffset = Vector3.new(
+                bossRoot.Position.X - queryOrigin.X,
+                0,
+                bossRoot.Position.Z - queryOrigin.Z
+            )
+            local forwardDistance = flatOffset:Dot(flatDir)
+            local lateralOffset = flatOffset - flatDir * forwardDistance
+            if forwardDistance >= 0
+                and forwardDistance <= range
+                and lateralOffset.Magnitude <= width * 0.5
+            then
+                addTarget(bossModel)
+            end
+        end
+    end
+
     table.sort(targets, function(a, b)
         return a.Distance < b.Distance
     end)
+
+    local maxTargets = tonumber(config.MaxTargets)
+    if maxTargets then
+        maxTargets = math.max(1, math.floor(maxTargets))
+        while #targets > maxTargets do
+            table.remove(targets)
+        end
+    end
 
     return targets, flatDir
 end
@@ -1592,6 +1623,19 @@ local function getMarkerProjectileSettlementDelay(itemDetail, markerConfig, proj
     return remainingFallbackWait + flightTime
 end
 
+local function getTargetTrackingVisualConfig(itemDetail)
+	local trackTarget = itemDetail and itemDetail.ProjectileTracksTarget == true
+	local destroyWhenTargetInvalid = itemDetail and itemDetail.ProjectileDestroyWhenTargetInvalid == true
+	if not trackTarget and not destroyWhenTargetInvalid then
+		return nil
+	end
+
+	return {
+		TrackTarget = trackTarget,
+		DestroyWhenTargetInvalid = destroyWhenTargetInvalid,
+	}
+end
+
 local function fireMarkerProjectileBatch(plant, targetZombieModel, itemDetail, plot, speedMult, attackToken)
     local markerConfig = getMarkerProjectileConfig(itemDetail)
     local rootPart = plant and (plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart"))
@@ -1621,6 +1665,7 @@ local function fireMarkerProjectileBatch(plant, targetZombieModel, itemDetail, p
             ArcHeight = tonumber(itemDetail.ArcHeight) or 0,
             SpeedMult = speedMult,
             OwnerUserId = plot and plot:GetAttribute("OwnerId"),
+            ProjectileVisualConfig = getTargetTrackingVisualConfig(itemDetail),
         }
     )
 
@@ -1710,6 +1755,13 @@ local function FireProjectile(plant, targetZombieModel, _targetHum, itemDetail, 
             ),
             DestroyBeyondPosition = maxPosPart and maxPosPart:IsA("BasePart") and maxPosPart.Position or nil,
         }
+    end
+
+    local targetTrackingVisualConfig = getTargetTrackingVisualConfig(itemDetail)
+    if targetTrackingVisualConfig then
+        projectileVisualConfig = projectileVisualConfig or {}
+        projectileVisualConfig.TrackTarget = targetTrackingVisualConfig.TrackTarget
+        projectileVisualConfig.DestroyWhenTargetInvalid = targetTrackingVisualConfig.DestroyWhenTargetInvalid
     end
 
 	local markerConfig = getMarkerProjectileConfig(itemDetail)
@@ -1987,7 +2039,12 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
         local baseAttackDamage = itemDetail.Attack or 20
         local plantRowNum = getLawnRowFromGridName(plant:GetAttribute("GridName"))
         local usesFrontAreaAttack = isFrontAreaAttack(itemDetail)
+        local usesGlobalSingleTargetAttack = isGlobalSingleTargetAttack(itemDetail)
         local usesCenteredGridAreaAttack = isCenteredGridAreaAttack(itemDetail)
+        local frontAreaConfig = type(itemDetail.FrontArea) == "table" and itemDetail.FrontArea or nil
+        local bossMustBeInFrontArea = usesFrontAreaAttack
+            and frontAreaConfig
+            and frontAreaConfig.BossMustBeInArea == true
 
         local animator = getPlantAnimator(plant)
 
@@ -2016,7 +2073,7 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                     targetZombieModel = firstTarget.Model
                     targetHum = firstTarget.Humanoid
                 end
-            elseif eventBossModel and eventBossHum and eventBossRoot then
+            elseif eventBossModel and eventBossHum and eventBossRoot and not bossMustBeInFrontArea then
                 targetZombieModel = eventBossModel
                 targetHum = eventBossHum
                 isEventBossTarget = true
@@ -2026,6 +2083,13 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                 if firstTarget then
                     targetZombieModel = firstTarget.Model
                     targetHum = firstTarget.Humanoid
+                end
+            elseif usesGlobalSingleTargetAttack then
+                local targetRoot
+                targetZombieModel, targetHum, targetRoot = CombatRegistry.FindFrontmostZombie(plot)
+                if not targetRoot then
+                    targetZombieModel = nil
+                    targetHum = nil
                 end
             else
                 local targetRoot

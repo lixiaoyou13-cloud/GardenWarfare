@@ -7,6 +7,7 @@ local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 local registryByPlot = setmetatable({}, { __mode = "k" })
 local recordByModel = setmetatable({}, { __mode = "k" })
 local cachedPartsByModel = setmetatable({}, { __mode = "k" })
+local nextRegistrationSequence = 0
 
 local function getRowKey(rowNum)
     local normalized = tonumber(rowNum)
@@ -278,6 +279,7 @@ local function registerModel(kind, plot, model, rowNum, humanoid, rootPart)
 
     local state = getPlotState(plot)
     local rowKey = getRowKey(rowNum)
+    nextRegistrationSequence += 1
     local record = {
         Kind = kind,
         Plot = plot,
@@ -287,6 +289,7 @@ local function registerModel(kind, plot, model, rowNum, humanoid, rootPart)
         Humanoid = humanoid,
         RootPart = rootPart,
         CachedParts = CombatRegistry.GetCachedParts(model),
+        RegistrationSequence = nextRegistrationSequence,
     }
 
     recordByModel[model] = record
@@ -496,6 +499,80 @@ function CombatRegistry.FindNearestZombieInLane(plot, rowNum, origin, direction,
     end
 
     return target.Model, target.Humanoid, target.RootPart, target.Distance
+end
+
+local function getZombieAdvanceProgress(plot, record)
+	local rowNum = record and (record.Row or tonumber(record.Model and record.Model:GetAttribute("LaneRow")))
+	local rootPart = record and record.RootPart
+	local lawnFolder = plot and plot:FindFirstChild("Lawn")
+	if not rowNum or not rootPart or not rootPart.Parent or not lawnFolder then
+		return nil
+	end
+
+	local spawnLawn = lawnFolder:FindFirstChild(("Lawn%d_9"):format(rowNum))
+	local houseLawn = lawnFolder:FindFirstChild(("Lawn%d_1"):format(rowNum))
+	if not (spawnLawn and spawnLawn:IsA("BasePart") and houseLawn and houseLawn:IsA("BasePart")) then
+		return nil
+	end
+
+	local laneVector = getFlatVector(houseLawn.Position - spawnLawn.Position)
+	local laneLengthSquared = laneVector:Dot(laneVector)
+	if laneLengthSquared <= 0.001 then
+		return nil
+	end
+
+	local zombieOffset = getFlatVector(rootPart.Position - spawnLawn.Position)
+	return zombieOffset:Dot(laneVector) / laneLengthSquared
+end
+
+-- 全地块索敌：跨行比较僵尸从 Lawn_9 向 Lawn_1 的推进度，越靠近房屋越优先。
+function CombatRegistry.FindFrontmostZombie(plot)
+	local state = plot and registryByPlot[plot]
+	local candidates = state and state.Zombies
+	if not candidates then
+		return nil, nil, nil, nil
+	end
+
+	local targets = {}
+	for _, record in pairs(candidates) do
+		if isRecordAlive(record, "Zombie") then
+			local progress = getZombieAdvanceProgress(plot, record)
+			table.insert(targets, {
+				Model = record.Model,
+				Humanoid = record.Humanoid,
+				RootPart = record.RootPart,
+				Progress = progress,
+				HasProgress = progress ~= nil,
+				Row = tonumber(record.Row) or math.huge,
+				RegistrationSequence = tonumber(record.RegistrationSequence) or math.huge,
+			})
+		else
+			removeRecord(record)
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		if a.HasProgress ~= b.HasProgress then
+			return a.HasProgress
+		end
+		if a.HasProgress and math.abs(a.Progress - b.Progress) > 0.00001 then
+			return a.Progress > b.Progress
+		end
+		if a.Row ~= b.Row then
+			return a.Row < b.Row
+		end
+		if a.Model.Name ~= b.Model.Name then
+			return a.Model.Name < b.Model.Name
+		end
+		return a.RegistrationSequence < b.RegistrationSequence
+	end)
+
+	local target = targets[1]
+	if not target then
+		return nil, nil, nil, nil
+	end
+
+	return target.Model, target.Humanoid, target.RootPart, target.Progress
 end
 
 function CombatRegistry.CollectZombiesInRadius(plot, center, radius, excludeModel)

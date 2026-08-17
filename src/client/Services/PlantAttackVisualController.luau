@@ -1132,13 +1132,41 @@ local function getTrajectoryPosition(startPos, endPos, arcHeight, alpha)
     return startPos:Lerp(endPos, alpha)
 end
 
-local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPos, _targetZombieModel, arcHeight, speedMult, ownerUserId, projectileVisualConfig)
+local function getTrackedProjectileTargetPosition(targetZombieModel, targetOffset)
+    if not targetZombieModel or not targetZombieModel.Parent or targetZombieModel:GetAttribute("IsDead") == true then
+        return nil
+    end
+
+    local humanoid = targetZombieModel:FindFirstChildOfClass("Humanoid")
+    if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
+        return nil
+    end
+
+    local targetRoot = targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart
+    if not targetRoot or not targetRoot.Parent then
+        return nil
+    end
+
+    return targetRoot.Position + (typeof(targetOffset) == "Vector3" and targetOffset or Vector3.zero)
+end
+
+local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPos, targetZombieModel, arcHeight, speedMult, ownerUserId, projectileVisualConfig)
     if type(projectileName) ~= "string" or projectileName == "" then return end
     if typeof(fireCFrame) ~= "CFrame" then return end
     if typeof(initialTargetPos) ~= "Vector3" then return end
 
     ownerUserId = tonumber(ownerUserId)
     if not isLocalOwner(ownerUserId) then
+        return
+    end
+
+    local trackTarget = type(projectileVisualConfig) == "table" and projectileVisualConfig.TrackTarget == true
+    local destroyWhenTargetInvalid = type(projectileVisualConfig) == "table"
+        and projectileVisualConfig.DestroyWhenTargetInvalid == true
+    local initialTargetRoot = targetZombieModel
+        and (targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart)
+    local targetOffset = initialTargetRoot and (initialTargetPos - initialTargetRoot.Position) or Vector3.zero
+    if destroyWhenTargetInvalid and not getTrackedProjectileTargetPosition(targetZombieModel, targetOffset) then
         return
     end
 
@@ -1196,9 +1224,22 @@ local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPo
             local dt = RunService.Heartbeat:Wait()
             elapsedTime += dt
             local t = math.clamp(elapsedTime / flightTime, 0, 1)
-            local currentPos = getTrajectoryPosition(startPos, visualEndPos, arcHeight, t)
+            local currentEndPos = visualEndPos
+            if trackTarget or destroyWhenTargetInvalid then
+                local trackedTargetPosition = getTrackedProjectileTargetPosition(targetZombieModel, targetOffset)
+                if not trackedTargetPosition then
+                    if destroyWhenTargetInvalid then
+                        finishProjectile()
+                        break
+                    end
+                elseif trackTarget then
+                    currentEndPos = trackedTargetPosition
+                end
+            end
+
+            local currentPos = getTrajectoryPosition(startPos, currentEndPos, arcHeight, t)
             local nextT = math.clamp(t + 0.03, 0, 1)
-            local nextPos = getTrajectoryPosition(startPos, visualEndPos, arcHeight, nextT)
+            local nextPos = getTrajectoryPosition(startPos, currentEndPos, arcHeight, nextT)
 
             if (nextPos - currentPos).Magnitude > 0.001 then
                 setProjectileCFrame(projectile, CFrame.lookAt(currentPos, nextPos))
@@ -1266,7 +1307,7 @@ fireMarkerProjectileShot = function(plant, attackToken, fromMarker)
         context.ArcHeight,
         context.SpeedMult,
         context.OwnerUserId,
-        nil
+        context.ProjectileVisualConfig
     )
 
     if context.FiredCount >= context.ExpectedCount then
@@ -1327,6 +1368,7 @@ local function startMarkerProjectileBatch(plant, contextData)
         ArcHeight = tonumber(contextData.ArcHeight) or 0,
         SpeedMult = math.max(0.01, tonumber(contextData.SpeedMult) or 1),
         OwnerUserId = tonumber(contextData.OwnerUserId),
+        ProjectileVisualConfig = contextData.ProjectileVisualConfig,
         FiredCount = 0,
         InFallback = false,
         Connections = {},
