@@ -1636,7 +1636,7 @@ local function getTargetTrackingVisualConfig(itemDetail)
 	}
 end
 
-local function fireMarkerProjectileBatch(plant, targetZombieModel, itemDetail, plot, speedMult, attackToken)
+local function fireMarkerProjectileBatch(plant, targetZombieModel, itemDetail, plot, speedMult, attackToken, targetPosition)
     local markerConfig = getMarkerProjectileConfig(itemDetail)
     local rootPart = plant and (plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart"))
     local targetRoot = targetZombieModel and (targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart)
@@ -1661,7 +1661,9 @@ local function fireMarkerProjectileBatch(plant, targetZombieModel, itemDetail, p
             FallbackStartDelay = markerConfig.FallbackStartDelay,
             ProjectileName = projectileName,
             TargetZombieModel = targetZombieModel,
-            TargetPosition = getProjectileTargetPosition(targetZombieModel, targetRoot),
+            TargetPosition = typeof(targetPosition) == "Vector3"
+                and targetPosition
+                or getProjectileTargetPosition(targetZombieModel, targetRoot),
             ArcHeight = tonumber(itemDetail.ArcHeight) or 0,
             SpeedMult = speedMult,
             OwnerUserId = plot and plot:GetAttribute("OwnerId"),
@@ -1813,6 +1815,110 @@ local function FireProjectile(plant, targetZombieModel, _targetHum, itemDetail, 
 
 		local hitTargets = { [targetZombieModel] = true }
 		runChainProjectile(plant, itemDetail, attackDamage, plot, speedMult, ownerUserId, projName, arcHeight, hitTargets, hitPosition)
+	end)
+end
+
+-- 特殊投掷到达后统一结算当前地块内的全部目标，不依赖原锁定目标继续存活。
+local function FireRandomFullMapAttack(
+	plant,
+	targetZombieModel,
+	initialTargetPosition,
+	itemDetail,
+	fullMapConfig,
+	attackDamage,
+	plot
+)
+	local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+	if not rootPart or typeof(initialTargetPosition) ~= "Vector3" then
+		return
+	end
+
+	local projectileName = itemDetail.ProjectileName
+	if type(projectileName) ~= "string" or projectileName == "" then
+		return
+	end
+
+	local ammoFolder = ReplicatedStorage:FindFirstChild("Ammo")
+	if not (ammoFolder and ammoFolder:FindFirstChild(projectileName)) then
+		warnProjectileOnce(projectileName, "ReplicatedStorage.Ammo template not found on server")
+		return
+	end
+
+	local speedMult = GetSafeGameSpeed(plot)
+	local ownerUserId = plot and plot:GetAttribute("OwnerId")
+	local fireCFrames = getProjectileFireCFrames(plant, rootPart, itemDetail)
+	local primaryFireCFrame = fireCFrames[1]
+	local initialDistance = (initialTargetPosition - primaryFireCFrame.Position).Magnitude
+	local arcHeight = tonumber(itemDetail.ArcHeight) or 0
+	local markerConfig = getMarkerProjectileConfig(itemDetail)
+	local settlementDelay
+
+	if markerConfig then
+		settlementDelay = getMarkerProjectileSettlementDelay(itemDetail, markerConfig, initialDistance, speedMult)
+	else
+		settlementDelay = fireProjectileVisuals(
+			plot,
+			projectileName,
+			fireCFrames,
+			initialTargetPosition,
+			targetZombieModel,
+			arcHeight,
+			speedMult,
+			ownerUserId,
+			nil,
+			itemDetail.ProjectileVisualInterval
+		)
+	end
+
+	task.delay(settlementDelay, function()
+		if not plant.Parent
+			or (tonumber(plant:GetAttribute("Health")) or 0) <= 0
+			or plant:GetAttribute("IsDead") == true
+		then
+			return
+		end
+
+		local effectName = fullMapConfig.EffectName
+		if type(effectName) == "string" and effectName ~= "" then
+			firePlantVisualEvent(
+				plot,
+				initialTargetPosition,
+				"EffectBurst",
+				effectName,
+				CFrame.new(initialTargetPosition),
+				ownerUserId
+			)
+		end
+
+		local targets = {}
+		local seenTargets = {}
+		for _, target in ipairs(CombatRegistry.CollectAllZombies(plot)) do
+			local targetModel = target.Model
+			if targetModel and not seenTargets[targetModel] then
+				seenTargets[targetModel] = true
+				table.insert(targets, targetModel)
+			end
+		end
+
+		if fullMapConfig.IncludeEventBoss == true then
+			local bossModel = getActiveEventBossTarget(plot)
+			if bossModel and not seenTargets[bossModel] then
+				seenTargets[bossModel] = true
+				table.insert(targets, bossModel)
+			end
+		end
+
+		for _, targetModel in ipairs(targets) do
+			local didDamage, finalDamage = PlantCombatAI.ApplyPlantDamageToZombie(
+				plot,
+				targetModel,
+				attackDamage,
+				ownerUserId
+			)
+			if didDamage then
+				queueDamageText(plot, targetModel, finalDamage, ownerUserId)
+			end
+		end
 	end)
 end
 
@@ -2038,10 +2144,13 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
         local attackInterval = itemDetail.AttackInterval or 1.5
         local baseAttackDamage = itemDetail.Attack or 20
         local plantRowNum = getLawnRowFromGridName(plant:GetAttribute("GridName"))
-        local usesFrontAreaAttack = isFrontAreaAttack(itemDetail)
-        local usesGlobalSingleTargetAttack = isGlobalSingleTargetAttack(itemDetail)
-        local usesCenteredGridAreaAttack = isCenteredGridAreaAttack(itemDetail)
-        local frontAreaConfig = type(itemDetail.FrontArea) == "table" and itemDetail.FrontArea or nil
+		local usesFrontAreaAttack = isFrontAreaAttack(itemDetail)
+		local usesGlobalSingleTargetAttack = isGlobalSingleTargetAttack(itemDetail)
+		local usesCenteredGridAreaAttack = isCenteredGridAreaAttack(itemDetail)
+		local randomFullMapAttackConfig = type(itemDetail.RandomFullMapAttack) == "table"
+			and itemDetail.RandomFullMapAttack
+			or nil
+		local frontAreaConfig = type(itemDetail.FrontArea) == "table" and itemDetail.FrontArea or nil
         local bossMustBeInFrontArea = usesFrontAreaAttack
             and frontAreaConfig
             and frontAreaConfig.BossMustBeInArea == true
@@ -2108,8 +2217,17 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
 
             end
 
-            if targetZombieModel and targetHum then
-                local markerProjectileConfig = getMarkerProjectileConfig(itemDetail)
+			if targetZombieModel and targetHum then
+				local randomFullMapAttackTriggered = false
+				if randomFullMapAttackConfig then
+					local chance = math.clamp(tonumber(randomFullMapAttackConfig.Chance) or 0, 0, 1)
+					randomFullMapAttackTriggered = chance > 0 and math.random() < chance
+				end
+
+				local initialTargetRoot = targetZombieModel:FindFirstChild("HumanoidRootPart")
+					or targetZombieModel.PrimaryPart
+				local initialTargetPosition = getProjectileTargetPosition(targetZombieModel, initialTargetRoot)
+				local markerProjectileConfig = getMarkerProjectileConfig(itemDetail)
                 local attackVFXMarker = itemDetail.AttackVFXMarker
                 local hasAttackVFXMarker = type(attackVFXMarker) == "string" and attackVFXMarker ~= ""
                 local markerAttackToken = nil
@@ -2147,7 +2265,8 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
                         itemDetail,
                         plot,
                         speedMult,
-                        markerAttackToken
+                        markerAttackToken,
+                        initialTargetPosition
                     )
                 end
 
@@ -2182,18 +2301,40 @@ function PlantCombatAI.StartShooterAI(plant, itemDetail, mutationLevel, plot)
 	                if plant.Parent and (plant:GetAttribute("Health") or 0) > 0 then
 	                    local currentMutationLevel = tonumber(plant:GetAttribute("MutationLevel")) or mutationLevel or 1
 	                    local stats = ItemConfig.MutationStats[currentMutationLevel] or ItemConfig.MutationStats[1]
-	                    local attackDamage = math.floor(baseAttackDamage * stats.DamageMul)
-	                    local buffedAttackDamage = applyAttackBuffAura(plant, plot, attackDamage)
-	                    if usesCenteredGridAreaAttack then
-	                        FireCenteredGridAreaAttack(plant, itemDetail, buffedAttackDamage, plot)
-	                    elseif isEventBossTarget then
-	                        FireEventBossAttack(plant, targetZombieModel, targetHum, itemDetail, buffedAttackDamage, plot)
-	                    elseif usesFrontAreaAttack then
-	                        FireFrontAreaAttack(plant, itemDetail, buffedAttackDamage, plot)
-	                    else
-	                        FireProjectile(plant, targetZombieModel, targetHum, itemDetail, buffedAttackDamage, plot)
-                    end
-                end
+					local attackDamage = math.floor(baseAttackDamage * stats.DamageMul)
+					local buffedAttackDamage = applyAttackBuffAura(plant, plot, attackDamage)
+					local replacesNormalAttack = false
+
+					if randomFullMapAttackTriggered then
+						local fullMapBaseDamage = math.max(
+							1,
+							math.floor(tonumber(randomFullMapAttackConfig.Damage) or 1)
+						)
+						local fullMapAttackDamage = applyAttackBuffAura(plant, plot, fullMapBaseDamage)
+						FireRandomFullMapAttack(
+							plant,
+							targetZombieModel,
+							initialTargetPosition,
+							itemDetail,
+							randomFullMapAttackConfig,
+							fullMapAttackDamage,
+							plot
+						)
+						replacesNormalAttack = randomFullMapAttackConfig.ReplaceNormalAttack == true
+					end
+
+					if not replacesNormalAttack then
+						if usesCenteredGridAreaAttack then
+							FireCenteredGridAreaAttack(plant, itemDetail, buffedAttackDamage, plot)
+						elseif isEventBossTarget then
+							FireEventBossAttack(plant, targetZombieModel, targetHum, itemDetail, buffedAttackDamage, plot)
+						elseif usesFrontAreaAttack then
+							FireFrontAreaAttack(plant, itemDetail, buffedAttackDamage, plot)
+						else
+							FireProjectile(plant, targetZombieModel, targetHum, itemDetail, buffedAttackDamage, plot)
+						end
+					end
+				end
 
                 local cooldown
                 if usesConfiguredActionDelay then

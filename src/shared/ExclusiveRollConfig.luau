@@ -16,8 +16,8 @@ local ExclusiveRollConfig = {
         "Magnetshroom",
         "IceMelonpult",
         "CobCannon",
-        "AppleMortar",
         "Rotobaga",
+        "DoomShroomPult",
     },
 
     Animation = {
@@ -159,15 +159,15 @@ local ExclusiveRollConfig = {
         { PlantId = "FumeShroom", Weight = 40 },
         { PlantId = "Magnetshroom", Weight = 30 },
         { PlantId = "IceMelonpult", Weight = 12.5 },
-        { PlantId = "CobCannon", Weight = 10 },
-        { PlantId = "AppleMortar", Weight = 5 },
+        { PlantId = "CobCannon", Weight = 12.5 },
         { PlantId = "Rotobaga", Weight = 2.5 },
+        { PlantId = "DoomShroomPult", Weight = 2.5 },
     },
 
     Pity = {
-        TargetPlantId = "Rotobaga",
+        TargetPlantId = "DoomShroomPult",
         GuaranteeAt = 50,
-        DataKey = "ExclusiveRollPity_Rotobaga",
+        DataKey = "ExclusiveRollPity_DoomShroomPult",
         TextPath = { "Store", "StoreFrame", "Container", "Exclusive", "Pity" },
         ResetWhenHitTarget = true,
     },

@@ -11,6 +11,7 @@ local CHECK_FLAG = "ExclusiveRollRotobagaCompensationChecked_V1"
 local REWARD_PLANT_ID = "Rotobaga"
 local REWARD_AMOUNT = 1
 local REWARD_MUTATION = 1
+local LEGACY_PITY_DATA_KEY = "ExclusiveRollPity_Rotobaga"
 local POPUP_DELAY_SECONDS = 3
 local POPUP_MESSAGE = "Exclusive Roll Compensation\n\nYou previously purchased the Exclusive Plant Roll. As compensation, 1x Rotobaga has been sent to your inventory.\n\nThank you for supporting GardenWarfare!"
 
@@ -82,8 +83,7 @@ local function hasExclusiveRollEvidence(data)
         return true
     end
 
-    local pityKey = (ExclusiveRollConfig.Pity and ExclusiveRollConfig.Pity.DataKey) or "ExclusiveRollPity_Rotobaga"
-    if math.max(0, math.floor(tonumber(data[pityKey]) or 0)) > 0 then
+	if math.max(0, math.floor(tonumber(data[LEGACY_PITY_DATA_KEY]) or 0)) > 0 then
         return true
     end
 

@@ -7,6 +7,26 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
     {
+        Id = "notice-2026-08-24",
+        TagText = "2026/8/24",
+        PublishedAt = "2026-08-24",
+        Title = "August 24 Update Notice",
+        Sections = {
+            {
+                Title = "Three New Plants",
+                Content = "Bonk Choy, Cattail, and Doom-shroom Pult have joined the garden! Each plant brings a unique attack style and new strategic options.",
+            },
+            {
+                Title = "How to Obtain",
+                Content = "Cattail Seeds can appear as special stock in Dave's Shop.\nDoom-shroom Pult can be obtained from the Exclusive Roll.\nBonk Choy will be featured as a Season Leaderboard reward.",
+            },
+            {
+                Title = "Leaderboard Season",
+                Content = "The Season Leaderboard will update on August 28. Climb the rankings for a chance to earn Bonk Choy!",
+            },
+        },
+    },
+    {
         Id = "notice-2026-08-10",
         TagText = "2026/8/10",
         PublishedAt = "2026-08-10",

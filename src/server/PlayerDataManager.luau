@@ -472,6 +472,7 @@ local function GetDefaultData()
         NewbieGiftPurchased = false,
         ChatGiftClaimed_V1 = false,
         ExclusiveRollPity_Rotobaga = 0,
+        ExclusiveRollPity_DoomShroomPult = 0,
         ExclusiveRollPurchaseCount = 0,
         ExclusiveRollTotalRolls = 0,
         ExclusiveRollTickets = 0,
@@ -2740,6 +2741,7 @@ local function onPlayerAdded(player)
                 local inventorySeedsNormalized = false
                 local passShopTokensNormalized = false
                 local rankingSeasonNormalized = false
+                local doomShroomPultPityMigrationApplied = false
                 savedData.Hotbar = {"Tool_Shovel", "System_Backpack", "Tool_WeaponBlock"}
                 if type(savedData.Inventory) ~= "table" then savedData.Inventory = { Seeds = {}, Plants = {}, Chests = {}, Titles = {}, Items = {} } end
                 if type(savedData.Inventory.Seeds) ~= "table" then savedData.Inventory.Seeds = {} end
@@ -2759,6 +2761,18 @@ local function onPlayerAdded(player)
                 if type(savedData.NewbieGiftStartTime) ~= "number" then savedData.NewbieGiftStartTime = 0 end
                 if type(savedData.NewbieGiftPurchased) ~= "boolean" then savedData.NewbieGiftPurchased = false end
                 if type(savedData.ChatGiftClaimed_V1) ~= "boolean" then savedData.ChatGiftClaimed_V1 = false end
+                if savedData.ExclusiveRollPity_DoomShroomPult == nil then
+                    savedData.ExclusiveRollPity_DoomShroomPult = math.max(
+                        0,
+                        math.floor(tonumber(savedData.ExclusiveRollPity_Rotobaga) or 0)
+                    )
+                    doomShroomPultPityMigrationApplied = true
+                else
+                    savedData.ExclusiveRollPity_DoomShroomPult = math.max(
+                        0,
+                        math.floor(tonumber(savedData.ExclusiveRollPity_DoomShroomPult) or 0)
+                    )
+                end
                 if type(savedData.ExclusiveRollPity_Rotobaga) ~= "number" then savedData.ExclusiveRollPity_Rotobaga = 0 end
                 if type(savedData.ExclusiveRollPurchaseCount) ~= "number" then savedData.ExclusiveRollPurchaseCount = 0 end
                 if type(savedData.ExclusiveRollTotalRolls) ~= "number" then savedData.ExclusiveRollTotalRolls = 0 end
@@ -2820,6 +2834,9 @@ local function onPlayerAdded(player)
                 end
                 sessionData[player.UserId] = savedData
                 dataSaveAllowed[player.UserId] = true
+                if doomShroomPultPityMigrationApplied then
+                    markSessionDataChanged(player, "doom shroom pult pity inheritance")
+                end
                 if sunBalancesNormalized then
                     markSessionDataChanged(player, "sun balance cleanup")
                     print("[Data] Player " .. player.Name .. " negative Sun balance normalized to 0.")

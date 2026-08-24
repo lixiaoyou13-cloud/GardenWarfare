@@ -575,6 +575,42 @@ function CombatRegistry.FindFrontmostZombie(plot)
 	return target.Model, target.Humanoid, target.RootPart, target.Progress
 end
 
+-- 返回当前地块内所有存活僵尸；注册序号作为最终排序键，保证遍历结果稳定。
+function CombatRegistry.CollectAllZombies(plot)
+	local state = plot and registryByPlot[plot]
+	local candidates = state and state.Zombies
+	if not candidates then
+		return {}
+	end
+
+	local targets = {}
+	for _, record in pairs(candidates) do
+		if isRecordAlive(record, "Zombie") then
+			table.insert(targets, {
+				Model = record.Model,
+				Humanoid = record.Humanoid,
+				RootPart = record.RootPart,
+				Row = tonumber(record.Row) or math.huge,
+				RegistrationSequence = tonumber(record.RegistrationSequence) or math.huge,
+			})
+		else
+			removeRecord(record)
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		if a.Row ~= b.Row then
+			return a.Row < b.Row
+		end
+		if a.Model.Name ~= b.Model.Name then
+			return a.Model.Name < b.Model.Name
+		end
+		return a.RegistrationSequence < b.RegistrationSequence
+	end)
+
+	return targets
+end
+
 function CombatRegistry.CollectZombiesInRadius(plot, center, radius, excludeModel)
     if not plot or typeof(center) ~= "Vector3" then
         return {}
