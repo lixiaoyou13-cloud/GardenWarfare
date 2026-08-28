@@ -297,9 +297,19 @@ function GiftingController.Init()
 
     local toggleTarget = getToggleTarget(giftingGui)
     if toggleTarget then
-        local propertyName = toggleTarget:IsA("ScreenGui") and "Enabled" or "Visible"
+        local propertyName
+        if toggleTarget:IsA("ScreenGui") then
+            propertyName = "Enabled"
+        else
+            propertyName = "Visible"
+        end
         toggleTarget:GetPropertyChangedSignal(propertyName):Connect(function()
-            local isActuallyOpen = toggleTarget:IsA("ScreenGui") and toggleTarget.Enabled or toggleTarget.Visible
+            local isActuallyOpen
+            if toggleTarget:IsA("ScreenGui") then
+                isActuallyOpen = toggleTarget.Enabled
+            else
+                isActuallyOpen = toggleTarget.Visible
+            end
             isOpen = isActuallyOpen
             if not isActuallyOpen then
                 hideOverlayInstant(blurOverlay)

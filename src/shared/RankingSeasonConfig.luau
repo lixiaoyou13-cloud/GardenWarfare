@@ -1,10 +1,10 @@
 local RankingSeasonConfig = {}
 
-RankingSeasonConfig.SettlementId = "LevelRanking_v2_20260731"
-RankingSeasonConfig.SeasonId = "LevelRanking_v3_20260731_Cap1000"
-RankingSeasonConfig.PreviousSeasonId = "LevelRanking_v2_20260707_Reset1"
-RankingSeasonConfig.PreviousStoreName = "LevelRanking_v2"
-RankingSeasonConfig.CurrentStoreName = "LevelRanking_v3_lazy_v1"
+RankingSeasonConfig.SettlementId = "LevelRanking_v3_20260828"
+RankingSeasonConfig.SeasonId = "LevelRanking_v4_20260828_Cap1000"
+RankingSeasonConfig.PreviousSeasonId = "LevelRanking_v3_20260731_Cap1000"
+RankingSeasonConfig.PreviousStoreName = "LevelRanking_v3_lazy_v1"
+RankingSeasonConfig.CurrentStoreName = "LevelRanking_v4_20260828"
 RankingSeasonConfig.SettlementStateStoreName = "LeaderboardSettlementState_v1"
 RankingSeasonConfig.TopCount = 60
 RankingSeasonConfig.RankValuePrefix = "Lv."
@@ -25,8 +25,8 @@ RankingSeasonConfig.SeasonCarryOverMaxClearedLevel = 1000
 RankingSeasonConfig.SeasonCarryOverFallbackToUnlockedLevel = true
 
 RankingSeasonConfig.CurrentStoreMigrationEnabled = false
-RankingSeasonConfig.CurrentStoreMigrationId = "LevelRanking_v2_to_v3_cap1000_20260731"
-RankingSeasonConfig.CurrentStoreMigrationSourceName = "LevelRanking_v2"
+RankingSeasonConfig.CurrentStoreMigrationId = "LevelRanking_v3_to_v4_unused_20260828"
+RankingSeasonConfig.CurrentStoreMigrationSourceName = "LevelRanking_v3_lazy_v1"
 RankingSeasonConfig.CurrentStoreMigrationStateStoreName = "RankingStoreMigrationState_v1"
 RankingSeasonConfig.CurrentStoreMigrationInStudio = false
 RankingSeasonConfig.CurrentStoreMigrationPageSize = 100
@@ -34,15 +34,15 @@ RankingSeasonConfig.CurrentStoreMigrationMaxPages = 1000
 RankingSeasonConfig.CurrentStoreMigrationWriteDelaySeconds = 0.05
 RankingSeasonConfig.CurrentStoreMigrationCapClearedLevel = 1000
 
-RankingSeasonConfig.LazyRankingMigrationEnabled = true
-RankingSeasonConfig.LazyRankingMigrationSourceStoreName = "LevelRanking_v2"
+RankingSeasonConfig.LazyRankingMigrationEnabled = false
+RankingSeasonConfig.LazyRankingMigrationSourceStoreName = "LevelRanking_v3_lazy_v1"
 RankingSeasonConfig.LazyRankingMigrationInStudio = false
 RankingSeasonConfig.LazyRankingMigrationCapClearedLevel = 1000
 RankingSeasonConfig.LazyRankingMigrationInitialRetryDelaySeconds = 30
 RankingSeasonConfig.LazyRankingMigrationRetryIntervalSeconds = 5
 
 RankingSeasonConfig.CurrentStoreResetEnabled = false
-RankingSeasonConfig.CurrentStoreResetId = "LevelRanking_v3_unused_reset_20260731"
+RankingSeasonConfig.CurrentStoreResetId = "LevelRanking_v4_unused_reset_20260828"
 RankingSeasonConfig.CurrentStoreResetStateStoreName = "RankingStoreResetState_v1"
 RankingSeasonConfig.CurrentStoreResetInStudio = false
 RankingSeasonConfig.CurrentStoreResetPageSize = 100
@@ -53,7 +53,7 @@ RankingSeasonConfig.RewardTiers = {
         MinRank = 1,
         MaxRank = 1,
         Rewards = {
-            { RewardType = "Plant", ItemId = "GloomShroom", Amount = 12, Mutation = 1, DisplayName = "Gloom-shroom" },
+            { RewardType = "Plant", ItemId = "BonkChoy", Amount = 12, Mutation = 1, DisplayName = "Bonk Choy" },
             { RewardType = "Item", ItemId = "DivinePotion", Amount = 20, DisplayName = "Divine Potion" },
             { RewardType = "Item", ItemId = "ThunderPotion", Amount = 10, DisplayName = "Thunder Potion" },
         },
@@ -62,7 +62,7 @@ RankingSeasonConfig.RewardTiers = {
         MinRank = 2,
         MaxRank = 5,
         Rewards = {
-            { RewardType = "Plant", ItemId = "GloomShroom", Amount = 8, Mutation = 1, DisplayName = "Gloom-shroom" },
+            { RewardType = "Plant", ItemId = "BonkChoy", Amount = 8, Mutation = 1, DisplayName = "Bonk Choy" },
             { RewardType = "Item", ItemId = "DivinePotion", Amount = 10, DisplayName = "Divine Potion" },
             { RewardType = "Item", ItemId = "ThunderPotion", Amount = 5, DisplayName = "Thunder Potion" },
         },
@@ -71,7 +71,7 @@ RankingSeasonConfig.RewardTiers = {
         MinRank = 6,
         MaxRank = 10,
         Rewards = {
-            { RewardType = "Plant", ItemId = "GloomShroom", Amount = 6, Mutation = 1, DisplayName = "Gloom-shroom" },
+            { RewardType = "Plant", ItemId = "BonkChoy", Amount = 6, Mutation = 1, DisplayName = "Bonk Choy" },
             { RewardType = "Item", ItemId = "DivinePotion", Amount = 6, DisplayName = "Divine Potion" },
             { RewardType = "Item", ItemId = "ThunderPotion", Amount = 3, DisplayName = "Thunder Potion" },
         },
@@ -80,7 +80,7 @@ RankingSeasonConfig.RewardTiers = {
         MinRank = 11,
         MaxRank = 20,
         Rewards = {
-            { RewardType = "Plant", ItemId = "GloomShroom", Amount = 4, Mutation = 1, DisplayName = "Gloom-shroom" },
+            { RewardType = "Plant", ItemId = "BonkChoy", Amount = 4, Mutation = 1, DisplayName = "Bonk Choy" },
             { RewardType = "Item", ItemId = "DivinePotion", Amount = 3, DisplayName = "Divine Potion" },
         },
     },
@@ -88,7 +88,7 @@ RankingSeasonConfig.RewardTiers = {
         MinRank = 21,
         MaxRank = 60,
         Rewards = {
-            { RewardType = "Plant", ItemId = "GloomShroom", Amount = 2, Mutation = 1, DisplayName = "Gloom-shroom" },
+            { RewardType = "Plant", ItemId = "BonkChoy", Amount = 2, Mutation = 1, DisplayName = "Bonk Choy" },
             { RewardType = "Item", ItemId = "DivinePotion", Amount = 2, DisplayName = "Divine Potion" },
         },
     },

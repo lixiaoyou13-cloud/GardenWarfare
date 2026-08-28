@@ -7,6 +7,22 @@ NoticeConfig.MarkSeenRemoteName = "MarkNoticeSeenRF"
 -- PublishedAt uses YYYY-MM-DD; the newest valid date is selected by default.
 NoticeConfig.Notices = {
     {
+        Id = "notice-2026-08-28",
+        TagText = "2026/8/28",
+        PublishedAt = "2026-08-28",
+        Title = "August 28 Update Notice",
+        Sections = {
+            {
+                Title = "New Leaderboard Season",
+                Content = "Rewards from the previous leaderboard season have been settled, and a new season has begun. Stage progress carries over into the new season up to a maximum of Stage 1,000; players below Stage 1,000 keep their actual progress.",
+            },
+            {
+                Title = "Garden Improvements",
+                Content = "The garden scene has been optimized.",
+            },
+        },
+    },
+    {
         Id = "notice-2026-08-24",
         TagText = "2026/8/24",
         PublishedAt = "2026-08-24",
