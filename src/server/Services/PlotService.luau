@@ -2,13 +2,264 @@
 local PlotService = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local AnalyticsService = game:GetService("AnalyticsService")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local PlotUnlockConfig = require(ReplicatedStorage.Shared.PlotUnlockConfig)
+local NumberFormatUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("NumberFormatUtil"))
+local RankingSeasonConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RankingSeasonConfig"))
 local PlayerDataManager = require(script.Parent.Parent.PlayerDataManager)
 
 local playerPlots = {}
+local MAX_LEVEL_PART_NAME = "PlayerMaxLevelPart"
+local PLOTS_FOLDER_WAIT_TIME = 10
+local FALLBACK_KICK_DELAY = 3
+local FALLBACK_SPAWN_NAME = "PlotAssignmentFallbackSpawn"
+
+local PLOT_UNLOCK_SAVE_FIELDS = {
+    "Coins",
+    "UnlockedPlots",
+}
+
+local function cloneValue(value)
+    if type(value) ~= "table" then
+        return value
+    end
+
+    local copy = {}
+    for key, child in pairs(value) do
+        copy[key] = cloneValue(child)
+    end
+    return copy
+end
+
+local function snapshotPlotUnlockState(data)
+    local snapshot = {}
+    for _, fieldName in ipairs(PLOT_UNLOCK_SAVE_FIELDS) do
+        snapshot[fieldName] = cloneValue(data[fieldName])
+    end
+    return snapshot
+end
+
+local function restorePlotUnlockState(data, snapshot)
+    if type(data) ~= "table" or type(snapshot) ~= "table" then
+        return
+    end
+
+    for _, fieldName in ipairs(PLOT_UNLOCK_SAVE_FIELDS) do
+        data[fieldName] = cloneValue(snapshot[fieldName])
+    end
+end
+
+local function fireInventoryUpdate(player, data)
+    local updateInventoryRE = ReplicatedStorage:FindFirstChild("UpdateInventoryRE")
+    if updateInventoryRE and player and player.Parent then
+        updateInventoryRE:FireClient(player, data)
+    end
+end
+
+local function notifyPlayer(player, message)
+    local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+    if showNotifRE and player and player.Parent then
+        showNotifRE:FireClient(player, "Notice", message)
+    end
+end
+
+local function rollbackPlotUnlock(player, data, snapshot)
+    restorePlotUnlockState(data, snapshot)
+    fireInventoryUpdate(player, data)
+
+    local rollbackSaved, rollbackErr = PlayerDataManager.RequestSave(player, "plot unlock rollback")
+    if not rollbackSaved and rollbackErr ~= "stale_session" then
+        warn("[PlotService] Failed to queue rollback save after plot unlock for "
+            .. tostring(player and player.Name or "unknown") .. ": " .. tostring(rollbackErr))
+    end
+end
+
+local function IsPlotInstance(plot)
+    return plot and string.match(plot.Name, "Plot") ~= nil
+end
+
+local function GetPlotsFolder()
+    local plotsFolder = Workspace:FindFirstChild("Plots")
+    if plotsFolder then
+        return plotsFolder
+    end
+
+    return Workspace:WaitForChild("Plots", PLOTS_FOLDER_WAIT_TIME)
+end
+
+local function GetPlotSpawnPart(plot)
+    local spawnPart = plot and (plot:FindFirstChild("SpawnPoint", true) or plot:FindFirstChild("SpawnLocation", true))
+    if spawnPart and spawnPart:IsA("BasePart") then
+        return spawnPart
+    end
+
+    return nil
+end
+
+local function GetTitleService()
+    local ok, titleService = pcall(function()
+        return require(script.Parent.TitleService)
+    end)
+
+    if ok then
+        return titleService
+    end
+
+    return nil
+end
+
+local function RefreshPlotTitleDisplays(player)
+    local titleService = GetTitleService()
+    if titleService and type(titleService.UpdatePlotTitleDisplays) == "function" then
+        titleService.UpdatePlotTitleDisplays(player)
+    end
+end
+
+local function ClearPlotTitleDisplays(plot)
+    local titleService = GetTitleService()
+    if titleService and type(titleService.ClearPlotTitleDisplays) == "function" then
+        titleService.ClearPlotTitleDisplays(plot)
+    end
+end
+
+local function GetFallbackSpawnPart()
+    local fallback = Workspace:FindFirstChild(FALLBACK_SPAWN_NAME)
+    if fallback and fallback:IsA("BasePart") then
+        return fallback
+    end
+
+    fallback = Instance.new("Part")
+    fallback.Name = FALLBACK_SPAWN_NAME
+    fallback.Anchored = true
+    fallback.CanCollide = true
+    fallback.Transparency = 0.35
+    fallback.Color = Color3.fromRGB(255, 220, 80)
+    fallback.Size = Vector3.new(36, 4, 36)
+    fallback.Position = Vector3.new(0, 30, 0)
+    fallback.Parent = Workspace
+
+    return fallback
+end
+
+local function MoveCharacterToCFrame(character, targetCFrame)
+    local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5))
+    if not rootPart then
+        return
+    end
+
+    rootPart.AssemblyLinearVelocity = Vector3.zero
+    rootPart.AssemblyAngularVelocity = Vector3.zero
+    character:PivotTo(targetCFrame)
+end
+
+local function ResetPlotRuntimeState(plot)
+    plot:SetAttribute("OwnerId", nil)
+    plot:SetAttribute("IsLevelActive", false)
+    plot:SetAttribute("IsGameOver", false)
+    plot:SetAttribute("CurrentLevel", 1)
+    plot:SetAttribute("ActiveZombies", 0)
+    plot:SetAttribute("ZombiesDefeated", 0)
+    plot:SetAttribute("TotalZombies", 0)
+    plot:SetAttribute("GameSpeed", 1)
+end
+
+local function HandlePlotAssignFailure(player, reason)
+    warn("[PlotService] Failed to assign plot for " .. player.Name .. ": " .. tostring(reason))
+
+    local fallbackPart = GetFallbackSpawnPart()
+    local fallbackCFrame = fallbackPart.CFrame * CFrame.new(0, (fallbackPart.Size.Y / 2) + 4, 0)
+
+    local function teleportToFallback(character)
+        task.wait(0.1)
+        MoveCharacterToCFrame(character, fallbackCFrame)
+    end
+
+    if player.Character then
+        teleportToFallback(player.Character)
+    end
+
+    local connection
+    connection = player.CharacterAdded:Connect(teleportToFallback)
+
+    local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
+    if showNotifRE then
+        showNotifRE:FireClient(player, "Notice", "Server is full. Please rejoin another server.")
+    end
+
+    task.delay(FALLBACK_KICK_DELAY, function()
+        if connection then
+            connection:Disconnect()
+        end
+
+        if player and player.Parent then
+            player:Kick("Server is full or the map failed to load. Please rejoin another server.")
+        end
+    end)
+end
+
+local function ClearMaxLevelPart(plot)
+    for _, obj in ipairs(plot:GetDescendants()) do
+        if obj.Name == MAX_LEVEL_PART_NAME then
+            obj:Destroy()
+        end
+    end
+end
+
+local function SpawnMaxLevelPart(plot, data)
+    ClearMaxLevelPart(plot)
+
+    local maxPos = plot:FindFirstChild("MAXPos", true)
+    if not maxPos or not maxPos:IsA("BasePart") then
+        warn("Server: plot " .. plot.Name .. " is missing MAXPos; cannot spawn Max Level display sign!")
+        return
+    end
+
+    local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
+    local template = itemModels and itemModels:FindFirstChild("ShowLevelPart")
+    if not template then
+        warn("Server: ReplicatedStorage.ItemModels.ShowLevelPart is missing; cannot spawn Max Level display sign!")
+        return
+    end
+
+    local showLevelPart = template:Clone()
+    showLevelPart.Name = MAX_LEVEL_PART_NAME
+
+    local billboardGui = showLevelPart:FindFirstChild("BillboardGui", true)
+    local textLabel = billboardGui and billboardGui:FindFirstChild("TextLabel")
+    if textLabel and textLabel:IsA("TextLabel") then
+        textLabel.Text = "Max Lv." .. tostring(RankingSeasonConfig.GetSeasonClearedLevel(data))
+    end
+
+    if showLevelPart:IsA("Model") then
+        local _, size = showLevelPart:GetBoundingBox()
+        showLevelPart:PivotTo(maxPos.CFrame * CFrame.new(0, (maxPos.Size.Y / 2) + (size.Y / 2), 0))
+    elseif showLevelPart:IsA("BasePart") then
+        showLevelPart.CFrame = maxPos.CFrame * CFrame.new(0, (maxPos.Size.Y / 2) + (showLevelPart.Size.Y / 2), 0)
+    end
+
+    for _, part in ipairs(showLevelPart:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Anchored = true
+        end
+    end
+    if showLevelPart:IsA("BasePart") then
+        showLevelPart.Anchored = true
+    end
+
+    showLevelPart.Parent = plot
+end
+
+function PlotService.RefreshMaxLevelDisplay(player)
+    local plot = player and playerPlots[player.UserId]
+    if not plot then
+        return
+    end
+
+    local data = PlayerDataManager.GetPlayerData(player)
+    SpawnMaxLevelPart(plot, data)
+    RefreshPlotTitleDisplays(player)
+end
 
 local function ResetPlotForNextOwner(plot)
     local soilsFolder = plot:FindFirstChild("Soils")
@@ -22,12 +273,11 @@ local function ResetPlotForNextOwner(plot)
                     unlockPrompt:Destroy()
                 end
 
-                -- 👇 [🌟 新增：玩家退出时清理木牌]
+                -- 玩家退出时间清理木牌
                 local woodenSign = soil:FindFirstChild("WoodenSign")
                 if woodenSign then
                     woodenSign:Destroy()
                 end
-                -- 👆 新增结束
 
                 local plantPrompt = soil:FindFirstChild("PlantPrompt")
                 if plantPrompt and plantPrompt:IsA("ProximityPrompt") then
@@ -70,12 +320,18 @@ end
 function PlotService.AssignPlot(player)
     if playerPlots[player.UserId] then return playerPlots[player.UserId] end
 
-    local plotsFolder = Workspace:WaitForChild("Plots")
+    local data = PlayerDataManager.GetPlayerData(player)
+
+    local plotsFolder = GetPlotsFolder()
+    if not plotsFolder then
+        HandlePlotAssignFailure(player, "Workspace.Plots is missing")
+        return nil
+    end
     local chosenPlot = nil
 
     -- 寻找空闲地块
     for _, plot in ipairs(plotsFolder:GetChildren()) do
-        if not plot:GetAttribute("OwnerId") and string.match(plot.Name, "Plot") then
+        if IsPlotInstance(plot) and not plot:GetAttribute("OwnerId") then
             plot:SetAttribute("OwnerId", player.UserId)
             chosenPlot = plot
             playerPlots[player.UserId] = plot
@@ -83,13 +339,21 @@ function PlotService.AssignPlot(player)
         end
     end
 
+    if not chosenPlot then
+        HandlePlotAssignFailure(player, "No free plot")
+        return nil
+    end
+
     if chosenPlot then
-       chosenPlot:SetAttribute("GameSpeed", 1) 
+       chosenPlot:SetAttribute("GameSpeed", 1)
         chosenPlot:SetAttribute("IsGameOver", false)
         chosenPlot:SetAttribute("IsLevelActive", false)
 
         ResetPlotForNextOwner(chosenPlot)
-        
+
+        SpawnMaxLevelPart(chosenPlot, data)
+        RefreshPlotTitleDisplays(player)
+
         -- 生成基地向日葵
         local BaseSunflowerService = require(script.Parent.BaseSunflowerService)
         BaseSunflowerService.SpawnSunflower(player, chosenPlot)
@@ -97,36 +361,43 @@ function PlotService.AssignPlot(player)
         -- 初始化并刷新这块基地里的泥土状态
         PlotService.UpdateSoilVisuals(player, chosenPlot)
 
-        -- ==========================================
-        -- [🌟 新增：生成玩家领地身份牌 (所有人可见)]
-        -- ==========================================
+        task.spawn(function()
+            local loadedData = PlayerDataManager.WaitForPlayerData(player)
+            if playerPlots[player.UserId] == chosenPlot then
+                SpawnMaxLevelPart(chosenPlot, loadedData)
+                RefreshPlotTitleDisplays(player)
+                PlotService.UpdateSoilVisuals(player, chosenPlot)
+            end
+        end)
+
+        -- 生成玩家领地身份牌 (所有人可见)
       task.spawn(function()
-        
+
             -- 获取头像数据
             local avatarUrl = Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
 
-            -- ---------- 功能 A：恢复旧版的基地上方悬浮牌 (BillboardGui) ----------
-           -- ---------- 功能 A：恢复旧版的基地上方悬浮牌 (BillboardGui) ----------
-            -- 🚀 1. 改为查找基地内名为 "NameTag" 的模型或零件
+            -- 功能 A：恢复旧版的基地上方悬浮牌 (BillboardGui)
+           -- 功能 A：恢复旧版的基地上方悬浮牌 (BillboardGui)
+            -- 1. 改为查找基地内名为 "NameTag" 的模型或零件
             local nameTagObj = chosenPlot:FindFirstChild("NameTag", true)
 
-            print("【排错】系统分配给玩家的地块是: " .. chosenPlot.Name .. " | 是否找到 NameTag: " .. tostring(nameTagObj ~= nil))
+            print("[Debug] Assigned plot for player: " .. chosenPlot.Name .. " | NameTag found: " .. tostring(nameTagObj ~= nil))
             local targetPart = nil
-            
+
             if nameTagObj then
                 if nameTagObj:IsA("Model") then
-                    -- 【修改这里】：在找 BasePart 的时候加上 true，开启递归深度查找
+                    -- 这里：在找 BasePart 的时间候加上 true，开启递归深度查找
                     targetPart = nameTagObj.PrimaryPart or nameTagObj:FindFirstChildWhichIsA("BasePart", true)
                 elseif nameTagObj:IsA("BasePart") then
                     targetPart = nameTagObj
                 end
             end
 
-            -- 如果没有找到 NameTag，兜底使用原本的出生点
+            -- 如果没有找到 NameTag，兜底使用原本的出生点击
             if not targetPart then
-                targetPart = chosenPlot:FindFirstChild("SpawnPoint") or chosenPlot:FindFirstChild("SpawnLocation") or chosenPlot:FindFirstChildWhichIsA("BasePart", true)
+                targetPart = GetPlotSpawnPart(chosenPlot) or chosenPlot:FindFirstChildWhichIsA("BasePart", true)
             end
-            
+
             if targetPart then
                 -- 清理可能残留的旧悬浮牌
                 local existingBillboard = targetPart:FindFirstChild("OwnerBillboard")
@@ -134,13 +405,13 @@ function PlotService.AssignPlot(player)
 
                 local billboard = Instance.new("BillboardGui")
                 billboard.Name = "OwnerBillboard"
-                billboard.Size = UDim2.new(24, 0, 6, 0) 
-                
-                -- 🚀 2. 位置修改：悬浮在 NameTag 正上方 (可微调中间的 8 来改变高度)
-                billboard.StudsOffset = Vector3.new(0, 20, 0) 
-                
+                billboard.Size = UDim2.new(24, 0, 6, 0)
+
+                -- 2. 位置：悬浮在 NameTag 正上方 (可微调中间的 8 来改变高度)
+                billboard.StudsOffset = Vector3.new(0, 20, 0)
+
                 billboard.AlwaysOnTop = true
-                billboard.MaxDistance = 250 
+                billboard.MaxDistance = 250
 
                 -- 1. 背景框
                 local bgFrame = Instance.new("Frame")
@@ -163,7 +434,7 @@ function PlotService.AssignPlot(player)
                 avatarCorner.Parent = avatarImg
                 avatarImg.Parent = bgFrame
 
-                -- 3. 装饰小图标
+                -- 3. 装饰小图片标签
                 local decIcon = Instance.new("ImageLabel")
                 decIcon.Size = UDim2.new(0.1, 0, 0.4, 0)
                 decIcon.Position = UDim2.new(0.28, 0, 0.3, 0)
@@ -176,7 +447,7 @@ function PlotService.AssignPlot(player)
                 nameLabel.Size = UDim2.new(0.55, 0, 1, 0)
                 nameLabel.Position = UDim2.new(0.4, 0, 0, 0)
                 nameLabel.BackgroundTransparency = 1
-                nameLabel.Text = player.DisplayName 
+                nameLabel.Text = player.DisplayName
                 nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
                 nameLabel.TextStrokeTransparency = 0.4
                 nameLabel.Font = Enum.Font.FredokaOne
@@ -184,23 +455,24 @@ function PlotService.AssignPlot(player)
                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                 nameLabel.Parent = bgFrame
 
-                -- 👇 ============= 这里是关键修改区 ============= 👇
-                
-                -- 🚀 3. 显式指定 UI 要挂载的实体零件 (必须加这一句)
-                billboard.Adornee = targetPart 
-                
+                -- 这里是区
+
+                -- 3. 显式指定 UI 要挂载的实体零件 (必须加这一句)
+                billboard.Adornee = targetPart
+
                 billboard.Parent = targetPart
-                
+                RefreshPlotTitleDisplays(player)
+
                 -- 顺便打印一下到底挂在了哪个零件上，方便排错
-                print("【UI生成】成功！已挂载至目标: " .. tostring(targetPart.Name))
+                print("[UI] Created successfully. Mounted to target: " .. tostring(targetPart.Name))
             end
 
-            -- ---------- 功能 B：额外功能 - 木牌上的表面显示 (SurfaceGui) ----------
+            -- 功能 B：额外功能 - 木牌上的表面显示 (SurfaceGui)
             local paiModel = chosenPlot:FindFirstChild("pai", true)
             local targetPart = paiModel and paiModel:FindFirstChild("Text")
 
 
-            
+
             if targetPart and targetPart:IsA("BasePart") then
                 -- 清理旧的木牌 GUI
                 if targetPart:FindFirstChild("PlayerIdentitySurfaceGui") then
@@ -209,7 +481,7 @@ function PlotService.AssignPlot(player)
 
                 local surfaceGui = Instance.new("SurfaceGui")
                 surfaceGui.Name = "PlayerIdentitySurfaceGui"
-                surfaceGui.Face = Enum.NormalId.Front 
+                surfaceGui.Face = Enum.NormalId.Front
                 surfaceGui.MaxDistance = 300 -- 您要求的300米可见
                 surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
                 surfaceGui.PixelsPerStud = 50
@@ -235,7 +507,7 @@ function PlotService.AssignPlot(player)
                 sText.Parent = surfaceGui
 
                 surfaceGui.Parent = targetPart
-                print("【UI生成】头像获取完毕，开始创建牌子...2222222222222222222222222222")
+                print("[UI] Avatar loaded; creating sign...")
             end
         end)
         local dave = chosenPlot:FindFirstChild("CrazyDave")
@@ -250,13 +522,13 @@ function PlotService.AssignPlot(player)
                     prompt.Name = "ShopPrompt"
                     prompt.ActionText = "Open Shop"
                     prompt.ObjectText = "Crazy Dave"
-                    prompt.KeyboardKeyCode = Enum.KeyCode.F -- 绑定按键 F
+                    prompt.KeyboardKeyCode = Enum.KeyCode.E -- 绑定按键 E
                     prompt.RequiresLineOfSight = false
                     prompt.MaxActivationDistance = 10 -- 触发距离
                     prompt.HoldDuration = 0 -- 瞬间触发，不需要长按
                     prompt.Parent = targetPart
                 end
-                
+
                 -- 同理，如果想要点击也能打开，就加个 ClickDetector
                 local existingClick = targetPart:FindFirstChildWhichIsA("ClickDetector")
                 if not existingClick then
@@ -265,10 +537,10 @@ function PlotService.AssignPlot(player)
                     clicker.Parent = targetPart
                 end
             else
-                warn("服务端：CrazyDave 模型内找不到任何 BasePart，无法挂载交互组件！")
+                warn("Server: CrazyDave model has no BasePart; cannot attach interaction components!")
             end
         else
-            warn("服务端：在地块 " .. chosenPlot.Name .. " 中未找到 CrazyDave！")
+            warn("Server: plot " .. chosenPlot.Name .. " is missing CrazyDave!")
         end
 
         -- 设置玩家位置逻辑 (保持不变)
@@ -277,62 +549,74 @@ function PlotService.AssignPlot(player)
             local rootPart = character:WaitForChild("HumanoidRootPart", 5)
             if not rootPart then return end
 
-            local spawnPart = chosenPlot:FindFirstChild("SpawnPoint") or chosenPlot:FindFirstChild("SpawnLocation")
-            
-            if spawnPart and spawnPart:IsA("BasePart") then
-                character:PivotTo(spawnPart.CFrame * CFrame.new(0, 4, 0))
+            local spawnPart = GetPlotSpawnPart(chosenPlot)
+
+            if spawnPart then
+                MoveCharacterToCFrame(character, spawnPart.CFrame * CFrame.new(0, 4, 0))
             else
-                character:PivotTo(chosenPlot:GetPivot() * CFrame.new(0, 5, 20))
+                MoveCharacterToCFrame(character, chosenPlot:GetPivot() * CFrame.new(0, 5, 20))
             end
         end
 
         if player.Character then teleportToPlot(player.Character) end
         player.CharacterAdded:Connect(teleportToPlot)
     end
-    
+
     return chosenPlot
 end
 
-function PlotService.GetPlayerPlot(player) 
-    return playerPlots[player.UserId] 
+function PlotService.GetPlayerPlot(player)
+    return playerPlots[player.UserId]
 end
 
 function PlotService.Init()
+    local plotsFolder = GetPlotsFolder()
+    if plotsFolder then
+        for _, plot in ipairs(plotsFolder:GetChildren()) do
+            if IsPlotInstance(plot) then
+                ResetPlotRuntimeState(plot)
+                ClearMaxLevelPart(plot)
+                ResetPlotForNextOwner(plot)
+            end
+        end
+    else
+        warn("[PlotService] Workspace.Plots is missing. Players will be sent to fallback and kicked.")
+    end
+
     Players.PlayerAdded:Connect(function(player)
-        task.wait(1) 
-        PlotService.AssignPlot(player)
-        
+        task.spawn(function()
+            PlotService.AssignPlot(player)
+        end)
     end)
     Players.PlayerRemoving:Connect(function(player)
         PlotService.ReleasePlot(player)
     end)
-    
+
     for _, player in ipairs(Players:GetPlayers()) do
         task.spawn(function()
-            task.wait(1)
             PlotService.AssignPlot(player)
         end)
     end
 
     local MarketplaceService = game:GetService("MarketplaceService")
-    local SPEED_PASS_ID = 1811835638 
-    
+    local SPEED_PASS_ID = 1811835638
+
     local setSpeedRE = ReplicatedStorage:FindFirstChild("SetSpeedRE") or Instance.new("RemoteEvent")
     setSpeedRE.Name = "SetSpeedRE"
     setSpeedRE.Parent = ReplicatedStorage
     setSpeedRE.OnServerEvent:Connect(function(player, speed)
         local plot = PlotService.GetPlayerPlot(player)
         if plot then
-            -- [🌟 服务端防作弊拦截]
+            -- 服务端防作弊拦截
             if speed == 4 then
                 local hasPass = false
                 pcall(function()
                     hasPass = MarketplaceService:UserOwnsGamePassAsync(player.UserId, SPEED_PASS_ID)
                 end)
-                
-                -- 如果服务端查明该玩家没付过钱，直接 return 拦截请求！
+
+                -- 如果服务端查明该玩家没付过钱，直接 return 拦截请求
                 if not hasPass then
-                    warn("玩家 " .. player.Name .. " 未购买通行证，尝试非法开启 4 倍速！")
+                    warn("Player " .. player.Name .. " does not own the pass and tried to enable 4x speed!")
                     return
                 end
             end
@@ -341,11 +625,11 @@ function PlotService.Init()
             setSpeedRE:FireClient(player, speed)
         end
     end)
-    
-    print("服务端：PlotService 戴夫交互组件配置完毕！")
+
+    print("Server: PlotService Dave interaction components configured.")
 end
 
--- [🌟 核心逻辑：刷新泥土状态与视觉效果]
+-- 逻辑：刷新泥土状态与视觉效果
 function PlotService.UpdateSoilVisuals(player, plot)
     local unlockedCount = PlayerDataManager.GetUnlockedPlots(player)
     local targetUnlockId = unlockedCount + 1 -- 玩家当前只能解锁这块地（循序渐进）
@@ -353,11 +637,11 @@ function PlotService.UpdateSoilVisuals(player, plot)
     -- 遍历地块内所有的零件，找到泥土
     for _, soil in ipairs(plot:GetDescendants()) do
         if soil:IsA("BasePart") then
-            -- 提取泥土名字中的数字 (假设你的泥土名叫 Soil1, Soil2...)
+            -- 提示取泥土名字中的数字 (假设你的泥土名叫 Soil1, Soil2...)
             local soilId = tonumber(string.match(soil.Name, "%d+"))
-            
+
             if soilId and string.find(soil.Name, "Soil") then
-                -- 如果是第一次运行，把泥土原来的材质/颜色保存下来，方便解锁后恢复
+                -- 如果是第一次数运行，把泥土原来的材质/颜色保持存下来，方便解锁后恢复
                 if not soil:GetAttribute("OriginalColor") then
                     soil:SetAttribute("OriginalColor", soil.Color)
                 end
@@ -366,14 +650,14 @@ function PlotService.UpdateSoilVisuals(player, plot)
                 local woodenSign = soil:FindFirstChild("WoodenSign")
 
                 if soilId <= unlockedCount then
-                    -- 🟢 情况1：已解锁
+                    -- 情况1：已解锁
                     soil:SetAttribute("IsUnlocked", true)
                     soil.Color = soil:GetAttribute("OriginalColor") -- 恢复原本颜色
                     if prompt then prompt:Destroy() end -- 移除购买提示
                     if woodenSign then woodenSign:Destroy() end -- 解锁后销毁木牌
 
                 elseif soilId == targetUnlockId then
-                    -- 🟡 情况2：当前可解锁的下一块地
+                    -- 情况2：当前可解锁的下一块地
                     soil:SetAttribute("IsUnlocked", false)
                     soil.Color = Color3.fromRGB(218, 179, 51) -- 变成黄色
 
@@ -381,12 +665,12 @@ function PlotService.UpdateSoilVisuals(player, plot)
                     if not woodenSign then
                         local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
                         local signTemplate = itemModels and itemModels:FindFirstChild("WoodenSign")
-                        
+
                         if signTemplate then
                             woodenSign = signTemplate:Clone()
                             woodenSign.Name = "WoodenSign"
-                            
-                            -- 坐标计算
+
+                            -- 坐标签计算
                             if woodenSign:IsA("Model") then
                                 local _, size = woodenSign:GetBoundingBox()
                                 local yOffset = (soil.Size.Y / 2) + (size.Y / 2)
@@ -395,7 +679,7 @@ function PlotService.UpdateSoilVisuals(player, plot)
                                 local yOffset = (soil.Size.Y / 2) + (woodenSign.Size.Y / 2)
                                 woodenSign.CFrame = soil.CFrame * CFrame.new(0, yOffset, 0)
                             end
-                            
+
                             -- 取消碰撞并焊死
                             for _, part in ipairs(woodenSign:GetDescendants()) do
                                 if part:IsA("BasePart") then
@@ -403,7 +687,7 @@ function PlotService.UpdateSoilVisuals(player, plot)
                                     part.Anchored = true
                                 end
                             end
-            
+
                             -- 在 NegativePart 上生成 Unlock 文本
                             local negativePart = woodenSign:FindFirstChild("NegativePart", true)
                             if negativePart and negativePart:IsA("BasePart") then
@@ -416,7 +700,7 @@ function PlotService.UpdateSoilVisuals(player, plot)
                                 surfaceGui.Face = Enum.NormalId.Front
                                 surfaceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
                                 surfaceGui.PixelsPerStud = 50
-                                surfaceGui.AlwaysOnTop = false 
+                                surfaceGui.AlwaysOnTop = false
 
                                 local textLabel = Instance.new("TextLabel")
                                 textLabel.Size = UDim2.new(1, 0, 1, 0)
@@ -434,50 +718,61 @@ function PlotService.UpdateSoilVisuals(player, plot)
                         end
                     end
 
-                    -- 👇 [🌟 核心修复区：挂载购买提示，且仅对目标地块生效]
+                    -- 区：挂载购买提示，且仅对目标地块生效
                     if not prompt then
                         prompt = Instance.new("ProximityPrompt")
                         prompt.Name = "UnlockPrompt"
                         prompt.ActionText = "Unlock Plot"
-                        prompt.KeyboardKeyCode = Enum.KeyCode.F
+                        prompt.KeyboardKeyCode = Enum.KeyCode.E
                         prompt.RequiresLineOfSight = false
                         prompt.MaxActivationDistance = 8
-                        prompt.HoldDuration = 0.5 -- [🌟 修复2] 必须长按0.5秒，杜绝按键连发穿透多块地！
+                        prompt.HoldDuration = 0.5 -- 2 必须长按0.5秒，杜绝按键连发穿透多块地
                         prompt.Parent = soil
 
-                        -- 当玩家长按 F 键时触发购买
+                        -- 当玩家长按 E 键时间触发购买
                         prompt.Triggered:Connect(function(triggerPlayer)
                             if triggerPlayer ~= player then return end -- 只有地块主人能买
                             local price = PlotUnlockConfig.UnlockPrices[soilId]
-                            
+
                             -- 扣除金币，如果成功则解锁
+                            local data = PlayerDataManager.GetPlayerData(player)
+                            if not data then
+                                notifyPlayer(player, "Data loading. Please try again.")
+                                return
+                            end
+                            if not PlayerDataManager.IsDataSafeToSave(player) then
+                                notifyPlayer(player, "Save unavailable. Please try again.")
+                                return
+                            end
+
+                            local snapshot = snapshotPlotUnlockState(data)
                             if price and PlayerDataManager.ConsumeCoins(player, price) then
-                                local data = PlayerDataManager.GetPlayerData(player)
-                                AnalyticsService:LogEconomyEvent(
-                                    player,
-                                    Enum.AnalyticsEconomyFlowType.Sink,
-                                    "Coins",
-                                    price,
-                                    data and data.Coins or 0,
-                                    Enum.AnalyticsEconomyTransactionType.Gameplay.Name,
-                                    "UnlockPlot_Soil_" .. tostring(soilId)
-                                )
                                 PlayerDataManager.IncrementUnlockedPlots(player)
+
+                                local saveQueued, saveErr = PlayerDataManager.RequestSave(player, "plot unlock")
+                                if not saveQueued then
+                                    warn("[PlotService] Failed to queue save after plot unlock for "
+                                        .. player.Name .. ": " .. tostring(saveErr))
+                                    rollbackPlotUnlock(player, data, snapshot)
+                                    PlotService.UpdateSoilVisuals(player, plot)
+                                    notifyPlayer(player, "Unlock failed: save unavailable. Please try again.")
+                                    return
+                                end
+                                -- Unlock was already applied before the forced save.
                                 PlotService.UpdateSoilVisuals(player, plot) -- 刷新所有土地状态
                             else
                                 local showNotifRE = ReplicatedStorage:FindFirstChild("ShowNotificationRE")
-                                if showNotifRE then 
-                                    showNotifRE:FireClient(player, "Notice", "Not enough coins!") 
+                                if showNotifRE then
+                                    showNotifRE:FireClient(player, "Notice", "Not enough coins!")
                                 end
                             end
                         end)
                     end
                     -- 更新提示框上显示的价格
-                    prompt.ObjectText = "Price:" .. tostring(PlotUnlockConfig.UnlockPrices[soilId])
-                    -- 👆 [核心修复区结束]
+                    prompt.ObjectText = "Price:" .. NumberFormatUtil.FormatNumber(PlotUnlockConfig.UnlockPrices[soilId])
 
                 else
-                    -- 🔴 情况3：未来才能解锁的地（跳级的地）
+                    -- 情况3：未来才能解锁的地（跳级的地）
                     soil:SetAttribute("IsUnlocked", false)
                     soil.Color = Color3.fromRGB(163, 124, 18) -- 变成绿色
                     if prompt then prompt:Destroy() end -- 没有任何交互
@@ -487,17 +782,18 @@ function PlotService.UpdateSoilVisuals(player, plot)
         end
     end
 end
--- [🌟 新增：玩家退出时彻底清理地块]
+-- 玩家退出时间彻底清理地块
 function PlotService.ReleasePlot(player)
     local userId = player.UserId
     local plot = playerPlots[userId]
-    
+
     if plot then
-        print("【地块系统】玩家 " .. player.Name .. " 已退出，正在回收地块: " .. plot.Name)
-        
-        -- 0. 先停止战斗状态，避免后台刷怪协程继续运行
+        print("[PlotService] Player " .. player.Name .. " left; recycling plot: " .. plot.Name)
+
+        -- 0. 先停止战斗状态，避免后台刷新怪协程继续运行
         plot:SetAttribute("IsGameOver", true)
         plot:SetAttribute("IsLevelActive", false)
+        ClearPlotTitleDisplays(plot)
 
         local okZombie, ZombieService = pcall(function()
             return require(script.Parent.ZombieService)
@@ -505,7 +801,7 @@ function PlotService.ReleasePlot(player)
         if okZombie and ZombieService and ZombieService.CleanupPlayerBattle then
             ZombieService.CleanupPlayerBattle(player)
         end
-        
+
         -- 1. 彻底销毁地块上的所有植物
         local plantsFolder = plot:FindFirstChild("Plants")
         if plantsFolder then
@@ -524,11 +820,12 @@ function PlotService.ReleasePlot(player)
                             child:Destroy()
                         end
                     end
+                    lawnPart:SetAttribute("OccupiedBy", nil)
                 end
             end
         end
         -- 2.1 销毁悬浮牌 (OwnerBillboard)
-        local spawnPart = plot:FindFirstChild("SpawnPoint") or plot:FindFirstChild("SpawnLocation") or plot:FindFirstChildWhichIsA("BasePart", true)
+        local spawnPart = GetPlotSpawnPart(plot) or plot:FindFirstChildWhichIsA("BasePart", true)
         if spawnPart then
             local billboard = spawnPart:FindFirstChild("OwnerBillboard")
             if billboard then billboard:Destroy() end
@@ -537,11 +834,11 @@ function PlotService.ReleasePlot(player)
        -- 2. 销毁身份名牌 (PlayerIdentitySurfaceGui)
         local paiModel = plot:FindFirstChild("pai", true)
         local targetPart = paiModel and paiModel:FindFirstChild("Text")
-        
+
         if targetPart then
             local identityGui = targetPart:FindFirstChild("PlayerIdentitySurfaceGui")
             if identityGui then identityGui:Destroy() end
-            
+
             -- 兜底清理旧版的纯名字名牌
             local oldNameGui = targetPart:FindFirstChild("PlayerNameSurfaceGui")
             if oldNameGui then oldNameGui:Destroy() end
@@ -555,7 +852,10 @@ function PlotService.ReleasePlot(player)
             end
         end
 
-        -- 3. 兜底销毁场上的 OwnerId 关联对象（僵尸、基地向日葵、其他专属模型）
+        -- 2.5 销毁 Max Level 展示牌
+        ClearMaxLevelPart(plot)
+
+        -- 3. 兜底销毁场上的 OwnerId联对象（僵尸、基地向日葵、其他专属模型）
         for _, obj in pairs(game.Workspace:GetChildren()) do
             if obj:IsA("Model") and obj:GetAttribute("OwnerId") == userId then
                 obj:Destroy()
@@ -568,7 +868,7 @@ function PlotService.ReleasePlot(player)
             end
         end
 
-        -- 4. 重置地块交互与视觉状态，让下一个玩家接手时是干净的
+        -- 4. 重置地块交互与视觉状态，让下一个玩家接手时间是干净的
         ResetPlotForNextOwner(plot)
 
         -- 5. 重置地块属性，让其他新玩家可以占用
@@ -578,8 +878,9 @@ function PlotService.ReleasePlot(player)
         plot:SetAttribute("CurrentLevel", 1)
         plot:SetAttribute("ActiveZombies", 0)
         plot:SetAttribute("ZombiesDefeated", 0)
+        plot:SetAttribute("TotalZombies", 0)
         plot:SetAttribute("GameSpeed", 1)
-        
+
         -- 6. 从缓存中移除
         playerPlots[userId] = nil
     end

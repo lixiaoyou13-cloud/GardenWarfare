@@ -1,0 +1,2013 @@
+-- src/client/Services/PlantAttackVisualController.luau
+local PlantAttackVisualController = {}
+
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local EffectUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EffectUtil"))
+local localPlayer = Players.LocalPlayer
+
+local PROJECTILE_SPEED = 25
+local HIT_EFFECT_POOL_LIMIT = 30
+local DAMAGE_TEXT_POOL_LIMIT = 80
+local GROUND_EFFECT_POOL_LIMIT_PER_TYPE = 12
+local LOCAL_OWNER_PROJECTILE_LIMIT = 120
+local OTHER_OWNER_PROJECTILE_LIMIT = 45
+local GLOBAL_PROJECTILE_LIMIT = 180
+local OTHER_OWNER_PROJECTILE_DISTANCE = 140
+local ATTACK_TRACK_CACHE_LIMIT = 24
+local ATTACK_TRACK_IDLE_CACHE_TARGET = 12
+local LOCAL_OWNER_ATTACK_ANIMATION_DISTANCE = 180
+local OTHER_OWNER_ATTACK_ANIMATION_DISTANCE = 90
+local OFFSCREEN_ATTACK_ANIMATION_DISTANCE = 60
+local SUNSHROOM_HEAL_VFX_DEBUG = false
+local CARROT_CANNON_ATTACK_DEBUG = false -- 临时调试萝卜加农炮攻击动画表现。
+local CARROT_CANNON_ATTACK_ANIMATION_ID = "79085387107532"
+local CARROT_CANNON_DEBUG_PRINT_LIMIT = 120
+local CARROT_CANNON_DEBUG_MOTOR_NAMES = { "luobo ", "chelun1", "chelun2", "chetoupao" }
+
+local attackTracks = setmetatable({}, { __mode = "k" })
+local activeMarkerProjectileContexts = setmetatable({}, { __mode = "k" })
+local activeMarkerPlantVFXContexts = setmetatable({}, { __mode = "k" })
+local timedPlantVFXTokens = setmetatable({}, { __mode = "k" })
+local flashingZombies = setmetatable({}, { __mode = "k" })
+local warnedProjectileIssues = {}
+local warnedAnimationIssues = {}
+local failedAnimationIds = {}
+local hitEffectPools = {}
+local groundEffectPools = {}
+local damageTextPool = {}
+local visualCache = setmetatable({}, { __mode = "k" })
+local zombiePartCache = setmetatable({}, { __mode = "k" })
+local activeGroundEffects = {}
+local activeProjectileCounts = {
+    Self = 0,
+    Others = 0,
+    Total = 0,
+}
+local visualConnection = nil
+local carrotCannonDebugPrintCount = 0
+local fireMarkerProjectileShot = nil
+local startMarkerTimedPlantVFX = nil
+local visualSettings = {
+    EffectsSelf = true,
+    EffectsOthers = true,
+    PlantSelf = true,
+    PlantOthers = true,
+}
+
+local function warnProjectileOnce(projectileName, message)
+    local key = tostring(projectileName) .. ":" .. message
+    if warnedProjectileIssues[key] then return end
+    warnedProjectileIssues[key] = true
+    warn(("[PlantAttackVisual] %s: %s"):format(tostring(projectileName), message))
+end
+
+local function warnAnimationOnce(animationId, message)
+    local key = tostring(animationId) .. ":" .. message
+    if warnedAnimationIssues[key] then return end
+    warnedAnimationIssues[key] = true
+    warn(("[PlantAttackVisual] Animation %s: %s"):format(tostring(animationId), message))
+end
+
+local function getPool(poolMap, key)
+    local pool = poolMap[key]
+    if not pool then
+        pool = {}
+        poolMap[key] = pool
+    end
+
+    return pool
+end
+
+local function getEmitCount(emitter, fallback)
+    local emitCount = emitter:GetAttribute("EmitCount")
+    if not emitCount then
+        local countValueNode = emitter:FindFirstChild("EmitCount")
+        if countValueNode and (countValueNode:IsA("IntValue") or countValueNode:IsA("NumberValue")) then
+            emitCount = countValueNode.Value
+        end
+    end
+
+    emitCount = tonumber(emitCount)
+    if not emitCount or emitCount <= 0 then
+        return fallback
+    end
+
+    return emitCount
+end
+
+local function getVisualCache(instance)
+    if not instance then
+        return {
+            BaseParts = {},
+            Effects = {},
+            OriginalTransparencies = {},
+        }
+    end
+
+    local cached = visualCache[instance]
+    if cached then
+        return cached
+    end
+
+    cached = {
+        BaseParts = {},
+        Effects = {},
+        OriginalTransparencies = {},
+    }
+
+    if instance:IsA("BasePart") then
+        table.insert(cached.BaseParts, instance)
+        cached.OriginalTransparencies[instance] = instance.Transparency
+    end
+
+    for _, desc in ipairs(instance:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            table.insert(cached.BaseParts, desc)
+            cached.OriginalTransparencies[desc] = desc.Transparency
+        elseif desc:IsA("ParticleEmitter")
+            or desc:IsA("Trail")
+            or desc:IsA("Beam")
+            or desc:IsA("Light")
+            or desc:IsA("Highlight")
+        then
+            table.insert(cached.Effects, desc)
+        end
+    end
+
+    visualCache[instance] = cached
+    return cached
+end
+
+local function getCachedZombieParts(zombieModel)
+    if not zombieModel then
+        return {}
+    end
+
+    local parts = zombiePartCache[zombieModel]
+    if parts then
+        return parts
+    end
+
+    parts = {}
+    if zombieModel:IsA("BasePart") then
+        table.insert(parts, zombieModel)
+    end
+
+    for _, desc in ipairs(zombieModel:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            table.insert(parts, desc)
+        end
+    end
+
+    zombiePartCache[zombieModel] = parts
+    return parts
+end
+
+local function deactivateVisualEffects(instance)
+    if not instance then return end
+
+    for _, desc in ipairs(getVisualCache(instance).Effects) do
+        if desc:IsA("ParticleEmitter") then
+            desc.Enabled = false
+            pcall(function()
+                desc:Clear()
+            end)
+        elseif desc:IsA("Trail") then
+            desc.Enabled = false
+            pcall(function()
+                desc:Clear()
+            end)
+        elseif desc:IsA("Beam") or desc:IsA("Light") or desc:IsA("Highlight") then
+            desc.Enabled = false
+        end
+    end
+end
+
+local function setVisualPartsVisible(instance, visible)
+    if not instance then return end
+
+    local cached = getVisualCache(instance)
+    for _, part in ipairs(cached.BaseParts) do
+        if part and part.Parent then
+            if visible then
+                local originalTransparency = cached.OriginalTransparencies[part]
+                if originalTransparency == nil then
+                    originalTransparency = part.Transparency
+                    cached.OriginalTransparencies[part] = originalTransparency
+                end
+                part.Transparency = originalTransparency
+            else
+                part.Transparency = 1
+            end
+        end
+    end
+end
+
+local function getOwnerUserIdFromInstance(instance)
+    local current = instance
+    while current and current ~= game do
+        local ownerId = current:GetAttribute("OwnerId")
+        if ownerId then
+            return tonumber(ownerId)
+        end
+
+        current = current.Parent
+    end
+
+    return nil
+end
+
+local function isLocalOwner(ownerUserId)
+    return tonumber(ownerUserId) == localPlayer.UserId
+end
+
+local function areEffectsEnabled(ownerUserId)
+    if isLocalOwner(ownerUserId) then
+        return visualSettings.EffectsSelf ~= false
+    end
+
+    return visualSettings.EffectsOthers ~= false
+end
+
+local function arePlantAnimationsEnabled(ownerUserId)
+    if isLocalOwner(ownerUserId) then
+        return visualSettings.PlantSelf ~= false
+    end
+
+    return visualSettings.PlantOthers ~= false
+end
+
+local function getInstancePosition(instance)
+    if not instance or not instance.Parent then
+        return nil
+    end
+
+    if instance:IsA("BasePart") then
+        return instance.Position
+    end
+
+    if instance:IsA("Model") then
+        return instance:GetPivot().Position
+    end
+
+    local part = instance:FindFirstChildWhichIsA("BasePart", true)
+    return part and part.Position or nil
+end
+
+local function getLocalRootPosition()
+    local character = localPlayer.Character
+    local rootPart = character and (character:FindFirstChild("HumanoidRootPart") or character.PrimaryPart)
+    return rootPart and rootPart.Position or nil
+end
+
+local function getProjectileOwnerBucket(ownerUserId)
+    if isLocalOwner(ownerUserId) then
+        return "Self"
+    end
+
+    return "Others"
+end
+
+local function shouldRenderProjectile(ownerUserId, firePosition)
+    if activeProjectileCounts.Total >= GLOBAL_PROJECTILE_LIMIT then
+        return nil
+    end
+
+    local bucket = getProjectileOwnerBucket(ownerUserId)
+    if bucket == "Self" then
+        if activeProjectileCounts.Self >= LOCAL_OWNER_PROJECTILE_LIMIT then
+            return nil
+        end
+
+        return bucket
+    end
+
+    if activeProjectileCounts.Others >= OTHER_OWNER_PROJECTILE_LIMIT then
+        return nil
+    end
+
+    local localRootPosition = getLocalRootPosition()
+    if localRootPosition and typeof(firePosition) == "Vector3" then
+        if (localRootPosition - firePosition).Magnitude > OTHER_OWNER_PROJECTILE_DISTANCE then
+            return nil
+        end
+    end
+
+    return bucket
+end
+
+local function incrementProjectileCount(bucket)
+    activeProjectileCounts.Total += 1
+    if bucket == "Self" then
+        activeProjectileCounts.Self += 1
+    else
+        activeProjectileCounts.Others += 1
+    end
+end
+
+local function decrementProjectileCount(bucket)
+    activeProjectileCounts.Total = math.max(0, activeProjectileCounts.Total - 1)
+    if bucket == "Self" then
+        activeProjectileCounts.Self = math.max(0, activeProjectileCounts.Self - 1)
+    else
+        activeProjectileCounts.Others = math.max(0, activeProjectileCounts.Others - 1)
+    end
+end
+
+local function isPlantAnimationImportant(plant, ownerUserId)
+    local position = getInstancePosition(plant)
+    local camera = Workspace.CurrentCamera
+    if not position or not camera then
+        return isLocalOwner(ownerUserId)
+    end
+
+    local distance = (camera.CFrame.Position - position).Magnitude
+    local maxDistance = isLocalOwner(ownerUserId) and LOCAL_OWNER_ATTACK_ANIMATION_DISTANCE or OTHER_OWNER_ATTACK_ANIMATION_DISTANCE
+    if distance > maxDistance then
+        return false
+    end
+
+    local viewportPoint, onScreen = camera:WorldToViewportPoint(position)
+    if onScreen and viewportPoint.Z > 0 then
+        return true
+    end
+
+    return distance <= OFFSCREEN_ATTACK_ANIMATION_DISTANCE
+end
+
+local function cleanupAttackTrack(plant)
+    local cached = attackTracks[plant]
+    if not cached then return end
+
+    if cached.markerConnection then cached.markerConnection:Disconnect() end
+    if cached.fireMarkerConnection then cached.fireMarkerConnection:Disconnect() end
+    if cached.cleanupConnection then cached.cleanupConnection:Disconnect() end
+    if cached.track then
+        cached.track:Stop(0.05)
+        cached.track:Destroy()
+    end
+
+    attackTracks[plant] = nil
+end
+
+local function cleanupMarkerProjectileContext(plant, expectedContext)
+    local context = activeMarkerProjectileContexts[plant]
+    if not context or (expectedContext and context ~= expectedContext) then
+        return
+    end
+
+    activeMarkerProjectileContexts[plant] = nil
+    for _, connection in ipairs(context.Connections or {}) do
+        connection:Disconnect()
+    end
+    context.Connections = nil
+end
+
+local function isMarkerProjectilePlantActive(plant)
+    if not plant or not plant.Parent then
+        return false
+    end
+    if plant:GetAttribute("IsCombatPlant") ~= true or plant:GetAttribute("IsDead") == true then
+        return false
+    end
+
+    local health = tonumber(plant:GetAttribute("Health"))
+    return health == nil or health > 0
+end
+
+local function countAttackTracks()
+    local count = 0
+    for plant in pairs(attackTracks) do
+        if not plant or not plant.Parent then
+            cleanupAttackTrack(plant)
+        else
+            count += 1
+        end
+    end
+    return count
+end
+
+local function pruneAttackTracksForNewTrack(exceptPlant)
+    local activeCount = 0
+    local pruneCandidates = {}
+    for plant, cached in pairs(attackTracks) do
+        if not plant or not plant.Parent or not cached.track then
+            cleanupAttackTrack(plant)
+        else
+            activeCount += 1
+            if plant ~= exceptPlant then
+                local ownerUserId = tonumber(cached.ownerUserId) or getOwnerUserIdFromInstance(plant)
+                local important = isPlantAnimationImportant(plant, ownerUserId)
+                local isPlaying = cached.track.IsPlaying == true
+                local priority = 0
+
+                if important then
+                    priority += 2
+                end
+                if isPlaying then
+                    priority += 1
+                end
+
+                table.insert(pruneCandidates, {
+                    Plant = plant,
+                    Priority = priority,
+                    LastUsedAt = tonumber(cached.lastUsedAt) or 0,
+                })
+            end
+        end
+    end
+
+    if activeCount < ATTACK_TRACK_CACHE_LIMIT then
+        return true
+    end
+
+    table.sort(pruneCandidates, function(first, second)
+        if first.Priority ~= second.Priority then
+            return first.Priority < second.Priority
+        end
+
+        return first.LastUsedAt < second.LastUsedAt
+    end)
+
+    for _, candidate in ipairs(pruneCandidates) do
+        cleanupAttackTrack(candidate.Plant)
+        activeCount -= 1
+        if activeCount < ATTACK_TRACK_CACHE_LIMIT then
+            return true
+        end
+    end
+
+    return activeCount < ATTACK_TRACK_CACHE_LIMIT
+end
+
+local function scheduleIdleAttackTrackCleanup(plant, cached, speedMult)
+    cached.cleanupToken = (tonumber(cached.cleanupToken) or 0) + 1
+    local cleanupToken = cached.cleanupToken
+    local track = cached.track
+    local length = track and tonumber(track.Length) or 0
+    local cleanupDelay = math.max(2, (length > 0 and (length / math.max(speedMult, 0.01)) or 1.5) + 0.75)
+
+    task.delay(cleanupDelay, function()
+        local current = attackTracks[plant]
+        if current ~= cached or current.cleanupToken ~= cleanupToken then
+            return
+        end
+
+        if current.track and current.track.IsPlaying then
+            return
+        end
+
+        if countAttackTracks() > ATTACK_TRACK_IDLE_CACHE_TARGET then
+            cleanupAttackTrack(plant)
+        end
+    end)
+end
+
+local function getAnimator(model)
+    if not model or not model.Parent then return nil end
+
+    local animController = model:FindFirstChildOfClass("AnimationController") or model:FindFirstChildOfClass("Humanoid")
+    if not animController then return nil end
+
+    local animator = animController:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = animController
+    end
+
+    return animator
+end
+
+-- 判断本次攻击动画是否需要输出萝卜加农炮调试日志。
+local function shouldDebugCarrotCannonAttack(plant, animationId)
+    if not CARROT_CANNON_ATTACK_DEBUG then
+        return false
+    end
+
+    if tostring(animationId or ""):find(CARROT_CANNON_ATTACK_ANIMATION_ID, 1, true) then
+        return true
+    end
+
+    local plantName = plant and plant.Name or ""
+    return tostring(plantName):find("CarrotCannon", 1, true) ~= nil
+end
+
+-- 控制萝卜加农炮调试日志输出数量，避免刷屏。
+local function printCarrotCannonDebug(message)
+    if carrotCannonDebugPrintCount >= CARROT_CANNON_DEBUG_PRINT_LIMIT then
+        return
+    end
+
+    carrotCannonDebugPrintCount += 1
+    print("[CarrotCannonAttackDebug][Client] " .. tostring(message))
+end
+
+-- 将 Motor6D.Transform 转成便于查看的位置和角度文本。
+local function formatCFrameForDebug(cframe)
+    local x, y, z = cframe:ToOrientation()
+    local position = cframe.Position
+    return ("pos=(%.3f, %.3f, %.3f) rotDeg=(%.1f, %.1f, %.1f)"):format(
+        position.X,
+        position.Y,
+        position.Z,
+        math.deg(x),
+        math.deg(y),
+        math.deg(z)
+    )
+end
+
+-- 读取 AnimationTrack 上的动画资源 ID，部分环境读不到时返回 unknown。
+local function getTrackAnimationIdForDebug(track)
+    local ok, animation = pcall(function()
+        return track.Animation
+    end)
+    if ok and animation and animation:IsA("Animation") then
+        return tostring(animation.AnimationId)
+    end
+
+    return "unknown"
+end
+
+-- 输出当前 Animator 正在播放的动画轨道，方便判断待机和攻击是否叠加。
+local function debugCarrotCannonPlayingTracks(plant, label, animationId)
+    if not shouldDebugCarrotCannonAttack(plant, animationId) then
+        return
+    end
+
+    local animator = getAnimator(plant)
+    if not animator then
+        printCarrotCannonDebug(tostring(label) .. " tracks | animator missing")
+        return
+    end
+
+    local tracks = animator:GetPlayingAnimationTracks()
+    local parts = {}
+    for index, playingTrack in ipairs(tracks) do
+        table.insert(parts, ("#%d id=%s playing=%s time=%.3f length=%.3f weight=%.3f priority=%s"):format(
+            index,
+            getTrackAnimationIdForDebug(playingTrack),
+            tostring(playingTrack.IsPlaying),
+            tonumber(playingTrack.TimePosition) or 0,
+            tonumber(playingTrack.Length) or 0,
+            tonumber(playingTrack.WeightCurrent) or 0,
+            tostring(playingTrack.Priority)
+        ))
+    end
+
+    if #parts == 0 then
+        table.insert(parts, "none")
+    end
+
+    printCarrotCannonDebug(tostring(label) .. " tracks | " .. table.concat(parts, " | "))
+end
+
+-- 在植物模型下按名称查找指定 Motor6D。
+local function findMotorByName(root, motorName)
+    for _, descendant in ipairs(root:GetDescendants()) do
+        if descendant:IsA("Motor6D") and descendant.Name == motorName then
+            return descendant
+        end
+    end
+
+    return nil
+end
+
+-- 格式化 Motor6D 绑定零件信息，用来排查零件是否被锚定或没有实际位移。
+local function formatMotorPartForDebug(part)
+    if not part or not part:IsA("BasePart") then
+        return "nil"
+    end
+
+    return ("%s anchored=%s %s"):format(
+        part:GetFullName(),
+        tostring(part.Anchored),
+        formatCFrameForDebug(part.CFrame)
+    )
+end
+
+-- 打印萝卜加农炮关键 Motor6D 在动画播放过程中的 Transform。
+local function debugCarrotCannonMotors(plant, label, track, animationId)
+    if not shouldDebugCarrotCannonAttack(plant, animationId) then
+        return
+    end
+
+    local parts = {}
+    if track then
+        table.insert(parts, ("trackPlaying=%s time=%.3f length=%.3f weight=%.3f priority=%s"):format(
+            tostring(track.IsPlaying),
+            tonumber(track.TimePosition) or 0,
+            tonumber(track.Length) or 0,
+            tonumber(track.WeightCurrent) or 0,
+            tostring(track.Priority)
+        ))
+    end
+
+    for _, motorName in ipairs(CARROT_CANNON_DEBUG_MOTOR_NAMES) do
+        local motor = findMotorByName(plant, motorName)
+        if motor then
+            table.insert(parts, ("%q Transform %s Part0=%s Part1=%s"):format(
+                motorName,
+                formatCFrameForDebug(motor.Transform),
+                formatMotorPartForDebug(motor.Part0),
+                formatMotorPartForDebug(motor.Part1)
+            ))
+        else
+            table.insert(parts, ("%q missing"):format(motorName))
+        end
+    end
+
+    printCarrotCannonDebug(tostring(label) .. " | " .. table.concat(parts, " | "))
+end
+
+local function playAttackAnimation(plant, animationId, speedMult, ownerUserId, attackToken)
+    local debugCarrot = shouldDebugCarrotCannonAttack(plant, animationId)
+    if not plant or not plant.Parent then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: plant missing animation=" .. tostring(animationId))
+        end
+        return
+    end
+    if type(animationId) ~= "string" or animationId == "" then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: animationId invalid plant=" .. tostring(plant:GetFullName()))
+        end
+        return
+    end
+    if failedAnimationIds[animationId] then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: animation previously failed plant=" .. tostring(plant:GetFullName()) .. " animation=" .. tostring(animationId))
+        end
+        return
+    end
+
+    ownerUserId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
+    if not arePlantAnimationsEnabled(ownerUserId) then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: plant animation setting disabled owner=" .. tostring(ownerUserId))
+        end
+        cleanupAttackTrack(plant)
+        return
+    end
+
+    if not isPlantAnimationImportant(plant, ownerUserId) then
+        if debugCarrot then
+            local position = getInstancePosition(plant)
+            local camera = Workspace.CurrentCamera
+            local distance = position and camera and (camera.CFrame.Position - position).Magnitude or -1
+            printCarrotCannonDebug(("skip: not important owner=%s distance=%.2f"):format(tostring(ownerUserId), distance))
+        end
+        cleanupAttackTrack(plant)
+        return
+    end
+
+    speedMult = tonumber(speedMult) or 1
+    local animator = getAnimator(plant)
+    if not animator then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: animator missing plant=" .. tostring(plant:GetFullName()))
+        end
+        return
+    end
+
+    local cached = attackTracks[plant]
+    if not cached or cached.animationId ~= animationId or cached.animator ~= animator then
+        cleanupAttackTrack(plant)
+
+        if not pruneAttackTracksForNewTrack(plant) then
+            if debugCarrot then
+                printCarrotCannonDebug("skip: attack track cache full plant=" .. tostring(plant:GetFullName()))
+            end
+            return
+        end
+
+        local anim = Instance.new("Animation")
+        anim.AnimationId = animationId
+
+        local ok, track = pcall(function()
+            return animator:LoadAnimation(anim)
+        end)
+        anim:Destroy()
+
+        if not ok or not track then
+            failedAnimationIds[animationId] = true
+            warnAnimationOnce(animationId, "failed to load; skipping future attempts for this client")
+            if debugCarrot then
+                printCarrotCannonDebug("load failed plant=" .. tostring(plant:GetFullName()) .. " error=" .. tostring(track))
+            end
+            return
+        end
+
+        track.Priority = Enum.AnimationPriority.Action
+        track.Looped = false
+
+        if debugCarrot then
+            printCarrotCannonDebug(("loaded plant=%s animation=%s length=%.3f priority=%s"):format(
+                tostring(plant:GetFullName()),
+                tostring(animationId),
+                tonumber(track.Length) or 0,
+                tostring(track.Priority)
+            ))
+        end
+
+        cached = {
+            animationId = animationId,
+            animator = animator,
+            track = track,
+            ownerUserId = ownerUserId,
+            lastUsedAt = os.clock(),
+        }
+
+        cached.markerConnection = track:GetMarkerReachedSignal("VFX"):Connect(function()
+            local currentOwnerId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
+            local plantId = plant and (plant:GetAttribute("PlantId") or plant.Name)
+            if plantId ~= "GloomShroom"
+                and plant and plant.Parent and areEffectsEnabled(currentOwnerId)
+            then
+                EffectUtil.PlayAttackVFX(plant)
+            end
+        end)
+
+        cached.fireMarkerConnection = track:GetMarkerReachedSignal("Fire"):Connect(function()
+            if fireMarkerProjectileShot then
+                fireMarkerProjectileShot(plant, cached.attackToken, true)
+            end
+            if startMarkerTimedPlantVFX then
+                startMarkerTimedPlantVFX(plant, cached.attackToken, track)
+            end
+        end)
+
+        cached.cleanupConnection = plant.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                cleanupAttackTrack(plant)
+            end
+        end)
+
+        attackTracks[plant] = cached
+    end
+
+    local track = cached.track
+    if not track then
+        if debugCarrot then
+            printCarrotCannonDebug("skip: cached track missing plant=" .. tostring(plant:GetFullName()))
+        end
+        return
+    end
+
+    cached.ownerUserId = ownerUserId
+    cached.lastUsedAt = os.clock()
+    cached.attackToken = attackToken
+    if debugCarrot then
+        printCarrotCannonDebug(("play plant=%s animation=%s owner=%s speed=%.2f"):format(
+            tostring(plant:GetFullName()),
+            tostring(animationId),
+            tostring(ownerUserId),
+            speedMult
+        ))
+        debugCarrotCannonPlayingTracks(plant, "before Play", animationId)
+        debugCarrotCannonMotors(plant, "before Play", track, animationId)
+    end
+    track:Stop(0)
+    track:Play(0.05)
+    track:AdjustSpeed(speedMult)
+    if debugCarrot then
+        debugCarrotCannonPlayingTracks(plant, "after Play", animationId)
+        debugCarrotCannonMotors(plant, "after Play", track, animationId)
+        task.delay(0.12 / math.max(speedMult, 0.01), function()
+            if plant and plant.Parent and track then
+                debugCarrotCannonPlayingTracks(plant, "after 0.12s", animationId)
+                debugCarrotCannonMotors(plant, "after 0.12s", track, animationId)
+            end
+        end)
+        task.delay(0.35 / math.max(speedMult, 0.01), function()
+            if plant and plant.Parent and track then
+                debugCarrotCannonPlayingTracks(plant, "after 0.35s", animationId)
+                debugCarrotCannonMotors(plant, "after 0.35s", track, animationId)
+            end
+        end)
+    end
+    scheduleIdleAttackTrackCleanup(plant, cached, speedMult)
+end
+
+-- 播放植物模型自身的 VFX 节点特效，用于无攻击动画的表现。
+local function playPlantVFX(plant, ownerUserId)
+    if not plant or not plant.Parent then
+        if SUNSHROOM_HEAL_VFX_DEBUG then
+            print("[SunShroomHealVFX][Client] PlantVFX received, but plant is nil or not replicated")
+        end
+        return
+    end
+
+    local currentOwnerId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
+    local effectsEnabled = areEffectsEnabled(currentOwnerId)
+    local isSunShroom = plant.Name == "SunShroom" or plant:GetAttribute("PlantId") == "SunShroom"
+    if isSunShroom and SUNSHROOM_HEAL_VFX_DEBUG then
+        print(("[SunShroomHealVFX][Client] PlantVFX received plant=%s owner=%s effectsEnabled=%s"):format(
+            plant:GetFullName(),
+            tostring(currentOwnerId),
+            tostring(effectsEnabled)
+        ))
+    end
+
+    if effectsEnabled then
+        EffectUtil.PlayAttackVFX(plant)
+    end
+end
+
+local function runTimedPlantVFX(plant, token, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId)
+    task.spawn(function()
+        if delaySeconds > 0 then
+            task.wait(delaySeconds / speedMult)
+        end
+
+        local elapsed = 0
+        while elapsed <= durationSeconds do
+            if timedPlantVFXTokens[plant] ~= token
+                or not plant.Parent
+                or plant:GetAttribute("IsCombatPlant") ~= true
+                or plant:GetAttribute("IsDead") == true
+                or (tonumber(plant:GetAttribute("Health")) or 0) <= 0
+                or not areEffectsEnabled(ownerUserId)
+            then
+                break
+            end
+
+            EffectUtil.PlayAttackVFX(plant)
+            task.wait(pulseInterval / speedMult)
+            elapsed += pulseInterval
+        end
+
+        if timedPlantVFXTokens[plant] == token then
+            timedPlantVFXTokens[plant] = nil
+            activeMarkerPlantVFXContexts[plant] = nil
+        end
+    end)
+end
+
+local function stopMarkerContinuousPlantVFX(plant, expectedContext)
+    local context = activeMarkerPlantVFXContexts[plant]
+    if not context or (expectedContext and context ~= expectedContext) then
+        return
+    end
+
+    activeMarkerPlantVFXContexts[plant] = nil
+    for _, connection in ipairs(context.Connections or {}) do
+        connection:Disconnect()
+    end
+    context.Connections = nil
+
+    if context.Started then
+        EffectUtil.SetAttackVFXContinuous(plant, false)
+    end
+end
+
+-- Marker 正常到达时立即开始连续喷发；Marker 缺失时才按配置延迟降级。
+local function playTimedPlantVFX(plant, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId, markerName, attackToken)
+    if not plant or not plant.Parent then
+        return
+    end
+
+    local token = (timedPlantVFXTokens[plant] or 0) + 1
+    timedPlantVFXTokens[plant] = token
+
+    delaySeconds = math.max(0, tonumber(delaySeconds) or 0)
+    durationSeconds = math.max(0, tonumber(durationSeconds) or 0)
+    pulseInterval = math.max(0.01, tonumber(pulseInterval) or 0.1)
+    speedMult = math.max(0.01, tonumber(speedMult) or 1)
+    ownerUserId = tonumber(ownerUserId) or getOwnerUserIdFromInstance(plant)
+    stopMarkerContinuousPlantVFX(plant)
+
+    attackToken = tonumber(attackToken)
+    if type(markerName) ~= "string" or markerName == "" or not attackToken then
+        runTimedPlantVFX(plant, token, delaySeconds, durationSeconds, pulseInterval, speedMult, ownerUserId)
+        return
+    end
+
+    local context = {
+        AttackToken = attackToken,
+        MarkerName = markerName,
+        Token = token,
+        Duration = durationSeconds,
+        SpeedMult = speedMult,
+        OwnerUserId = ownerUserId,
+        Started = false,
+        Connections = {},
+    }
+    activeMarkerPlantVFXContexts[plant] = context
+
+    local function stopIfPlantInactive()
+        if not isMarkerProjectilePlantActive(plant) then
+            stopMarkerContinuousPlantVFX(plant, context)
+        end
+    end
+    table.insert(context.Connections, plant.AncestryChanged:Connect(stopIfPlantInactive))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("Health"):Connect(stopIfPlantInactive))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsDead"):Connect(stopIfPlantInactive))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsCombatPlant"):Connect(stopIfPlantInactive))
+
+    local cached = attackTracks[plant]
+    if cached and cached.attackToken == attackToken and cached.track then
+        context.Track = cached.track
+        table.insert(context.Connections, cached.track.Stopped:Connect(function()
+            stopMarkerContinuousPlantVFX(plant, context)
+        end))
+        table.insert(context.Connections, cached.track.Ended:Connect(function()
+            stopMarkerContinuousPlantVFX(plant, context)
+        end))
+    end
+
+    task.delay((delaySeconds + 0.03) / speedMult, function()
+        if activeMarkerPlantVFXContexts[plant] == context and not context.Started and startMarkerTimedPlantVFX then
+            startMarkerTimedPlantVFX(plant, attackToken, nil)
+        end
+    end)
+end
+
+startMarkerTimedPlantVFX = function(plant, attackToken, track)
+    local context = activeMarkerPlantVFXContexts[plant]
+    if not context or context.AttackToken ~= attackToken or context.Started then
+        return false
+    end
+
+    if not isMarkerProjectilePlantActive(plant) or not areEffectsEnabled(context.OwnerUserId) then
+        stopMarkerContinuousPlantVFX(plant, context)
+        return false
+    end
+
+    context.Started = true
+    EffectUtil.SetAttackVFXContinuous(plant, true)
+    local duration = context.Duration
+    track = track or context.Track
+    if track and tonumber(track.Length) and track.Length > 0 then
+        local remainingDuration = math.max(0, track.Length - track.TimePosition)
+        if remainingDuration > 0 then
+            duration = remainingDuration
+        end
+    end
+
+    task.delay(duration / context.SpeedMult, function()
+        stopMarkerContinuousPlantVFX(plant, context)
+    end)
+    return true
+end
+
+local function getProjectileParts(projectile)
+    return getVisualCache(projectile).BaseParts
+end
+
+local function prepProjectile(projectile)
+    setVisualPartsVisible(projectile, true)
+
+    for _, part in ipairs(getProjectileParts(projectile)) do
+        if part and part.Parent then
+            part.Anchored = true
+            part.CanCollide = false
+            part.CanTouch = false
+            part.CanQuery = false
+        end
+    end
+end
+
+local function setProjectileCFrame(projectile, cf)
+    if projectile:IsA("BasePart") then
+        projectile.CFrame = cf
+    elseif projectile:IsA("Model") then
+        projectile:PivotTo(cf)
+    end
+end
+
+local function getProjectilePosition(projectile)
+    if projectile:IsA("BasePart") then
+        return projectile.Position
+    elseif projectile:IsA("Model") then
+        return projectile:GetPivot().Position
+    end
+
+    return nil
+end
+
+local function createEffectCarrier(projectileName, clone)
+    local carrier = Instance.new("Part")
+    carrier.Name = projectileName .. "Projectile"
+    carrier.Size = Vector3.new(0.2, 0.2, 0.2)
+    carrier.Transparency = 1
+    carrier.Anchored = true
+    carrier.CanCollide = false
+    carrier.CanTouch = false
+    carrier.CanQuery = false
+
+    if clone:IsA("Attachment") then
+        clone.Parent = carrier
+    else
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = carrier
+        clone.Parent = attachment
+    end
+
+    warnProjectileOnce(projectileName, "template has no BasePart or Model; using an invisible carrier for effects")
+    return carrier
+end
+
+local function createProjectileVisual(template, projectileName)
+    local clone = template:Clone()
+
+    if clone:IsA("BasePart") or clone:IsA("Model") then
+        return clone
+    end
+
+    local parts = getProjectileParts(clone)
+    if #parts > 0 then
+        local wrapper = Instance.new("Model")
+        wrapper.Name = projectileName .. "Projectile"
+        clone.Parent = wrapper
+        return wrapper
+    end
+
+    return createEffectCarrier(projectileName, clone)
+end
+
+local function acquireProjectileVisual(projectileName, template)
+    return createProjectileVisual(template, projectileName)
+end
+
+local function destroyProjectileVisual(projectile)
+    if not projectile then
+        return
+    end
+
+    deactivateVisualEffects(projectile)
+    setVisualPartsVisible(projectile, false)
+    visualCache[projectile] = nil
+
+    pcall(function()
+        projectile.Parent = nil
+        projectile:Destroy()
+    end)
+end
+
+local function activateProjectileEffects(projectile, projectileName, effectsEnabled)
+    local hasVisiblePart = false
+    local hasEffect = false
+
+    for _, part in ipairs(getProjectileParts(projectile)) do
+        if part.Transparency < 1 and part.Size.Magnitude > 0 then
+            hasVisiblePart = true
+        end
+    end
+
+    if not effectsEnabled then
+        return
+    end
+
+    for _, desc in ipairs(getVisualCache(projectile).Effects) do
+        if desc:IsA("ParticleEmitter") then
+            hasEffect = true
+            desc.Enabled = true
+
+            local emitCount = getEmitCount(desc)
+            if emitCount and emitCount > 0 then
+                desc:Emit(emitCount)
+            end
+        elseif desc:IsA("Trail") or desc:IsA("Beam") or desc:IsA("Light") or desc:IsA("Highlight") then
+            hasEffect = true
+            desc.Enabled = true
+        end
+    end
+
+    if not hasVisiblePart and not hasEffect then
+        warnProjectileOnce(projectileName, "template has no visible BasePart and no enabled effect")
+    end
+end
+
+local function getProjectileVisualEndPosition(startPos, initialTargetPos, projectileVisualConfig)
+    local initialOffset = initialTargetPos - startPos
+    local initialDistance = initialOffset.Magnitude
+    if type(projectileVisualConfig) ~= "table" or projectileVisualConfig.ContinuePastTarget ~= true then
+        return initialTargetPos, false, initialDistance
+    end
+
+    local visualDirection = initialDistance > 0.001 and initialOffset.Unit or nil
+    if not visualDirection and typeof(projectileVisualConfig.Direction) == "Vector3" then
+        local configuredDirection = projectileVisualConfig.Direction
+        if configuredDirection.Magnitude > 0.001 then
+            visualDirection = configuredDirection.Unit
+        end
+    end
+
+    if not visualDirection then
+        return initialTargetPos, false, initialDistance
+    end
+
+    local maxDistance = math.max(initialDistance, tonumber(projectileVisualConfig.MaxDistance) or initialDistance)
+    if typeof(projectileVisualConfig.DestroyBeyondPosition) == "Vector3"
+        and typeof(projectileVisualConfig.Direction) == "Vector3"
+        and projectileVisualConfig.Direction.Magnitude > 0.001
+    then
+        local flatDirection = Vector3.new(projectileVisualConfig.Direction.X, 0, projectileVisualConfig.Direction.Z)
+        if flatDirection.Magnitude > 0.001 then
+            flatDirection = flatDirection.Unit
+            local flatStart = Vector3.new(startPos.X, 0, startPos.Z)
+            local flatDestroy = Vector3.new(projectileVisualConfig.DestroyBeyondPosition.X, 0, projectileVisualConfig.DestroyBeyondPosition.Z)
+            local destroyDistance = (flatDestroy - flatStart):Dot(flatDirection)
+            if destroyDistance > initialDistance and destroyDistance < maxDistance then
+                maxDistance = destroyDistance
+            end
+        end
+    end
+
+    return startPos + visualDirection * maxDistance, true, maxDistance
+end
+
+local function getTrajectoryPosition(startPos, endPos, arcHeight, alpha)
+    if arcHeight > 0 then
+        local controlPos = startPos:Lerp(endPos, 0.5) + Vector3.new(0, arcHeight, 0)
+        return (1 - alpha) ^ 2 * startPos + 2 * (1 - alpha) * alpha * controlPos + alpha ^ 2 * endPos
+    end
+
+    return startPos:Lerp(endPos, alpha)
+end
+
+local function getTrackedProjectileTargetPosition(targetZombieModel, targetOffset)
+    if not targetZombieModel or not targetZombieModel.Parent or targetZombieModel:GetAttribute("IsDead") == true then
+        return nil
+    end
+
+    local humanoid = targetZombieModel:FindFirstChildOfClass("Humanoid")
+    if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
+        return nil
+    end
+
+    local targetRoot = targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart
+    if not targetRoot or not targetRoot.Parent then
+        return nil
+    end
+
+    return targetRoot.Position + (typeof(targetOffset) == "Vector3" and targetOffset or Vector3.zero)
+end
+
+local function spawnProjectileVisual(projectileName, fireCFrame, initialTargetPos, targetZombieModel, arcHeight, speedMult, ownerUserId, projectileVisualConfig)
+    if type(projectileName) ~= "string" or projectileName == "" then return end
+    if typeof(fireCFrame) ~= "CFrame" then return end
+    if typeof(initialTargetPos) ~= "Vector3" then return end
+
+    ownerUserId = tonumber(ownerUserId)
+    if not isLocalOwner(ownerUserId) then
+        return
+    end
+
+    local trackTarget = type(projectileVisualConfig) == "table" and projectileVisualConfig.TrackTarget == true
+    local destroyWhenTargetInvalid = type(projectileVisualConfig) == "table"
+        and projectileVisualConfig.DestroyWhenTargetInvalid == true
+    local initialTargetRoot = targetZombieModel
+        and (targetZombieModel:FindFirstChild("HumanoidRootPart") or targetZombieModel.PrimaryPart)
+    local targetOffset = initialTargetRoot and (initialTargetPos - initialTargetRoot.Position) or Vector3.zero
+    if destroyWhenTargetInvalid and not getTrackedProjectileTargetPosition(targetZombieModel, targetOffset) then
+        return
+    end
+
+    local ammoFolder = ReplicatedStorage:FindFirstChild("Ammo") or ReplicatedStorage:WaitForChild("Ammo", 1)
+    local template = ammoFolder and (ammoFolder:FindFirstChild(projectileName) or ammoFolder:WaitForChild(projectileName, 1))
+    if not template then
+        warnProjectileOnce(projectileName, "ReplicatedStorage.Ammo template not found on client")
+        return
+    end
+
+    local bucket = shouldRenderProjectile(ownerUserId, fireCFrame.Position)
+    if not bucket then
+        return
+    end
+
+    local projectile = acquireProjectileVisual(projectileName, template)
+    prepProjectile(projectile)
+    setProjectileCFrame(projectile, fireCFrame)
+    projectile.Parent = Workspace
+    incrementProjectileCount(bucket)
+    activateProjectileEffects(projectile, projectileName, areEffectsEnabled(ownerUserId))
+
+    task.spawn(function()
+        local finished = false
+        local function finishProjectile()
+            if finished then
+                return
+            end
+
+            finished = true
+            destroyProjectileVisual(projectile)
+            decrementProjectileCount(bucket)
+        end
+
+        speedMult = math.max(tonumber(speedMult) or 1, 0.01)
+        arcHeight = tonumber(arcHeight) or 0
+
+        local startPos = fireCFrame.Position
+        local visualEndPos, continuesPastTarget, visualDistance = getProjectileVisualEndPosition(startPos, initialTargetPos, projectileVisualConfig)
+        if not continuesPastTarget then
+            visualEndPos = initialTargetPos
+        end
+
+        local flightTime = math.max(0.05, visualDistance / (PROJECTILE_SPEED * speedMult))
+        local maxLifetime = math.clamp(flightTime + 0.5, 0.25, 10)
+        local startedAt = os.clock()
+        local elapsedTime = 0
+
+        while projectile and projectile.Parent do
+            if os.clock() - startedAt >= maxLifetime then
+                finishProjectile()
+                break
+            end
+
+            local dt = RunService.Heartbeat:Wait()
+            elapsedTime += dt
+            local t = math.clamp(elapsedTime / flightTime, 0, 1)
+            local currentEndPos = visualEndPos
+            if trackTarget or destroyWhenTargetInvalid then
+                local trackedTargetPosition = getTrackedProjectileTargetPosition(targetZombieModel, targetOffset)
+                if not trackedTargetPosition then
+                    if destroyWhenTargetInvalid then
+                        finishProjectile()
+                        break
+                    end
+                elseif trackTarget then
+                    currentEndPos = trackedTargetPosition
+                end
+            end
+
+            local currentPos = getTrajectoryPosition(startPos, currentEndPos, arcHeight, t)
+            local nextT = math.clamp(t + 0.03, 0, 1)
+            local nextPos = getTrajectoryPosition(startPos, currentEndPos, arcHeight, nextT)
+
+            if (nextPos - currentPos).Magnitude > 0.001 then
+                setProjectileCFrame(projectile, CFrame.lookAt(currentPos, nextPos))
+            else
+                setProjectileCFrame(projectile, CFrame.new(currentPos))
+            end
+
+            if t >= 1 then
+                finishProjectile()
+                break
+            end
+        end
+
+        finishProjectile()
+    end)
+end
+
+local function getMarkerProjectileFireCFrame(plant)
+    if not plant or not plant.Parent then
+        return nil
+    end
+
+    local posNode = plant:FindFirstChild("pos", true) or plant:FindFirstChild("Pos", true)
+    if posNode then
+        if posNode:IsA("Attachment") then
+            return posNode.WorldCFrame
+        elseif posNode:IsA("BasePart") then
+            return posNode.CFrame
+        end
+    end
+
+    local rootPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart")
+    return rootPart and (rootPart.CFrame * CFrame.new(0, 1.5, -1.5)) or nil
+end
+
+fireMarkerProjectileShot = function(plant, attackToken, fromMarker)
+    local context = activeMarkerProjectileContexts[plant]
+    if not context or context.AttackToken ~= attackToken then
+        return false
+    end
+    if fromMarker and context.InFallback then
+        return false
+    end
+    if not isMarkerProjectilePlantActive(plant) then
+        cleanupMarkerProjectileContext(plant, context)
+        return false
+    end
+    if context.FiredCount >= context.ExpectedCount then
+        cleanupMarkerProjectileContext(plant, context)
+        return false
+    end
+
+    local fireCFrame = getMarkerProjectileFireCFrame(plant)
+    if not fireCFrame then
+        cleanupMarkerProjectileContext(plant, context)
+        return false
+    end
+
+    context.FiredCount += 1
+    spawnProjectileVisual(
+        context.ProjectileName,
+        fireCFrame,
+        context.TargetPosition,
+        context.TargetZombieModel,
+        context.ArcHeight,
+        context.SpeedMult,
+        context.OwnerUserId,
+        context.ProjectileVisualConfig
+    )
+
+    if context.FiredCount >= context.ExpectedCount then
+        cleanupMarkerProjectileContext(plant, context)
+    end
+    return true
+end
+
+local function fillMarkerProjectileContext(plant, context, targetCount)
+    if activeMarkerProjectileContexts[plant] ~= context then
+        return
+    end
+
+    context.InFallback = true
+    targetCount = math.min(context.ExpectedCount, math.max(0, tonumber(targetCount) or context.ExpectedCount))
+    while activeMarkerProjectileContexts[plant] == context and context.FiredCount < targetCount do
+        if not fireMarkerProjectileShot(plant, context.AttackToken, false) then
+            break
+        end
+    end
+end
+
+local function startMarkerProjectileBatch(plant, contextData)
+    if not isMarkerProjectilePlantActive(plant) or type(contextData) ~= "table" then
+        cleanupMarkerProjectileContext(plant)
+        return
+    end
+
+    local attackToken = tonumber(contextData.AttackToken)
+    local projectileName = contextData.ProjectileName
+    local targetPosition = contextData.TargetPosition
+    if not attackToken
+        or contextData.MarkerName ~= "Fire"
+        or type(projectileName) ~= "string"
+        or projectileName == ""
+        or typeof(targetPosition) ~= "Vector3"
+    then
+        cleanupMarkerProjectileContext(plant)
+        return
+    end
+
+    local previousContext = activeMarkerProjectileContexts[plant]
+    if previousContext then
+        -- 新一轮到达边界时先封口上一轮，避免 1.50 秒末发被轨道重播吞掉。
+        fillMarkerProjectileContext(plant, previousContext, previousContext.ExpectedCount)
+        cleanupMarkerProjectileContext(plant, previousContext)
+    end
+    local context = {
+        AttackToken = attackToken,
+        MarkerName = contextData.MarkerName,
+        ExpectedCount = math.max(1, math.floor(tonumber(contextData.ExpectedCount) or 1)),
+        FallbackInterval = math.max(0, tonumber(contextData.FallbackInterval) or 0),
+        FallbackTimeout = math.max(0, tonumber(contextData.FallbackTimeout) or 0.35),
+        FallbackStartDelay = math.max(0, tonumber(contextData.FallbackStartDelay) or 0),
+        ProjectileName = projectileName,
+        TargetZombieModel = contextData.TargetZombieModel,
+        TargetPosition = targetPosition,
+        ArcHeight = tonumber(contextData.ArcHeight) or 0,
+        SpeedMult = math.max(0.01, tonumber(contextData.SpeedMult) or 1),
+        OwnerUserId = tonumber(contextData.OwnerUserId),
+        ProjectileVisualConfig = contextData.ProjectileVisualConfig,
+        FiredCount = 0,
+        InFallback = false,
+        Connections = {},
+    }
+    activeMarkerProjectileContexts[plant] = context
+
+    local function cleanupIfPlantStopped()
+        if not isMarkerProjectilePlantActive(plant) then
+            cleanupMarkerProjectileContext(plant, context)
+        end
+    end
+
+    table.insert(context.Connections, plant.AncestryChanged:Connect(cleanupIfPlantStopped))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("Health"):Connect(cleanupIfPlantStopped))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsDead"):Connect(cleanupIfPlantStopped))
+    table.insert(context.Connections, plant:GetAttributeChangedSignal("IsCombatPlant"):Connect(cleanupIfPlantStopped))
+
+    for expectedIndex = 1, context.ExpectedCount do
+        local fallbackAt = context.FallbackStartDelay + ((expectedIndex - 1) * context.FallbackInterval)
+        task.delay(fallbackAt / context.SpeedMult, function()
+            if activeMarkerProjectileContexts[plant] ~= context or not isMarkerProjectilePlantActive(plant) then
+                cleanupMarkerProjectileContext(plant, context)
+                return
+            end
+            if context.FiredCount < expectedIndex then
+                fillMarkerProjectileContext(plant, context, expectedIndex)
+            end
+        end)
+    end
+
+    task.delay(context.FallbackTimeout / context.SpeedMult, function()
+        if activeMarkerProjectileContexts[plant] == context then
+            fillMarkerProjectileContext(plant, context, context.ExpectedCount)
+        end
+    end)
+end
+
+local function flashZombieRed(zombieModel)
+    if not zombieModel or not zombieModel.Parent then return end
+    if zombieModel:GetAttribute("IsEventZomboss") == true then return end
+    if flashingZombies[zombieModel] then return end
+    flashingZombies[zombieModel] = true
+
+    local originalColors = {}
+    for _, p in ipairs(getCachedZombieParts(zombieModel)) do
+        if p:IsA("BasePart") then
+            originalColors[p] = p.Color
+            p.Color = Color3.fromRGB(255, 80, 80)
+        end
+    end
+
+    task.delay(0.15, function()
+        if not zombieModel or not zombieModel.Parent then return end
+
+        local isCharred = zombieModel:GetAttribute("IsCharred")
+        for p, color in pairs(originalColors) do
+            if p and p.Parent then
+                p.Color = isCharred and Color3.fromRGB(30, 30, 30) or color
+            end
+        end
+
+        flashingZombies[zombieModel] = nil
+    end)
+end
+
+local function createDamageTextBillboard()
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "DamageText"
+    billboard.Size = UDim2.new(0, 60, 0, 25)
+    billboard.AlwaysOnTop = true
+    billboard.MaxDistance = 150
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Name = "TextLabel"
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+    textLabel.TextScaled = true
+    textLabel.Font = Enum.Font.FredokaOne
+    textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    textLabel.Parent = billboard
+
+    return billboard
+end
+
+local function acquireDamageTextBillboard()
+    while #damageTextPool > 0 do
+        local billboard = table.remove(damageTextPool)
+        if billboard then
+            return billboard
+        end
+    end
+
+    return createDamageTextBillboard()
+end
+
+local function recycleDamageTextBillboard(billboard)
+    if not billboard then return end
+
+    local ok = pcall(function()
+        billboard.Parent = nil
+    end)
+    if not ok then return end
+
+    if #damageTextPool < DAMAGE_TEXT_POOL_LIMIT then
+        table.insert(damageTextPool, billboard)
+    else
+        billboard:Destroy()
+    end
+end
+
+local function showDamageText(zombieModel, damage)
+    if not zombieModel or not zombieModel.Parent then return end
+
+    local rootPart = zombieModel:FindFirstChild("HumanoidRootPart") or zombieModel.PrimaryPart
+    local head = zombieModel:FindFirstChild("Head") or rootPart
+    if not head then return end
+
+    local billboard = acquireDamageTextBillboard()
+    local textLabel = billboard:FindFirstChild("TextLabel")
+    if not textLabel or not textLabel:IsA("TextLabel") then
+        billboard:Destroy()
+        billboard = createDamageTextBillboard()
+        textLabel = billboard:FindFirstChild("TextLabel")
+    end
+
+    local startOffset = Vector3.new(math.random(-10, 10) / 10, 1.5 + math.random(5, 15) / 10, math.random(-10, 10) / 10)
+    billboard.StudsOffset = startOffset
+    textLabel.Text = "-" .. tostring(damage)
+    textLabel.TextTransparency = 0
+    textLabel.TextStrokeTransparency = 0
+    billboard.Parent = head
+
+    local tweenInfo = TweenInfo.new(1.0, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+    TweenService:Create(billboard, tweenInfo, { StudsOffset = startOffset + Vector3.new(0, 1.5, 0) }):Play()
+    TweenService:Create(textLabel, tweenInfo, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+
+    task.delay(1.0, function()
+        recycleDamageTextBillboard(billboard)
+    end)
+end
+
+local function createFallbackHitEffect()
+    local effectPart = Instance.new("Part")
+    effectPart.Name = "FallbackHitEffect"
+    effectPart.Size = Vector3.new(0.1, 0.1, 0.1)
+    effectPart.Transparency = 1
+    effectPart.Anchored = true
+    effectPart.CanCollide = false
+    effectPart.CanQuery = false
+
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = effectPart
+
+    local particles = Instance.new("ParticleEmitter")
+    particles.Name = "FallbackHitParticles"
+    particles.Rate = 0
+    particles.Size = NumberSequence.new(1, 0)
+    particles.Speed = NumberRange.new(5, 10)
+    particles.Lifetime = NumberRange.new(0.1, 0.3)
+    particles.Parent = attachment
+
+    return effectPart
+end
+
+local function acquireHitEffect(key, createFn)
+    local pool = getPool(hitEffectPools, key)
+
+    while #pool > 0 do
+        local effect = table.remove(pool)
+        if effect then
+            return effect
+        end
+    end
+
+    return createFn()
+end
+
+local function recycleHitEffect(key, effect)
+    if not effect then return end
+
+    deactivateVisualEffects(effect)
+    setVisualPartsVisible(effect, false)
+
+    local ok = pcall(function()
+        effect.Parent = nil
+    end)
+    if not ok then return end
+
+    local pool = getPool(hitEffectPools, key)
+    if #pool < HIT_EFFECT_POOL_LIMIT then
+        table.insert(pool, effect)
+    else
+        effect:Destroy()
+    end
+end
+
+local function emitHitEffect(effect)
+    for _, child in ipairs(getVisualCache(effect).Effects) do
+        if child:IsA("ParticleEmitter") then
+            child.Enabled = true
+            child:Emit(getEmitCount(child, 15))
+            task.delay(0.15, function()
+                if child and child.Parent then child.Enabled = false end
+            end)
+        elseif child:IsA("Light") then
+            child.Enabled = true
+            task.delay(0.15, function()
+                if child and child.Parent then child.Enabled = false end
+            end)
+        end
+    end
+end
+
+local function playHitEffect(hitPos, hitEffectTexture, hitEffectColor)
+    if typeof(hitPos) ~= "Vector3" then return end
+
+    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
+    local hitEffectPrefab = nil
+
+    if typeof(hitEffectTexture) == "string" and hitEffectTexture ~= "" and hitFolder then
+        local template = hitFolder:FindFirstChild(hitEffectTexture)
+        if template and template:IsA("BasePart") then
+            hitEffectPrefab = template
+        end
+    end
+
+    local key = hitEffectPrefab and ("prefab:" .. hitEffectPrefab.Name) or "fallback"
+    local effect = acquireHitEffect(key, function()
+        if hitEffectPrefab then
+            local clone = hitEffectPrefab:Clone()
+            prepProjectile(clone)
+            return clone
+        end
+
+        return createFallbackHitEffect()
+    end)
+
+    prepProjectile(effect)
+    deactivateVisualEffects(effect)
+
+    if hitEffectPrefab then
+        effect.CFrame = CFrame.new(hitPos)
+    else
+        effect.Position = hitPos
+
+        local particles = effect:FindFirstChild("FallbackHitParticles", true)
+        if particles and particles:IsA("ParticleEmitter") then
+            particles.Texture = hitEffectTexture or "rbxassetid://243098098"
+            particles.Color = ColorSequence.new(hitEffectColor or Color3.fromRGB(255, 215, 0))
+        end
+    end
+
+    effect.Parent = Workspace
+    emitHitEffect(effect)
+
+    task.delay(1.5, function()
+        recycleHitEffect(key, effect)
+    end)
+end
+
+local function positionGroundEffect(effect, lawnCFrame, lawnSize)
+    if not effect or typeof(lawnCFrame) ~= "CFrame" or typeof(lawnSize) ~= "Vector3" then
+        return
+    end
+
+    local yOffset = lawnSize.Y * 0.5
+    if effect:IsA("BasePart") then
+        effect.CFrame = lawnCFrame * CFrame.new(0, yOffset + effect.Size.Y * 0.5, 0)
+    elseif effect:IsA("Model") then
+        local _, size = effect:GetBoundingBox()
+        effect:PivotTo(lawnCFrame * CFrame.new(0, yOffset + size.Y * 0.5, 0))
+    end
+end
+
+local function activateGroundEffect(effect)
+    for _, desc in ipairs(getVisualCache(effect).Effects) do
+        if desc:IsA("ParticleEmitter") or desc:IsA("Trail") or desc:IsA("Beam") or desc:IsA("Light") or desc:IsA("Highlight") then
+            desc.Enabled = true
+        end
+    end
+end
+
+local function acquireGroundEffect(effectName)
+    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
+    local template = hitFolder and hitFolder:FindFirstChild(effectName)
+    if not template then
+        warnProjectileOnce(effectName, "ReplicatedStorage.Hit ground effect not found on client")
+        return nil
+    end
+
+    local pool = getPool(groundEffectPools, effectName)
+    while #pool > 0 do
+        local effect = table.remove(pool)
+        if effect then
+            return effect
+        end
+    end
+
+    local effect = template:Clone()
+    prepProjectile(effect)
+    return effect
+end
+
+local function recycleGroundEffect(effectName, effect)
+    if not effect then
+        return
+    end
+
+    deactivateVisualEffects(effect)
+    setVisualPartsVisible(effect, false)
+
+    local ok = pcall(function()
+        effect.Parent = nil
+    end)
+    if not ok then
+        return
+    end
+
+    local pool = getPool(groundEffectPools, effectName)
+    if #pool < GROUND_EFFECT_POOL_LIMIT_PER_TYPE then
+        table.insert(pool, effect)
+    else
+        visualCache[effect] = nil
+        effect:Destroy()
+    end
+end
+
+local function stopGroundEffectVisual(visualId)
+    local state = activeGroundEffects[visualId]
+    if not state then
+        return
+    end
+
+    activeGroundEffects[visualId] = nil
+    recycleGroundEffect(state.EffectName, state.Effect)
+end
+
+local function startGroundEffectVisual(visualId, effectName, lawnCFrame, lawnSize, duration, ownerUserId)
+    if type(visualId) ~= "string" or type(effectName) ~= "string" or effectName == "" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    stopGroundEffectVisual(visualId)
+
+    local effect = acquireGroundEffect(effectName)
+    if not effect then
+        return
+    end
+
+    positionGroundEffect(effect, lawnCFrame, lawnSize)
+    deactivateVisualEffects(effect)
+    activateGroundEffect(effect)
+    effect.Parent = Workspace
+
+    local state = {
+        Effect = effect,
+        EffectName = effectName,
+        ExpiresAt = os.clock() + math.max(0.1, tonumber(duration) or 2),
+        Token = 0,
+    }
+    activeGroundEffects[visualId] = state
+
+    task.spawn(function()
+        while activeGroundEffects[visualId] == state do
+            if os.clock() >= state.ExpiresAt then
+                stopGroundEffectVisual(visualId)
+                break
+            end
+
+            task.wait(0.2)
+        end
+    end)
+end
+
+local function refreshGroundEffectVisual(visualId, duration)
+    local state = activeGroundEffects[visualId]
+    if not state then
+        return
+    end
+
+    state.ExpiresAt = os.clock() + math.max(0.1, tonumber(duration) or 2)
+end
+
+local function playEffectBurst(effectName, effectCFrame, ownerUserId)
+    if type(effectName) ~= "string" or effectName == "" or typeof(effectCFrame) ~= "CFrame" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    local hitFolder = ReplicatedStorage:FindFirstChild("Hit")
+    local template = hitFolder and hitFolder:FindFirstChild(effectName)
+    if not template then
+        warnProjectileOnce(effectName, "ReplicatedStorage.Hit burst effect not found on client")
+        return
+    end
+
+    local key = "burst:" .. effectName
+    local effect = acquireHitEffect(key, function()
+        local clone = template:Clone()
+        prepProjectile(clone)
+        return clone
+    end)
+
+    prepProjectile(effect)
+    deactivateVisualEffects(effect)
+    setProjectileCFrame(effect, effectCFrame)
+    effect.Parent = Workspace
+
+    task.defer(function()
+        emitHitEffect(effect)
+    end)
+
+    task.delay(2, function()
+        recycleHitEffect(key, effect)
+    end)
+end
+
+local function playExplosionBurst(position, explosionType, ownerUserId)
+    if typeof(position) ~= "Vector3" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    local effectPart = Instance.new("Part")
+    effectPart.Name = "LocalExplosionBurst"
+    effectPart.Anchored = true
+    effectPart.CanCollide = false
+    effectPart.CanQuery = false
+    effectPart.CanTouch = false
+    effectPart.Transparency = 1
+    effectPart.Parent = Workspace
+
+    if explosionType == "Row" then
+        effectPart.Size = Vector3.new(6, 1, 100)
+        effectPart.Position = position - Vector3.new(0, 1.5, 0)
+
+        local particles = Instance.new("ParticleEmitter")
+        particles.Texture = "rbxassetid://248625108"
+        particles.Color = ColorSequence.new(Color3.fromRGB(255, 85, 0))
+        particles.Lifetime = NumberRange.new(0.05, 0.12)
+        particles.LightEmission = 1
+        particles.EmissionDirection = Enum.NormalId.Top
+        particles.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 4),
+            NumberSequenceKeypoint.new(1, 10),
+        })
+        particles.Rate = 2000
+        particles.Speed = NumberRange.new(15, 30)
+        particles.Parent = effectPart
+
+        task.delay(0.5, function()
+            if particles then
+                particles.Enabled = false
+            end
+        end)
+    else
+        effectPart.Position = position
+
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = effectPart
+
+        local particles = Instance.new("ParticleEmitter")
+        particles.Texture = "rbxassetid://243098098"
+        particles.Color = ColorSequence.new(Color3.fromRGB(255, 100, 0))
+        particles.Size = NumberSequence.new(1, 15)
+        particles.Rate = 500
+        particles.Speed = NumberRange.new(10, 20)
+        particles.Lifetime = NumberRange.new(0.2, 0.4)
+        particles.SpreadAngle = Vector2.new(180, 180)
+        particles.Parent = attachment
+
+        task.delay(0.2, function()
+            if particles then
+                particles.Enabled = false
+            end
+        end)
+    end
+
+    Debris:AddItem(effectPart, 2)
+end
+
+local function playThrownPlantVisual(modelName, startPosition, targetPosition, height, duration, ownerUserId)
+    if type(modelName) ~= "string" or modelName == "" then
+        return
+    end
+    if typeof(startPosition) ~= "Vector3" or typeof(targetPosition) ~= "Vector3" then
+        return
+    end
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    local itemModels = ReplicatedStorage:FindFirstChild("ItemModels")
+    local template = itemModels and (itemModels:FindFirstChild(modelName .. "_Plant") or itemModels:FindFirstChild(modelName))
+    if not template then
+        warnProjectileOnce(modelName, "ItemModels thrown plant visual not found on client")
+        return
+    end
+
+    local model = template:Clone()
+    prepProjectile(model)
+    setProjectileCFrame(model, CFrame.new(startPosition))
+    model.Parent = Workspace
+
+    task.spawn(function()
+        height = tonumber(height) or 15
+        duration = math.max(0.05, tonumber(duration) or 0.5)
+        local startTime = os.clock()
+
+        while model and model.Parent do
+            local alpha = math.clamp((os.clock() - startTime) / duration, 0, 1)
+            local currentPos = startPosition:Lerp(targetPosition, alpha) + Vector3.new(0, math.sin(alpha * math.pi) * height, 0)
+            setProjectileCFrame(model, CFrame.new(currentPos) * CFrame.Angles(math.rad(alpha * 360), 0, 0))
+
+            if alpha >= 1 then
+                break
+            end
+
+            RunService.Heartbeat:Wait()
+        end
+
+        if model then
+            visualCache[model] = nil
+            model:Destroy()
+        end
+    end)
+end
+
+local function playHitVisual(targetZombieModel, damage, hitPos, hitEffectTexture, hitEffectColor, ownerUserId)
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    flashZombieRed(targetZombieModel)
+    if (tonumber(damage) or 0) > 0 then
+        showDamageText(targetZombieModel, damage)
+    end
+    playHitEffect(hitPos, hitEffectTexture, hitEffectColor)
+end
+
+local function playDamageTextVisual(targetZombieModel, damage, ownerUserId)
+    if not areEffectsEnabled(tonumber(ownerUserId)) then
+        return
+    end
+
+    flashZombieRed(targetZombieModel)
+    showDamageText(targetZombieModel, damage)
+end
+
+local function playDamageTextBatch(entries)
+    if type(entries) ~= "table" then
+        return
+    end
+
+    for _, entry in ipairs(entries) do
+        local targetZombieModel = entry.Target or entry[1]
+        local damage = entry.Damage or entry[2]
+        local ownerUserId = entry.OwnerUserId or entry[3]
+        if areEffectsEnabled(tonumber(ownerUserId)) then
+            showDamageText(targetZombieModel, damage)
+        end
+    end
+end
+
+function PlantAttackVisualController.SetVisualSettings(newSettings)
+    if type(newSettings) ~= "table" then
+        return
+    end
+
+    for key, value in pairs(newSettings) do
+        if visualSettings[key] ~= nil then
+            visualSettings[key] = value ~= false
+        end
+    end
+
+    for plant in pairs(attackTracks) do
+        local ownerUserId = getOwnerUserIdFromInstance(plant)
+        if not arePlantAnimationsEnabled(ownerUserId) then
+            cleanupAttackTrack(plant)
+        end
+    end
+
+    for plant, context in pairs(activeMarkerPlantVFXContexts) do
+        if not areEffectsEnabled(context.OwnerUserId) then
+            stopMarkerContinuousPlantVFX(plant, context)
+        end
+    end
+end
+
+function PlantAttackVisualController.Init()
+    if visualConnection then
+        return
+    end
+
+    local visualRE = ReplicatedStorage:WaitForChild("PlantAttackVisualRE", 10)
+    if not visualRE then
+        warn("[PlantAttackVisual] PlantAttackVisualRE was not found within 10 seconds; visuals disabled.")
+        return
+    end
+
+    visualConnection = visualRE.OnClientEvent:Connect(function(action, ...)
+        if action == "Attack" then
+            playAttackAnimation(...)
+        elseif action == "PlantVFXTimed" then
+            playTimedPlantVFX(...)
+        elseif action == "PlantVFX" then
+            playPlantVFX(...)
+        elseif action == "Projectile" then
+            spawnProjectileVisual(...)
+        elseif action == "MarkerProjectileBatch" then
+            startMarkerProjectileBatch(...)
+        elseif action == "Hit" then
+            playHitVisual(...)
+        elseif action == "DamageText" then
+            playDamageTextVisual(...)
+        elseif action == "DamageTextBatch" then
+            playDamageTextBatch(...)
+        elseif action == "GroundEffectStart" then
+            startGroundEffectVisual(...)
+        elseif action == "GroundEffectRefresh" then
+            refreshGroundEffectVisual(...)
+        elseif action == "GroundEffectStop" then
+            stopGroundEffectVisual(...)
+        elseif action == "ThrownPlantVisual" then
+            playThrownPlantVisual(...)
+        elseif action == "EffectBurst" then
+            playEffectBurst(...)
+        elseif action == "ExplosionBurst" then
+            playExplosionBurst(...)
+        end
+    end)
+end
+
+return PlantAttackVisualController

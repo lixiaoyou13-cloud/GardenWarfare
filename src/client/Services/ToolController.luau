@@ -1,31 +1,393 @@
 -- src/client/Services/ToolController.luau
-local ToolController = {
-    _okConn = nil,      -- 提前声明，消除 Luau 类型检查警告
-    _cancelConn = nil   -- 提前声明，消除 Luau 类型检查警告
-}
+local ToolController = {}
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local weaponAttackRE = ReplicatedStorage:WaitForChild("WeaponAttackRE", 5)
 
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+local UIEffectUtil = require(script.Parent.Parent.Utils.UIEffectUtil)
+local PopupUtil = require(script.Parent.Parent.Utils.PopupUtil)
 
-local activePrompts = {} -- 保存对 Prompt 的引用，方便随时清理
+local activePrompts = {} -- 保持存对 Prompt 的引用，方便随时间清理
+local activeGiftPopup = nil
+local activeGiftRequestId = nil
+local weaponAttackAnimId = "rbxassetid://135432663541165"
+local weaponAttackTrackCache = setmetatable({}, { __mode = "k" })
+local SHOVEL_STACK_PROMPT_OFFSET_SCALE = 0.055
+local SHOVEL_STACK_PROMPT_OFFSET_MIN = 34
+local SHOVEL_STACK_PROMPT_OFFSET_MAX = 58
+
+-- ProximityPrompt 只有像素 UIOffset，这里按屏幕高度换算，尽量接近 scale 偏移。
+local function getScaledPromptYOffset()
+    local camera = Workspace.CurrentCamera
+    local viewportHeight = camera and camera.ViewportSize.Y or 720
+    return math.floor(math.clamp(viewportHeight * SHOVEL_STACK_PROMPT_OFFSET_SCALE, SHOVEL_STACK_PROMPT_OFFSET_MIN, SHOVEL_STACK_PROMPT_OFFSET_MAX))
+end
+
+-- 铲子同时出现 E/F 时分层显示：E 在上，F 在下。
+local function getPromptUIOffset(actionName)
+    if actionName == "Recycle to Backpack" then
+        return Vector2.new(0, -getScaledPromptYOffset())
+    elseif actionName == "Remove Pumpkin Shield" then
+        return Vector2.new(0, getScaledPromptYOffset())
+    end
+
+    return Vector2.zero
+end
+
+local function stopAndDestroyWeaponAttackTrack(animator)
+    local track = weaponAttackTrackCache[animator]
+    if track then
+        pcall(function()
+            track:Stop(0.05)
+            track:Destroy()
+        end)
+        weaponAttackTrackCache[animator] = nil
+    end
+end
+
+local function getWeaponAttackTrack(animator)
+    local cached = weaponAttackTrackCache[animator]
+    if cached then
+        return cached
+    end
+
+    local attackAnim = Instance.new("Animation")
+    attackAnim.AnimationId = weaponAttackAnimId
+
+    local track = animator:LoadAnimation(attackAnim)
+    track.Name = "WeaponBlockAttackAnim"
+    track.Priority = Enum.AnimationPriority.Action3
+    weaponAttackTrackCache[animator] = track
+
+    attackAnim:Destroy()
+    return track
+end
+
+local function getLocalPlayerPlot(player)
+    local plotsFolder = Workspace:FindFirstChild("Plots")
+    if not plotsFolder then return nil end
+
+    for _, plot in ipairs(plotsFolder:GetChildren()) do
+        if plot:GetAttribute("OwnerId") == player.UserId then
+            return plot
+        end
+    end
+
+    return nil
+end
+
+local function getCombatEditCost(player, fallbackPlot)
+    local plot = fallbackPlot or getLocalPlayerPlot(player)
+    local currentLevel = plot and plot:GetAttribute("CurrentLevel") or 1
+    currentLevel = math.max(1, tonumber(currentLevel) or 1)
+    return 100 + (currentLevel - 1) * 100
+end
+
+local function getPotionItemId(equippedItem)
+    if type(equippedItem) ~= "string" or string.sub(equippedItem, 1, 5) ~= "Item_" then
+        return nil
+    end
+
+    local itemId = string.sub(equippedItem, 6)
+    local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+    if itemDetail and itemDetail.ItemType == "MutationPotion" then
+        return itemId, itemDetail
+    end
+
+    return nil
+end
+
+local function isPotionEquipped(equippedItem)
+    return getPotionItemId(equippedItem) ~= nil
+end
+
+-- 解析快捷栏里的植物复合 ID。
+local function getEquippedPlantId(equippedItem)
+    if type(equippedItem) ~= "string" or not string.match(equippedItem, "^Plant_") then
+        return nil
+    end
+
+    local parts = string.split(equippedItem, "_")
+    return parts[2]
+end
+
+-- 判断当前拿着的是否是南瓜保护罩。
+local function isPumpkinShieldEquipped(equippedItem)
+    local plantId = getEquippedPlantId(equippedItem)
+    local plantDetail = plantId and ItemConfig.Plants and ItemConfig.Plants[plantId]
+    return plantDetail and plantDetail.IsPumpkinShield == true
+end
+
+-- 判断目标植物是否允许使用变异药水。
+local function canUsePotionOnPlant(plant)
+    local plantId = plant and (plant:GetAttribute("PlantId") or plant:GetAttribute("YieldPlant") or plant.Name)
+    local plantDetail = plantId and ItemConfig.Plants and ItemConfig.Plants[plantId]
+    return not (plantDetail and plantDetail.NoMutation == true)
+end
+
+local function setModelLocalHidden(model, hidden)
+    local changedParts = {}
+
+    local function applyToPart(part)
+        table.insert(changedParts, {
+            Part = part,
+            LocalTransparencyModifier = part.LocalTransparencyModifier,
+        })
+        part.LocalTransparencyModifier = hidden and 1 or 0
+    end
+
+    if model:IsA("BasePart") then
+        applyToPart(model)
+    end
+
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            applyToPart(descendant)
+        end
+    end
+
+    return function()
+        for _, record in ipairs(changedParts) do
+            if record.Part and record.Part.Parent then
+                record.Part.LocalTransparencyModifier = record.LocalTransparencyModifier or 0
+            end
+        end
+    end
+end
+
+local function paintBlackMutationClone(clone)
+    local nodes = {}
+    table.insert(nodes, clone)
+    for _, descendant in ipairs(clone:GetDescendants()) do
+        table.insert(nodes, descendant)
+    end
+
+    for _, node in ipairs(nodes) do
+        if node:IsA("BasePart") then
+            node.Anchored = true
+            node.CanCollide = false
+            node.CanTouch = false
+            node.CanQuery = false
+            node.Material = Enum.Material.SmoothPlastic
+            node.Color = Color3.fromRGB(0, 0, 0)
+            if node.Transparency < 0.95 then
+                node.Transparency = 0
+            end
+        elseif node:IsA("ParticleEmitter") or node:IsA("Beam") or node:IsA("Trail") or node:IsA("Light") or node:IsA("Highlight") then
+            node.Enabled = false
+        elseif node:IsA("Decal") or node:IsA("Texture") then
+            node.Transparency = 1
+        elseif node:IsA("BillboardGui") or node:IsA("SurfaceGui") then
+            node.Enabled = false
+        elseif node:IsA("BaseScript") then
+            node.Disabled = true
+        end
+    end
+end
+
+local function findPotionVisualTemplate(seedId, plantId, useSeed)
+    local itemModelsFolder = ReplicatedStorage:FindFirstChild("ItemModels")
+    if not itemModelsFolder then
+        return nil
+    end
+
+    if useSeed then
+        local seedConfig = seedId and ItemConfig.Seeds and ItemConfig.Seeds[seedId]
+        local seedModelName = seedConfig and seedConfig.SeedId
+        return (seedModelName and itemModelsFolder:FindFirstChild(seedModelName))
+            or (seedId and itemModelsFolder:FindFirstChild(seedId .. "_Seed"))
+            or (seedId and itemModelsFolder:FindFirstChild(seedId))
+            or itemModelsFolder:FindFirstChild("PlantSeed")
+    end
+
+    local plantDetail = plantId and ItemConfig.Plants and ItemConfig.Plants[plantId]
+    local modelName = (plantDetail and plantDetail.ModelName) or plantId
+    return (modelName and itemModelsFolder:FindFirstChild(modelName .. "_Plant"))
+        or (modelName and itemModelsFolder:FindFirstChild(modelName))
+        or (plantId and itemModelsFolder:FindFirstChild(plantId .. "_Plant"))
+        or (plantId and itemModelsFolder:FindFirstChild(plantId))
+end
+
+local function pivotCloneToTarget(clone, target)
+    local pivotCFrame = nil
+    if target and target.Parent then
+        if target:IsA("Model") then
+            local ok, pivot = pcall(function()
+                return target:GetPivot()
+            end)
+            if ok then
+                pivotCFrame = pivot
+            end
+        elseif target:IsA("BasePart") then
+            pivotCFrame = target.CFrame
+        end
+    end
+
+    pivotCFrame = pivotCFrame or CFrame.new()
+
+    if clone:IsA("Model") then
+        clone:PivotTo(pivotCFrame)
+    elseif clone:IsA("BasePart") then
+        clone.CFrame = pivotCFrame
+    end
+end
+
+local function showPotionMutationAnimation(payload)
+    if type(payload) ~= "table" then
+        return
+    end
+
+    local target = payload.Target
+    if typeof(target) ~= "Instance" or not target.Parent then
+        return
+    end
+
+    local seedId = payload.SeedId
+    local plantId = payload.PlantId
+    local seedTemplate = findPotionVisualTemplate(seedId, plantId, true)
+    local plantTemplate = findPotionVisualTemplate(seedId, plantId, false)
+    if not seedTemplate and not plantTemplate then
+        return
+    end
+
+    task.spawn(function()
+        local restoreTarget = setModelLocalHidden(target, true)
+        local duration = math.max(0.6, tonumber(payload.DurationSeconds) or 2.1)
+        local stepCount = 8
+        local stepTime = duration / stepCount
+        local currentClone = nil
+
+        for index = 1, stepCount do
+            if currentClone then
+                currentClone:Destroy()
+                currentClone = nil
+            end
+
+            local useSeed = index % 2 == 1
+            local template = (useSeed and seedTemplate) or plantTemplate or seedTemplate or plantTemplate
+            if template then
+                currentClone = template:Clone()
+                currentClone.Name = "PotionMutationPreview"
+                paintBlackMutationClone(currentClone)
+                pivotCloneToTarget(currentClone, target)
+                currentClone.Parent = Workspace
+            end
+
+            task.wait(stepTime)
+        end
+
+        if currentClone then
+            currentClone:Destroy()
+        end
+
+        restoreTarget()
+    end)
+end
 
 function ToolController.Init()
     local player = Players.LocalPlayer
+    local mouse = player:GetMouse()
+
     local shovelRE = ReplicatedStorage:WaitForChild("ShovelActionRE")
-    
-    -- 🌟 注册交换植物的远程事件
-    local swapRE = ReplicatedStorage:WaitForChild("SwapCombatPlantRE", 5) 
+    local giftItemRE = ReplicatedStorage:WaitForChild("GiftItemRE")
+    local weaponAttackRE = ReplicatedStorage:WaitForChild("WeaponAttackRE", 10)
+
+    -- 注册交换植物的远程事件
+    local swapRE = ReplicatedStorage:WaitForChild("SwapCombatPlantRE", 10)
+    local placePumpkinShieldRE = ReplicatedStorage:WaitForChild("PlacePumpkinShieldRE", 10)
+
+    -- 樱桃炸弹：爆炸范围指示球设置
+   local throwBombRE = ReplicatedStorage:WaitForChild("ThrowBombRE", 10)
+    local usePotionRE = ReplicatedStorage:WaitForChild("UsePotionRE", 10)
+
+    if not weaponAttackRE then
+        warn("[ToolController] WeaponAttackRE was not created by the server; weapon attacks are temporarily unavailable")
+    end
     if not swapRE then
-        -- 本地伪造一个防止报错，等待服务端真正创建
-        swapRE = Instance.new("RemoteEvent")
-        swapRE.Name = "SwapCombatPlantRE"
-        swapRE.Parent = ReplicatedStorage
+        warn("[ToolController] SwapCombatPlantRE was not created by the server; plant swapping is temporarily unavailable")
+    end
+    if not placePumpkinShieldRE then
+        warn("[ToolController] PlacePumpkinShieldRE was not created by the server; Pumpkin Shield placement is temporarily unavailable")
+    end
+    if not throwBombRE then
+        warn("[ToolController] ThrowBombRE was not created by the server; Cherry Bomb is temporarily unavailable")
+    end
+    if not usePotionRE then
+        warn("[ToolController] UsePotionRE was not created by the server; potion use is temporarily unavailable")
+    else
+        usePotionRE.OnClientEvent:Connect(function(action, message)
+            if action == "AnimatePotionMutation" then
+                showPotionMutationAnimation(message)
+                return
+            end
+
+            if message == nil and type(action) == "string" then
+                message = action
+            end
+
+            if message and message ~= "" then
+                UIEffectUtil.ShowTip(tostring(message))
+            end
+        end)
     end
 
+    -- 恢复为红点色的警示球，加深颜色
+    local rangeSphere = Instance.new("Part")
+    rangeSphere.Shape = Enum.PartType.Ball -- 保持球体
+    rangeSphere.Material = Enum.Material.ForceField
+    rangeSphere.Color = Color3.fromRGB(255, 20, 20)
+    rangeSphere.Transparency = 0.4 -- 键：透明度从0.8降到0.4，颜色会变得非常深且明显
+    rangeSphere.Anchored = true
+    rangeSphere.CanCollide = false
+    rangeSphere.CastShadow = false
+    rangeSphere.CanQuery = false
+    rangeSphere.CanTouch = false
+
+    RunService.RenderStepped:Connect(function()
+        local char = player.Character
+        if not char then rangeSphere.Parent = nil return end
+
+        local equippedItem = char:GetAttribute("EquippedSeed")
+
+        if type(equippedItem) == "string" and string.match(equippedItem, "Plant_CherryBomb") then
+            local rootPart = char:FindFirstChild("HumanoidRootPart")
+            if rootPart then
+                -- 大小完全由配置决定
+                local radius = ItemConfig.Plants["CherryBomb"].ExplosionRadius or 18
+                rangeSphere.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
+
+                -- 稍微推远一点击，从 15 改为 22 格，防止离玩家太近挡视野
+                local forwardPos = rootPart.CFrame.Position + rootPart.CFrame.LookVector * 22
+
+                local rayOrigin = forwardPos + Vector3.new(0, 20, 0)
+                local rayDir = Vector3.new(0, -40, 0)
+                local rayParams = RaycastParams.new()
+                rayParams.FilterDescendantsInstances = {char, rangeSphere}
+                rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+                local result = Workspace:Raycast(rayOrigin, rayDir, rayParams)
+                if result then
+                    rangeSphere.Position = result.Position
+                else
+                    rangeSphere.Position = forwardPos - Vector3.new(0, rootPart.Size.Y / 2, 0)
+                end
+
+                if rangeSphere.Parent ~= Workspace then
+                    rangeSphere.Parent = Workspace
+                end
+            end
+        else
+            if rangeSphere.Parent ~= nil then
+                rangeSphere.Parent = nil
+            end
+        end
+    end)
+
+    -- E键交互：提示框逻辑 (铲子/植物交换)
     local function clearAllPrompts()
         for plant, prompt in pairs(activePrompts) do
             if prompt and prompt.Parent then prompt:Destroy() end
@@ -40,92 +402,150 @@ function ToolController.Init()
         local isCombat = plant:GetAttribute("IsCombatPlant")
         local isFarm = plant:GetAttribute("PlantedOn")
         local isMature = plant:GetAttribute("IsMature")
-        
+        local isPumpkinShield = plant:GetAttribute("IsPumpkinShield") == true
+        local isLivingCombatPlant = isCombat and plant:GetAttribute("IsDead") ~= true and (tonumber(plant:GetAttribute("Health")) or 0) > 0
+
         local actionName = nil
-        
-        -- [🌟 核心判定：手里拿的是铲子 还是 植物？]
+        local promptKeyCode = Enum.KeyCode.E
+        local potionItemId = nil
+
+        -- 判定：手里拿的是铲子 还是 植物？
         if equippedItem == "Tool_Shovel" then
-            -- 铲子逻辑：战斗植物可回收，农田植物必须【未成熟】
-            if isCombat or (isFarm and not isMature) then
+            -- 铲子逻辑：战斗植物可回收，农田植物必须未成熟
+            if isPumpkinShield then
+                actionName = "Remove Pumpkin Shield"
+                promptKeyCode = Enum.KeyCode.F
+            elseif isCombat or (isFarm and not isMature) then
                 actionName = "Recycle to Backpack"
             end
         elseif type(equippedItem) == "string" and string.match(equippedItem, "^Plant_") then
             -- 拿着植物！开启交换逻辑，只能交换阵地上的战斗植物
-            if isCombat then
-                actionName = "Swap Plant"
+            -- 樱桃炸弹例外：拿在手里不触发交换植物的功能
+            if isPumpkinShieldEquipped(equippedItem) then
+                local lawnPart = plant.Parent
+                local plantId = plant:GetAttribute("PlantId") or plant.Name
+                local plantDetail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+                if isLivingCombatPlant
+                    and not isPumpkinShield
+                    and lawnPart
+                    and not lawnPart:GetAttribute("PumpkinShield")
+                    and not (plantDetail and plantDetail.DisallowPumpkinShield == true)
+                then
+                    actionName = "Add Pumpkin Shield"
+                end
+            elseif isCombat and not isPumpkinShield and not string.match(equippedItem, "Plant_CherryBomb") then
+                local lawnPart = plant.Parent
+                local newPlantId = getEquippedPlantId(equippedItem)
+                local newPlantDetail = newPlantId and ItemConfig.Plants and ItemConfig.Plants[newPlantId]
+                local blockedByShield = lawnPart
+                    and lawnPart:GetAttribute("PumpkinShield")
+                    and newPlantDetail
+                    and newPlantDetail.DisallowPumpkinShield == true
+                if not blockedByShield then
+                    actionName = "Swap Plant"
+                end
+            end
+        else
+            potionItemId = getPotionItemId(equippedItem)
+            if potionItemId and (isCombat or isFarm) and canUsePotionOnPlant(plant) then
+                actionName = "Use Potion"
+                promptKeyCode = Enum.KeyCode.F
             end
         end
-        
+
         if actionName then
             local prompt = Instance.new("ProximityPrompt")
             prompt.ActionText = actionName
             prompt.ObjectText = plant.Name or "Plant"
-            prompt.KeyboardKeyCode = Enum.KeyCode.F
-            prompt.HoldDuration = 0.2 -- 稍微加一点长按时间，防止误触
+            prompt.KeyboardKeyCode = promptKeyCode
+            prompt.HoldDuration = 0.2 -- 稍微加一点击长按时间，防止误触
             prompt.MaxActivationDistance = 12
             prompt.RequiresLineOfSight = false
-            
+            prompt.UIOffset = getPromptUIOffset(actionName)
+
             local attachPart = plant.PrimaryPart or plant:FindFirstChildWhichIsA("BasePart", true)
             if attachPart then
                 prompt.Parent = attachPart
                 activePrompts[plant] = prompt
-                
+
                 prompt.Triggered:Connect(function()
+                    if actionName == "Use Potion" then
+                        if usePotionRE and potionItemId then
+                            usePotionRE:FireServer(potionItemId, plant)
+                        else
+                            UIEffectUtil.ShowTip("Potion service is not ready")
+                        end
+
+                        if activePrompts[plant] then
+                            local currentPrompt = activePrompts[plant]
+                            currentPrompt.Enabled = false
+                            activePrompts[plant] = nil
+
+                            task.delay(0.1, function()
+                                if currentPrompt and currentPrompt.Parent then
+                                    currentPrompt:Destroy()
+                                end
+                            end)
+                        end
+
+                        task.delay(2.6, function()
+                            if not plant or not plant.Parent or activePrompts[plant] then
+                                return
+                            end
+
+                            local char = player.Character
+                            local currentEquipped = char and char:GetAttribute("EquippedSeed")
+                            if isPotionEquipped(currentEquipped) then
+                                checkAndAddPrompt(plant, currentEquipped)
+                            end
+                        end)
+                        return
+                    end
+
                     if isCombat then
                         local lawnPart = plant.Parent
                         local plot = lawnPart and lawnPart.Parent and lawnPart.Parent.Parent
                         if plot and plot:GetAttribute("IsLevelActive") then
-                            
-                            -- 👇 [🌟 修复后：正确的战斗状态拦截与弹窗逻辑]
-                            if actionName == "Swap Plant" or actionName == "Recycle to Backpack" then
-                                local playerGui = player:WaitForChild("PlayerGui")
-                                local basicGui = playerGui:FindFirstChild("BasicGui")
-                                local popup = basicGui and basicGui:FindFirstChild("Popup")
-                                
-                                if popup then
-                                    local popupFrame = popup:FindFirstChild("PopupFrame")
-                                    if popupFrame then
-                                        local detail = popupFrame:FindFirstChild("Detail")
-                                        local btnOk = popupFrame:FindFirstChild("OK")
-                                        local btnCancel = popupFrame:FindFirstChild("Cancel")
-                                        
-                                        if detail and btnOk and btnCancel then
-                                            -- 动态设置英文确认文本
-                                            if actionName == "Swap Plant" then
-                                                detail.Text = "Swapping plants during combat costs 1K Sun."
-                                            else
-                                                detail.Text = "Removing plants during combat costs 1K Sun."
-                                            end
-                                            popup.Enabled = true
-                                            
-                                            -- 清理之前的绑定，防止多重触发
-                                            if ToolController._okConn then ToolController._okConn:Disconnect() end
-                                            if ToolController._cancelConn then ToolController._cancelConn:Disconnect() end
-                                            
-                                            -- 确认扣费并发送请求
-                                            ToolController._okConn = btnOk.MouseButton1Click:Connect(function()
-                                                popup.Enabled = false
-                                                ToolController._okConn:Disconnect()
-                                                ToolController._cancelConn:Disconnect()
-                                                
-                                                -- 传入 true 代表这是战斗中的操作
-                                                if actionName == "Swap Plant" then
-                                                    swapRE:FireServer(plant, equippedItem, true)
-                                                else
-                                                    shovelRE:FireServer(plant, true)
-                                                end
-                                            end)
-                                            
-                                            -- 取消操作
-                                            ToolController._cancelConn = btnCancel.MouseButton1Click:Connect(function()
-                                                popup.Enabled = false
-                                                ToolController._okConn:Disconnect()
-                                                ToolController._cancelConn:Disconnect()
-                                            end)
-                                        end
-                                    end
+
+                            -- 战斗中加南瓜罩直接提交，服务端继续负责合法性校验。
+                            if actionName == "Add Pumpkin Shield" then
+                                if placePumpkinShieldRE then
+                                    placePumpkinShieldRE:FireServer(plant, equippedItem, true)
+                                else
+                                    UIEffectUtil.ShowTip("Pumpkin Shield service is not ready")
                                 end
-                                return -- 拦截到底，不往下执行默认操作
+                                return
+                            end
+
+                            -- 战斗中的置换/回收仍保留确认弹窗。
+                            if actionName == "Swap Plant" or actionName == "Recycle to Backpack" or actionName == "Remove Pumpkin Shield" then
+                                local detailText
+                                local cost = getCombatEditCost(player, plot)
+                                local costText = UIEffectUtil.FormatNumber(cost)
+                                if actionName == "Swap Plant" then
+                                    detailText = "Swapping plants during combat costs " .. costText .. " Sun."
+                                else
+                                    detailText = "Removing plants during combat costs " .. costText .. " Sun."
+                                end
+
+                                local shown = PopupUtil.ShowConfirm(detailText, function()
+                                    -- 传入 true 代表这是战斗中的操作
+                                    if actionName == "Swap Plant" then
+                                        if swapRE then
+                                            swapRE:FireServer(plant, equippedItem, true)
+                                        else
+                                            UIEffectUtil.ShowTip("Swap service is not ready")
+                                        end
+                                    else
+                                        shovelRE:FireServer(plant, true)
+                                    end
+                                end)
+
+                                if not shown then
+                                    UIEffectUtil.ShowTip("Popup is unavailable right now")
+                                end
+
+                                return -- 拦截到底
                             else
                                 UIEffectUtil.ShowTip("Cannot interact with plants during battle")
                                 return
@@ -133,22 +553,32 @@ function ToolController.Init()
                         end
                     end
 
-                    -- [🌟 根据动作发送给不同的服务端接口 (非战斗状态走这里)]
+                    -- 根据动作发送给不同的服务端接口 (非战斗状态走这里)
                     if actionName == "Swap Plant" then
-                        swapRE:FireServer(plant, equippedItem, false)
+                        if swapRE then
+                            swapRE:FireServer(plant, equippedItem, false)
+                        else
+                            UIEffectUtil.ShowTip("Swap service is not ready")
+                        end
+                    elseif actionName == "Add Pumpkin Shield" then
+                        if placePumpkinShieldRE then
+                            placePumpkinShieldRE:FireServer(plant, equippedItem, false)
+                        else
+                            UIEffectUtil.ShowTip("Pumpkin Shield service is not ready")
+                        end
                     else
                         shovelRE:FireServer(plant, false)
                     end
-                    
+
                     -- 先隐藏，防闪烁
                     if activePrompts[plant] then
                         local currentPrompt = activePrompts[plant]
-                        currentPrompt.Enabled = false 
+                        currentPrompt.Enabled = false
                         activePrompts[plant] = nil
-                        
+
                         task.delay(0.1, function()
-                            if currentPrompt and currentPrompt.Parent then 
-                                currentPrompt:Destroy() 
+                            if currentPrompt and currentPrompt.Parent then
+                                currentPrompt:Destroy()
                             end
                         end)
                     end
@@ -160,15 +590,19 @@ function ToolController.Init()
     local function updateToolState()
         local char = player.Character
         if not char then return end
-        
+
         local equippedItem = char:GetAttribute("EquippedSeed")
-        
+
         -- 每次切换装备，先清理旧的提示框
         clearAllPrompts()
-        
+
         -- 如果拿起了铲子，或者举起了成熟的植物(Plant_开头)
-        if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) then
-            for _, obj in ipairs(Workspace:GetDescendants()) do
+        if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) or isPotionEquipped(equippedItem) then
+            local plot = getLocalPlayerPlot(player)
+            if not plot then return end
+
+            -- 只扫描本地玩家自己的基地，避免每次切换工具都遍历整张地图
+            for _, obj in ipairs(plot:GetDescendants()) do
                 if obj:IsA("Model") and (obj:GetAttribute("IsCombatPlant") or obj:GetAttribute("PlantedOn")) then
                     checkAndAddPrompt(obj, equippedItem)
                 end
@@ -176,8 +610,146 @@ function ToolController.Init()
         end
     end
 
+    local function getGiftItemDisplayName(compositeId)
+        local parts = string.split(compositeId, "_")
+        local itemType = parts[1]
+        local realId = parts[2]
+
+        if itemType == "Seed" then
+            local seedConfig = ItemConfig.Seeds[realId]
+            return (seedConfig and seedConfig.Name) or realId
+        elseif itemType == "Plant" then
+            local plantConfig = ItemConfig.Plants[realId]
+            return (plantConfig and plantConfig.Name) or realId
+        end
+        return nil
+    end
+
+    local function tryGiftEquippedItem(targetPlayer)
+        if not targetPlayer or targetPlayer == player then return false end
+
+        local char = player.Character
+        if not char then return false end
+
+        local equippedItem = char:GetAttribute("EquippedSeed")
+        if type(equippedItem) ~= "string" then return false end
+        if not string.match(equippedItem, "^Seed_") and not string.match(equippedItem, "^Plant_") then
+            return false
+        end
+
+        local itemName = getGiftItemDisplayName(equippedItem)
+        if not itemName then return false end
+
+        local confirmText = string.format("Do you want to gift %s to %s?", itemName, targetPlayer.Name)
+        local popupHandle = PopupUtil.ShowManaged(confirmText, {
+            closeOnConfirm = false,
+            closeOnCancel = true,
+            onConfirm = function(handle)
+                handle.SetWaiting("Waiting for the other player to confirm ...")
+                activeGiftPopup = handle
+                activeGiftRequestId = "PENDING"
+                UIEffectUtil.ShowTip("Waiting...")
+                giftItemRE:FireServer("CreateRequest", targetPlayer, equippedItem)
+            end,
+            onCancel = function()
+                activeGiftPopup = nil
+                activeGiftRequestId = nil
+            end,
+        })
+
+        if not popupHandle then
+            UIEffectUtil.ShowTip("Popup is unavailable right now")
+            return true
+        end
+        return true
+    end
+
+    giftItemRE.OnClientEvent:Connect(function(action, ...)
+        local args = { ... }
+
+        if action == "RequesterWaiting" then
+            local requestId = args[1]
+            activeGiftRequestId = requestId
+
+            if activeGiftPopup then
+                activeGiftPopup.SetWaiting("Waiting for the other player to confirm ...")
+                activeGiftPopup.SetButtons({
+                    onCancel = function()
+                        giftItemRE:FireServer("CancelRequest", requestId)
+                        activeGiftPopup = nil
+                        activeGiftRequestId = nil
+                    end,
+                    closeOnCancel = true,
+                })
+            end
+        elseif action == "ReceiveRequest" then
+            local requestId = args[1]
+            local fromPlayerName = args[2]
+            local itemName = args[3]
+
+            activeGiftRequestId = requestId
+            activeGiftPopup = PopupUtil.ShowManaged(
+                string.format("Player %s gifts %s to you.\nDo you accept?", fromPlayerName, itemName),
+                {
+                    closeOnConfirm = true,
+                    closeOnCancel = true,
+                    onConfirm = function()
+                        giftItemRE:FireServer("RespondRequest", requestId, true)
+                        activeGiftPopup = nil
+                        activeGiftRequestId = nil
+                    end,
+                    onCancel = function()
+                        giftItemRE:FireServer("RespondRequest", requestId, false)
+                        activeGiftPopup = nil
+                        activeGiftRequestId = nil
+                    end,
+                }
+            )
+
+            if not activeGiftPopup then
+                giftItemRE:FireServer("RespondRequest", requestId, false)
+                UIEffectUtil.ShowTip("Popup is unavailable right now")
+            end
+        elseif action == "ClosePopup" then
+            local requestId = args[1]
+            local tipText = args[2]
+
+            if activeGiftRequestId == requestId or requestId == nil then
+                PopupUtil.Hide()
+                activeGiftPopup = nil
+                activeGiftRequestId = nil
+            end
+
+            if tipText and tipText ~= "" then
+                UIEffectUtil.ShowTip(tipText)
+            end
+        end
+    end)
+
     local function bindCharacter(char)
-        char:GetAttributeChangedSignal("EquippedSeed"):Connect(updateToolState)
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        local animator = humanoid and (humanoid:FindFirstChildOfClass("Animator") or humanoid)
+
+        char:GetAttributeChangedSignal("EquippedSeed"):Connect(function()
+            local equippedItem = char:GetAttribute("EquippedSeed")
+            if equippedItem ~= "Tool_WeaponBlock" and animator then
+                stopAndDestroyWeaponAttackTrack(animator)
+            end
+            updateToolState()
+        end)
+
+        if humanoid and animator then
+            humanoid.Died:Connect(function()
+                stopAndDestroyWeaponAttackTrack(animator)
+            end)
+        end
+
+        char.AncestryChanged:Connect(function(_, parent)
+            if not parent and animator then
+                stopAndDestroyWeaponAttackTrack(animator)
+            end
+        end)
+
         updateToolState()
     end
 
@@ -186,12 +758,13 @@ function ToolController.Init()
 
     Workspace.DescendantAdded:Connect(function(desc)
         if desc:IsA("Model") then
-            task.delay(0.1, function() 
+            task.delay(0.1, function()
                 local char = player.Character
                 if char then
                     local equippedItem = char:GetAttribute("EquippedSeed")
-                    if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) then
-                        if desc:GetAttribute("IsCombatPlant") or desc:GetAttribute("PlantedOn") then
+                    if equippedItem == "Tool_Shovel" or (type(equippedItem) == "string" and string.match(equippedItem, "^Plant_")) or isPotionEquipped(equippedItem) then
+                        local plot = getLocalPlayerPlot(player)
+                        if plot and desc:IsDescendantOf(plot) and (desc:GetAttribute("IsCombatPlant") or desc:GetAttribute("PlantedOn")) then
                             checkAndAddPrompt(desc, equippedItem)
                         end
                     end
@@ -199,7 +772,7 @@ function ToolController.Init()
             end)
         end
     end)
-    
+
     task.spawn(function()
         while task.wait(1) do
             for plant, prompt in pairs(activePrompts) do
@@ -213,36 +786,73 @@ function ToolController.Init()
             end
         end
     end)
-    
-    -- ==========================================
-    -- [武器点击挥舞逻辑]
-    -- ==========================================
-    local attackAnim = Instance.new("Animation")
-    attackAnim.AnimationId = "rbxassetid://135432663541165" 
-    local isAttacking = false 
 
+    -- 鼠标点击行为中枢：投掷 / 近战攻击 / 赠送
+    local isAttacking = false
+    local isThrowingBomb = false
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end 
+       if gameProcessed then return end
 
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             local char = player.Character
             if not char then return end
 
-            if char:GetAttribute("EquippedSeed") == "Tool_WeaponBlock" then
+            local equippedItem = char:GetAttribute("EquippedSeed")
+
+            if type(equippedItem) == "string" and string.sub(equippedItem, 1, 5) == "Item_" then
+                local itemId = string.sub(equippedItem, 6)
+                local itemDetail = ItemConfig.Items and ItemConfig.Items[itemId]
+                if itemDetail and itemDetail.ItemType == "MutationPotion" then
+                    UIEffectUtil.ShowTip("Move near a plant and press F to use this potion.")
+                    return
+                end
+            end
+
+            -- 行为 1：樱桃炸弹投掷动作 (支持连续投掷)
+            if type(equippedItem) == "string" and string.match(equippedItem, "Plant_CherryBomb") then
+                -- 确保范围球存在，且当前不在冷却中
+                if rangeSphere.Parent == Workspace and not isThrowingBomb then
+                    isThrowingBomb = true
+
+                    -- 发送投掷请求给服务端
+                    if throwBombRE then
+                        throwBombRE:FireServer(equippedItem, rangeSphere.Position)
+                    else
+                        UIEffectUtil.ShowTip("Bomb service is not ready")
+                    end
+
+                    -- 赋予 0.5 秒的投掷冷却，冷却后可以无缝扔出下一个
+                    task.delay(0.5, function()
+                        isThrowingBomb = false
+                    end)
+                end
+                return -- 拦截到底，直接返回
+            end
+            -- 行为 2：检测是否尝试点击玩家进行赠送
+            local target = mouse.Target
+            if target then
+                local targetModel = target:FindFirstAncestorOfClass("Model")
+                local targetPlayer = targetModel and Players:GetPlayerFromCharacter(targetModel)
+                if tryGiftEquippedItem(targetPlayer) then
+                    return
+                end
+            end
+
+            -- 行为 3：普通武器近战挥舞逻辑
+            if equippedItem == "Tool_WeaponBlock" then
                 if isAttacking then return end
                 isAttacking = true
 
                 local humanoid = char:FindFirstChildOfClass("Humanoid")
                 if humanoid then
                     local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
-                    local track = animator:LoadAnimation(attackAnim)
-                    track.Priority = Enum.AnimationPriority.Action3 
+                    local track = getWeaponAttackTrack(animator)
                     track:Play(0.05)
 
                     task.spawn(function()
                         local hitTargets = {}
                         local processed = {}
-                        local checkDuration = 0.35 
+                        local checkDuration = 0.35
                         local startTime = tick()
 
                         while tick() - startTime < checkDuration and isAttacking do
@@ -250,7 +860,7 @@ function ToolController.Init()
                             if not rootPart then break end
 
                             local checkCFrame = rootPart.CFrame * CFrame.new(0, 0, -3.5)
-                            local checkSize = Vector3.new(6.5, 6, 7.5) 
+                            local checkSize = Vector3.new(6.5, 6, 7.5)
                             local overlapParams = OverlapParams.new()
 
                             local hitParts = Workspace:GetPartBoundsInBox(checkCFrame, checkSize, overlapParams)
@@ -267,11 +877,11 @@ function ToolController.Init()
                             end
 
                             if #hitTargets > 0 and weaponAttackRE then
-                                 weaponAttackRE:FireServer(hitTargets)
-                                 table.clear(hitTargets) 
+                                weaponAttackRE:FireServer(hitTargets)
+                                table.clear(hitTargets)
                             end
-                            task.wait(0.05) 
-                         end
+                            task.wait(0.05)
+                        end
                     end)
 
                     task.delay(0.5, function()
@@ -283,8 +893,8 @@ function ToolController.Init()
             end
         end
     end)
-    
-    print("客户端：ToolController (F键交换与回收联动) 加载完毕！")
+
+    print("Client: ToolController (arc/interactions/combat weapon integration) loaded.")
 end
 
 return ToolController

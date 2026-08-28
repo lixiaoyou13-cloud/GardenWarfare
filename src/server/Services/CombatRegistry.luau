@@ -1,0 +1,705 @@
+-- src/server/Services/CombatRegistry.luau
+local CombatRegistry = {}
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("ItemConfig"))
+
+local registryByPlot = setmetatable({}, { __mode = "k" })
+local recordByModel = setmetatable({}, { __mode = "k" })
+local cachedPartsByModel = setmetatable({}, { __mode = "k" })
+local nextRegistrationSequence = 0
+
+local function getRowKey(rowNum)
+    local normalized = tonumber(rowNum)
+    if normalized then
+        return normalized
+    end
+
+    return tostring(rowNum or "_")
+end
+
+local function getPlotState(plot)
+    if not plot then
+        return nil
+    end
+
+    local state = registryByPlot[plot]
+    if not state then
+        state = {
+            Plants = {},
+            Zombies = {},
+            PlantsByRow = {},
+            ZombiesByRow = {},
+            ZombieDamageTakenMultiplier = 1,
+        }
+        registryByPlot[plot] = state
+    end
+
+    return state
+end
+
+local function getPlantGlobalDamageAura(plant)
+    if not plant then
+        return nil
+    end
+
+    local plantId = plant:GetAttribute("PlantId") or plant.Name
+    local detail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+    local aura = detail and detail.GlobalZombieDamageTakenAura
+    if type(aura) ~= "table" or type(aura.BonusByMutation) ~= "table" then
+        return nil
+    end
+
+    local mutationLevel = math.max(1, math.floor(tonumber(plant:GetAttribute("MutationLevel")) or 1))
+    local bonus = math.max(0, tonumber(aura.BonusByMutation[mutationLevel]) or 0)
+    if bonus <= 0 then
+        return nil
+    end
+
+    return {
+        Group = tostring(aura.Group or plantId),
+        MaxStacks = math.max(1, math.floor(tonumber(aura.MaxStacks) or 1)),
+        Bonus = bonus,
+    }
+end
+
+local function hasPlantGlobalDamageAura(plant)
+    if not plant then
+        return false
+    end
+
+    local plantId = plant:GetAttribute("PlantId") or plant.Name
+    local detail = ItemConfig.Plants and ItemConfig.Plants[plantId]
+    local aura = detail and detail.GlobalZombieDamageTakenAura
+    return type(aura) == "table" and type(aura.BonusByMutation) == "table"
+end
+
+-- 缓存同一玩家地块上的全局植物增伤；每组取数值最高的限定株数。
+local function refreshZombieDamageTakenMultiplier(plot, state)
+    if not plot or not state then
+        return 1
+    end
+
+    local plotOwnerId = tonumber(plot:GetAttribute("OwnerId"))
+    local auraGroups = {}
+
+    for _, record in pairs(state.Plants) do
+        local plant = record.Model
+        local plantOwnerId = plant and tonumber(plant:GetAttribute("OwnerId"))
+        local belongsToPlotOwner = not plotOwnerId or plotOwnerId <= 0 or plantOwnerId == plotOwnerId
+        if plant
+            and plant.Parent
+            and belongsToPlotOwner
+            and plant:GetAttribute("IsCombatPlant") == true
+            and plant:GetAttribute("IsDead") ~= true
+            and (tonumber(plant:GetAttribute("Health")) or 0) > 0
+        then
+            local aura = getPlantGlobalDamageAura(plant)
+            if aura then
+                local group = auraGroups[aura.Group]
+                if not group then
+                    group = {
+                        MaxStacks = aura.MaxStacks,
+                        Bonuses = {},
+                    }
+                    auraGroups[aura.Group] = group
+                else
+                    group.MaxStacks = math.min(group.MaxStacks, aura.MaxStacks)
+                end
+                table.insert(group.Bonuses, aura.Bonus)
+            end
+        end
+    end
+
+    local totalBonus = 0
+    for _, group in pairs(auraGroups) do
+        table.sort(group.Bonuses, function(a, b)
+            return a > b
+        end)
+        for index = 1, math.min(group.MaxStacks, #group.Bonuses) do
+            totalBonus += group.Bonuses[index]
+        end
+    end
+
+    state.ZombieDamageTakenMultiplier = 1 + totalBonus
+    return state.ZombieDamageTakenMultiplier
+end
+
+local function getFlatVector(vector)
+    return Vector3.new(vector.X, 0, vector.Z)
+end
+
+local function getFlatUnit(vector, fallback)
+    if typeof(vector) == "Vector3" then
+        local flat = getFlatVector(vector)
+        if flat.Magnitude > 0.001 then
+            return flat.Unit
+        end
+    end
+
+    if typeof(fallback) == "Vector3" then
+        local flatFallback = getFlatVector(fallback)
+        if flatFallback.Magnitude > 0.001 then
+            return flatFallback.Unit
+        end
+    end
+
+    return Vector3.new(0, 0, -1)
+end
+
+local function cacheModelParts(model)
+    local cached = {
+        BaseParts = {},
+        MeshParts = {},
+        VisualEffects = {},
+        SurfaceDetails = {},
+        DestroyOnChar = {},
+        Joints = {},
+        Sounds = {},
+    }
+
+    if not model then
+        return cached
+    end
+
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            table.insert(cached.BaseParts, descendant)
+            if descendant:IsA("MeshPart") then
+                table.insert(cached.MeshParts, descendant)
+            end
+        elseif descendant:IsA("ParticleEmitter")
+            or descendant:IsA("Light")
+            or descendant:IsA("Beam")
+            or descendant:IsA("Highlight")
+            or descendant:IsA("Trail")
+        then
+            table.insert(cached.VisualEffects, descendant)
+        elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+            table.insert(cached.SurfaceDetails, descendant)
+        elseif descendant:IsA("Clothing")
+            or descendant:IsA("Shirt")
+            or descendant:IsA("Pants")
+            or descendant:IsA("ShirtGraphic")
+            or descendant:IsA("CharacterMesh")
+        then
+            table.insert(cached.DestroyOnChar, descendant)
+        elseif descendant:IsA("JointInstance") or descendant:IsA("WeldConstraint") then
+            table.insert(cached.Joints, descendant)
+        elseif descendant:IsA("Sound") then
+            table.insert(cached.Sounds, descendant)
+        end
+    end
+
+    return cached
+end
+
+function CombatRegistry.GetCachedParts(model)
+    if not model then
+        return cacheModelParts(nil)
+    end
+
+    local cached = cachedPartsByModel[model]
+    if not cached then
+        cached = cacheModelParts(model)
+        cachedPartsByModel[model] = cached
+    end
+
+    return cached
+end
+
+function CombatRegistry.RefreshCachedParts(model)
+    if not model then
+        return cacheModelParts(nil)
+    end
+
+    local cached = cacheModelParts(model)
+    cachedPartsByModel[model] = cached
+
+    local record = recordByModel[model]
+    if record then
+        record.CachedParts = cached
+    end
+
+    return cached
+end
+
+local function removeRecord(record)
+    if not record then
+        return
+    end
+
+    if record.MutationLevelConnection then
+        record.MutationLevelConnection:Disconnect()
+        record.MutationLevelConnection = nil
+    end
+
+    local state = registryByPlot[record.Plot]
+    if state then
+        local allBucket = record.Kind == "Zombie" and state.Zombies or state.Plants
+        allBucket[record.Model] = nil
+
+        local rowBuckets = record.Kind == "Zombie" and state.ZombiesByRow or state.PlantsByRow
+        local rowBucket = rowBuckets[record.RowKey]
+        if rowBucket then
+            rowBucket[record.Model] = nil
+            if next(rowBucket) == nil then
+                rowBuckets[record.RowKey] = nil
+            end
+        end
+
+        if record.Kind == "Plant" then
+            refreshZombieDamageTakenMultiplier(record.Plot, state)
+        end
+    end
+
+    if record.Model then
+        recordByModel[record.Model] = nil
+    end
+end
+
+local function registerModel(kind, plot, model, rowNum, humanoid, rootPart)
+    if not plot or not model or not model.Parent then
+        return nil
+    end
+
+    rootPart = rootPart or model.PrimaryPart or model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA("BasePart")
+    if not rootPart then
+        return nil
+    end
+
+    if kind == "Zombie" then
+        humanoid = humanoid or model:FindFirstChildOfClass("Humanoid")
+        if not humanoid then
+            return nil
+        end
+    end
+
+    removeRecord(recordByModel[model])
+
+    local state = getPlotState(plot)
+    local rowKey = getRowKey(rowNum)
+    nextRegistrationSequence += 1
+    local record = {
+        Kind = kind,
+        Plot = plot,
+        Model = model,
+        Row = tonumber(rowNum),
+        RowKey = rowKey,
+        Humanoid = humanoid,
+        RootPart = rootPart,
+        CachedParts = CombatRegistry.GetCachedParts(model),
+        RegistrationSequence = nextRegistrationSequence,
+    }
+
+    recordByModel[model] = record
+
+    if kind == "Zombie" then
+        state.Zombies[model] = record
+        state.ZombiesByRow[rowKey] = state.ZombiesByRow[rowKey] or {}
+        state.ZombiesByRow[rowKey][model] = record
+    else
+        state.Plants[model] = record
+        state.PlantsByRow[rowKey] = state.PlantsByRow[rowKey] or {}
+        state.PlantsByRow[rowKey][model] = record
+
+        record.MutationLevelConnection = model:GetAttributeChangedSignal("MutationLevel"):Connect(function()
+            if recordByModel[model] ~= record or not hasPlantGlobalDamageAura(model) then
+                return
+            end
+
+            local currentState = registryByPlot[plot]
+            if currentState then
+                refreshZombieDamageTakenMultiplier(plot, currentState)
+            end
+        end)
+
+        refreshZombieDamageTakenMultiplier(plot, state)
+    end
+
+    return record
+end
+
+function CombatRegistry.GetZombieDamageTakenMultiplier(plot)
+    local state = plot and registryByPlot[plot]
+    return math.max(1, tonumber(state and state.ZombieDamageTakenMultiplier) or 1)
+end
+
+function CombatRegistry.RegisterPlant(plot, plant, rowNum, rootPart)
+    return registerModel("Plant", plot, plant, rowNum, nil, rootPart)
+end
+
+function CombatRegistry.UnregisterPlant(plant)
+    removeRecord(recordByModel[plant])
+end
+
+function CombatRegistry.RegisterZombie(plot, zombie, rowNum, humanoid, rootPart)
+    return registerModel("Zombie", plot, zombie, rowNum, humanoid, rootPart)
+end
+
+function CombatRegistry.UnregisterZombie(zombie)
+    removeRecord(recordByModel[zombie])
+end
+
+function CombatRegistry.UpdateZombieRow(zombie, rowNum, rootPart)
+    local record = recordByModel[zombie]
+    if not record or record.Kind ~= "Zombie" then
+        return nil
+    end
+
+    local state = registryByPlot[record.Plot]
+    if not state then
+        return nil
+    end
+
+    local oldBucket = state.ZombiesByRow[record.RowKey]
+    if oldBucket then
+        oldBucket[record.Model] = nil
+        if next(oldBucket) == nil then
+            state.ZombiesByRow[record.RowKey] = nil
+        end
+    end
+
+    local rowKey = getRowKey(rowNum)
+    record.Row = tonumber(rowNum)
+    record.RowKey = rowKey
+    if rootPart then
+        record.RootPart = rootPart
+    end
+
+    state.ZombiesByRow[rowKey] = state.ZombiesByRow[rowKey] or {}
+    state.ZombiesByRow[rowKey][record.Model] = record
+
+    return record
+end
+
+local function isRecordAlive(record, expectedKind)
+    if not record or record.Kind ~= expectedKind then
+        return false
+    end
+
+    local model = record.Model
+    local rootPart = record.RootPart
+    if not model or not model.Parent or not rootPart or not rootPart.Parent then
+        return false
+    end
+
+    if expectedKind == "Zombie" then
+        local humanoid = record.Humanoid
+        return humanoid and humanoid.Parent and humanoid.Health > 0 and model:GetAttribute("IsZombie") == true
+    end
+
+    return model:GetAttribute("IsCombatPlant") == true
+        and model:GetAttribute("IsDead") ~= true
+        and (tonumber(model:GetAttribute("Health")) or 0) > 0
+end
+
+local function getCandidateRecords(state, kind, rowNum)
+    if not state then
+        return nil
+    end
+
+    if kind == "Zombie" then
+        if rowNum ~= nil then
+            return state.ZombiesByRow[getRowKey(rowNum)] or {}
+        end
+
+        return state.Zombies
+    end
+
+    if rowNum ~= nil then
+        return state.PlantsByRow[getRowKey(rowNum)] or {}
+    end
+
+    return state.Plants
+end
+
+local function getRootRadius(rootPart)
+    local size = rootPart and rootPart.Size
+    if typeof(size) ~= "Vector3" then
+        return 0
+    end
+
+    return math.max(size.X, size.Z) * 0.5
+end
+
+local function recordInForwardBox(record, origin, direction, range, width)
+    local rootPart = record.RootPart
+    if not rootPart or not rootPart.Parent then
+        return nil
+    end
+
+    local flatOffset = getFlatVector(rootPart.Position - origin)
+    local forwardDistance = flatOffset:Dot(direction)
+    local radius = getRootRadius(rootPart)
+    if forwardDistance < -radius or forwardDistance > range + radius then
+        return nil
+    end
+
+    local lateralOffset = flatOffset - direction * forwardDistance
+    if lateralOffset.Magnitude > (width * 0.5) + radius then
+        return nil
+    end
+
+    return forwardDistance
+end
+
+function CombatRegistry.CollectZombiesInBox(plot, rowNumOrNil, origin, direction, range, width, maxTargets)
+    if not plot or typeof(origin) ~= "Vector3" then
+        return {}
+    end
+
+    range = math.max(0.1, tonumber(range) or 0)
+    width = math.max(0.1, tonumber(width) or 0)
+    maxTargets = maxTargets and math.max(1, math.floor(tonumber(maxTargets) or 1)) or nil
+
+    local state = registryByPlot[plot]
+    local candidates = getCandidateRecords(state, "Zombie", rowNumOrNil)
+    if not candidates then
+        return {}
+    end
+
+    local flatDirection = getFlatUnit(direction, Vector3.new(0, 0, -1))
+    local targets = {}
+
+    for _, record in pairs(candidates) do
+        if isRecordAlive(record, "Zombie") then
+            local distance = recordInForwardBox(record, origin, flatDirection, range, width)
+            if distance then
+                table.insert(targets, {
+                    Model = record.Model,
+                    Humanoid = record.Humanoid,
+                    RootPart = record.RootPart,
+                    Distance = distance,
+                })
+            end
+        else
+            removeRecord(record)
+        end
+    end
+
+    table.sort(targets, function(a, b)
+        return a.Distance < b.Distance
+    end)
+
+    if maxTargets then
+        while #targets > maxTargets do
+            table.remove(targets)
+        end
+    end
+
+    return targets
+end
+
+function CombatRegistry.FindNearestZombieInLane(plot, rowNum, origin, direction, range, width)
+    local targets = CombatRegistry.CollectZombiesInBox(plot, rowNum, origin, direction, range, width, 1)
+    local target = targets[1]
+    if not target then
+        return nil, nil, nil, nil
+    end
+
+    return target.Model, target.Humanoid, target.RootPart, target.Distance
+end
+
+local function getZombieAdvanceProgress(plot, record)
+	local rowNum = record and (record.Row or tonumber(record.Model and record.Model:GetAttribute("LaneRow")))
+	local rootPart = record and record.RootPart
+	local lawnFolder = plot and plot:FindFirstChild("Lawn")
+	if not rowNum or not rootPart or not rootPart.Parent or not lawnFolder then
+		return nil
+	end
+
+	local spawnLawn = lawnFolder:FindFirstChild(("Lawn%d_9"):format(rowNum))
+	local houseLawn = lawnFolder:FindFirstChild(("Lawn%d_1"):format(rowNum))
+	if not (spawnLawn and spawnLawn:IsA("BasePart") and houseLawn and houseLawn:IsA("BasePart")) then
+		return nil
+	end
+
+	local laneVector = getFlatVector(houseLawn.Position - spawnLawn.Position)
+	local laneLengthSquared = laneVector:Dot(laneVector)
+	if laneLengthSquared <= 0.001 then
+		return nil
+	end
+
+	local zombieOffset = getFlatVector(rootPart.Position - spawnLawn.Position)
+	return zombieOffset:Dot(laneVector) / laneLengthSquared
+end
+
+-- 全地块索敌：跨行比较僵尸从 Lawn_9 向 Lawn_1 的推进度，越靠近房屋越优先。
+function CombatRegistry.FindFrontmostZombie(plot)
+	local state = plot and registryByPlot[plot]
+	local candidates = state and state.Zombies
+	if not candidates then
+		return nil, nil, nil, nil
+	end
+
+	local targets = {}
+	for _, record in pairs(candidates) do
+		if isRecordAlive(record, "Zombie") then
+			local progress = getZombieAdvanceProgress(plot, record)
+			table.insert(targets, {
+				Model = record.Model,
+				Humanoid = record.Humanoid,
+				RootPart = record.RootPart,
+				Progress = progress,
+				HasProgress = progress ~= nil,
+				Row = tonumber(record.Row) or math.huge,
+				RegistrationSequence = tonumber(record.RegistrationSequence) or math.huge,
+			})
+		else
+			removeRecord(record)
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		if a.HasProgress ~= b.HasProgress then
+			return a.HasProgress
+		end
+		if a.HasProgress and math.abs(a.Progress - b.Progress) > 0.00001 then
+			return a.Progress > b.Progress
+		end
+		if a.Row ~= b.Row then
+			return a.Row < b.Row
+		end
+		if a.Model.Name ~= b.Model.Name then
+			return a.Model.Name < b.Model.Name
+		end
+		return a.RegistrationSequence < b.RegistrationSequence
+	end)
+
+	local target = targets[1]
+	if not target then
+		return nil, nil, nil, nil
+	end
+
+	return target.Model, target.Humanoid, target.RootPart, target.Progress
+end
+
+-- 返回当前地块内所有存活僵尸；注册序号作为最终排序键，保证遍历结果稳定。
+function CombatRegistry.CollectAllZombies(plot)
+	local state = plot and registryByPlot[plot]
+	local candidates = state and state.Zombies
+	if not candidates then
+		return {}
+	end
+
+	local targets = {}
+	for _, record in pairs(candidates) do
+		if isRecordAlive(record, "Zombie") then
+			table.insert(targets, {
+				Model = record.Model,
+				Humanoid = record.Humanoid,
+				RootPart = record.RootPart,
+				Row = tonumber(record.Row) or math.huge,
+				RegistrationSequence = tonumber(record.RegistrationSequence) or math.huge,
+			})
+		else
+			removeRecord(record)
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		if a.Row ~= b.Row then
+			return a.Row < b.Row
+		end
+		if a.Model.Name ~= b.Model.Name then
+			return a.Model.Name < b.Model.Name
+		end
+		return a.RegistrationSequence < b.RegistrationSequence
+	end)
+
+	return targets
+end
+
+function CombatRegistry.CollectZombiesInRadius(plot, center, radius, excludeModel)
+    if not plot or typeof(center) ~= "Vector3" then
+        return {}
+    end
+
+    radius = math.max(0.1, tonumber(radius) or 0)
+
+    local state = registryByPlot[plot]
+    local candidates = state and state.Zombies
+    if not candidates then
+        return {}
+    end
+
+    local targets = {}
+    for model, record in pairs(candidates) do
+        if model ~= excludeModel then
+            if isRecordAlive(record, "Zombie") then
+                local rootPart = record.RootPart
+                local flatDistance = getFlatVector(rootPart.Position - center).Magnitude
+                if flatDistance <= radius + getRootRadius(rootPart) then
+                    table.insert(targets, {
+                        Model = record.Model,
+                        Humanoid = record.Humanoid,
+                        RootPart = record.RootPart,
+                        Distance = flatDistance,
+                    })
+                end
+            else
+                removeRecord(record)
+            end
+        end
+    end
+
+    table.sort(targets, function(a, b)
+        return a.Distance < b.Distance
+    end)
+
+    return targets
+end
+
+function CombatRegistry.FindBlockingPlantInFront(plot, rowNum, origin, direction, range, width)
+    if not plot or typeof(origin) ~= "Vector3" then
+        return nil
+    end
+
+    range = math.max(0.1, tonumber(range) or 0)
+    width = math.max(0.1, tonumber(width) or 0)
+
+    local state = registryByPlot[plot]
+    local candidates = getCandidateRecords(state, "Plant", rowNum)
+    if not candidates then
+        return nil
+    end
+
+    local flatDirection = getFlatUnit(direction, Vector3.new(0, 0, -1))
+    local nearestRecord = nil
+    local nearestDistance = math.huge
+    local nearestPriority = -math.huge
+
+    for _, record in pairs(candidates) do
+        if isRecordAlive(record, "Plant") then
+            local distance = recordInForwardBox(record, origin, flatDirection, range, width)
+            local priority = record.Model:GetAttribute("IsPumpkinShield") == true and 1 or 0
+            local sameDistance = distance and math.abs(distance - nearestDistance) <= 0.1
+            local sameGrid = nearestRecord
+                and record.Model:GetAttribute("GridName") == nearestRecord.Model:GetAttribute("GridName")
+
+            local shouldReplace = false
+            if distance then
+                if sameGrid and priority ~= nearestPriority then
+                    -- 同一格内南瓜罩必须优先于内部植物，不受模型 RootPart 偏移影响。
+                    shouldReplace = priority > nearestPriority
+                else
+                    shouldReplace = distance < nearestDistance
+                        or (sameDistance and priority > nearestPriority)
+                end
+            end
+
+            if shouldReplace then
+                nearestRecord = record
+                nearestDistance = distance
+                nearestPriority = priority
+            end
+        else
+            removeRecord(record)
+        end
+    end
+
+    return nearestRecord and nearestRecord.Model or nil
+end
+
+return CombatRegistry
